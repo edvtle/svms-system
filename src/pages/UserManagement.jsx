@@ -27,6 +27,22 @@ const UserManagement = () => {
   const [selectedProgram, setSelectedProgram] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedSection, setSelectedSection] = useState("");
+
+  const [isAddOpen, setIsAddOpen] = useState(false);
+
+  const emptyUser = {
+    id: null,
+    no: null,
+    schoolId: "",
+    studentName: "",
+    program: "BSIT",
+    yearSection: "",
+    status: "Regular",
+    violationCount: 0,
+  };
+
+  const [newUser, setNewUser] = useState(emptyUser);
+
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
 
@@ -160,9 +176,7 @@ const UserManagement = () => {
     {
       key: "studentName",
       label: "Student Name",
-      render: (value) => (
-        <span className="text-black-500 font-bold">{value}</span>
-      ),
+      render: (value) => <span className="text-GREY font-bold">{value}</span>,
     },
     { key: "program", label: "Program" },
     { key: "yearSection", label: "Year/Section" },
@@ -208,7 +222,7 @@ const UserManagement = () => {
   ];
 
   return (
-    <div className="text-white">
+    <div className="text-white relative">
       <AnimatedContent>
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-xl font-semibold tracking-wide">
@@ -226,6 +240,10 @@ const UserManagement = () => {
             <Button
               variant="secondary"
               size="sm"
+              onClick={() => {
+                setNewUser(emptyUser);
+                setIsAddOpen(true);
+              }}
               className="gap-2 bg-[#4A5568] hover:bg-[#3d4654] border-0"
             >
               <Plus className="w-4 h-4" />
@@ -260,9 +278,6 @@ const UserManagement = () => {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSelectedProgram("bscs")}>
                 BSCS
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSelectedProgram("bsis")}>
-                BSIS
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -384,162 +399,272 @@ const UserManagement = () => {
 
       <AnimatedContent distance={40} delay={0.5}>
         <DataTable columns={columns} data={studentData} actions={actions} />
-        <Modal
-          isOpen={isEditOpen}
-          onClose={() => setIsEditOpen(false)}
-          title="Edit Student Profile"
-          size="xl"
-        >
-          {selectedUser && (
-            <>
-              {/* 2 Column Layout */}
-              <div className="grid grid-cols-2 gap-4">
-                {/* Student Name */}
-                <div>
-                  <label className="text-sm text-gray-300">Student Name</label>
-                  <input
-                    type="text"
-                    value={selectedUser.studentName}
-                    onChange={(e) =>
-                      setSelectedUser({
-                        ...selectedUser,
-                        studentName: e.target.value,
-                      })
-                    }
-                    className="w-full mt-1 bg-white/5 border border-white/10 
-            rounded-xl px-4 py-2 text-white focus:outline-none 
-            focus:ring-2 focus:ring-[#4A9B9B]"
-                  />
-                </div>
+      </AnimatedContent>
 
-                {/* Student ID */}
-                <div>
-                  <label className="text-sm text-gray-300">Student ID</label>
-                  <input
-                    type="text"
-                    value={selectedUser.schoolId}
-                    onChange={(e) =>
-                      setSelectedUser({
-                        ...selectedUser,
-                        schoolId: e.target.value,
-                      })
-                    }
-                    className="w-full mt-1 bg-white/5 border border-white/10 
-            rounded-xl px-4 py-2 text-white focus:outline-none 
-            focus:ring-2 focus:ring-[#4A9B9B]"
-                  />
-                </div>
+      {/* Add Student Modal - Moved outside AnimatedContent for better positioning */}
+      <Modal
+        isOpen={isAddOpen}
+        onClose={() => setIsAddOpen(false)}
+        title="Add New Student"
+        size="xl"
+      >
+        <div className="grid grid-cols-2 gap-4 p-6">
+          {/* Student Name */}
+          <div>
+            <label className="text-sm text-gray-300">Student Name</label>
+            <input
+              type="text"
+              value={newUser.studentName}
+              onChange={(e) =>
+                setNewUser({ ...newUser, studentName: e.target.value })
+              }
+              className="w-full mt-1 bg-white/5 border border-white/10 
+      rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+              placeholder="Enter student name"
+            />
+          </div>
 
-                {/* Program Dropdown */}
-                <div>
-                  <label className="text-sm text-gray-300">Program</label>
-                  <select
-                    value={selectedUser.program}
-                    onChange={(e) =>
-                      setSelectedUser({
-                        ...selectedUser,
-                        program: e.target.value,
-                      })
-                    }
-                    className="w-full mt-1 bg-white/5 border border-white/10 
-            rounded-xl px-4 py-2 text-white focus:outline-none 
-            focus:ring-2 focus:ring-[#4A9B9B]"
-                  >
-                    <option value="BSIT">BSIT</option>
-                    <option value="BSCS">BSCS</option>
-                  </select>
-                </div>
+          {/* Student ID */}
+          <div>
+            <label className="text-sm text-gray-300">Student ID</label>
+            <input
+              type="text"
+              value={newUser.schoolId}
+              onChange={(e) =>
+                setNewUser({ ...newUser, schoolId: e.target.value })
+              }
+              className="w-full mt-1 bg-white/5 border border-white/10 
+      rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+              placeholder="Enter student ID"
+            />
+          </div>
 
-                {/* Year / Section */}
-                <div>
-                  <label className="text-sm text-gray-300">Year/Section</label>
-                  <input
-                    type="text"
-                    value={selectedUser.yearSection}
-                    onChange={(e) =>
-                      setSelectedUser({
-                        ...selectedUser,
-                        yearSection: e.target.value,
-                      })
-                    }
-                    className="w-full mt-1 bg-white/5 border border-white/10 
-            rounded-xl px-4 py-2 text-white focus:outline-none 
-            focus:ring-2 focus:ring-[#4A9B9B]"
-                  />
-                </div>
+          {/* Program */}
+          <div>
+            <label className="text-sm text-gray-300">Program</label>
+            <select
+              value={newUser.program}
+              onChange={(e) =>
+                setNewUser({ ...newUser, program: e.target.value })
+              }
+              className="w-full mt-1 bg-white/5 border border-white/10 
+      rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+            >
+              <option value="BSIT">BSIT</option>
+              <option value="BSCS">BSCS</option>
+            </select>
+          </div>
 
-                {/* Status */}
-                <div>
-                  <label className="text-sm text-gray-300">Status</label>
-                  <select
-                    value={selectedUser.status}
-                    onChange={(e) =>
-                      setSelectedUser({
-                        ...selectedUser,
-                        status: e.target.value,
-                      })
-                    }
-                    className="w-full mt-1 bg-white/5 border border-white/10 
-            rounded-xl px-4 py-2 text-white focus:outline-none 
-            focus:ring-2 focus:ring-[#4A9B9B]"
-                  >
-                    <option value="Regular">Regular</option>
-                    <option value="Irregular">Irregular</option>
-                  </select>
-                </div>
+          {/* Year/Section */}
+          <div>
+            <label className="text-sm text-gray-300">Year/Section</label>
+            <input
+              type="text"
+              value={newUser.yearSection}
+              onChange={(e) =>
+                setNewUser({ ...newUser, yearSection: e.target.value })
+              }
+              className="w-full mt-1 bg-white/5 border border-white/10 
+      rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+              placeholder="e.g., 3A"
+            />
+          </div>
 
-                {/* Violation Count */}
-                <div>
-                  <label className="text-sm text-gray-300">
-                    Violation Count
-                  </label>
-                  <input
-                    type="number"
-                    value={selectedUser.violationCount}
-                    onChange={(e) =>
-                      setSelectedUser({
-                        ...selectedUser,
-                        violationCount: Number(e.target.value),
-                      })
-                    }
-                    className="w-full mt-1 bg-white/5 border border-white/10 
-            rounded-xl px-4 py-2 text-white focus:outline-none 
-            focus:ring-2 focus:ring-[#4A9B9B]"
-                  />
-                </div>
+          {/* Status */}
+          <div>
+            <label className="text-sm text-gray-300">Status</label>
+            <select
+              value={newUser.status}
+              onChange={(e) =>
+                setNewUser({ ...newUser, status: e.target.value })
+              }
+              className="w-full mt-1 bg-white/5 border border-white/10 
+      rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+            >
+              <option value="Regular">Regular</option>
+              <option value="Irregular">Irregular</option>
+            </select>
+          </div>
+        </div>
+
+        <ModalDivider />
+
+        <ModalFooter>
+          <button
+            onClick={() => setIsAddOpen(false)}
+            className="px-6 py-2 rounded-xl bg-white/10 
+    text-gray-300 hover:bg-white/20 transition-colors"
+          >
+            Cancel
+          </button>
+
+          <button
+            onClick={() => {
+              const newId = Date.now();
+              const newEntry = {
+                ...newUser,
+                id: newId,
+                no: studentData.length + 1,
+              };
+              setStudentData((prev) => [...prev, newEntry]);
+              setIsAddOpen(false);
+              setNewUser(emptyUser);
+            }}
+            className="px-6 py-2 rounded-xl bg-[#4A9B9B] 
+    hover:bg-[#3d8585] text-white transition-colors"
+          >
+            Add Student
+          </button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Edit Student Modal - Moved outside AnimatedContent */}
+      <Modal
+        isOpen={isEditOpen}
+        onClose={() => setIsEditOpen(false)}
+        title="Edit Student Profile"
+        size="xl"
+      >
+        {selectedUser && (
+          <>
+            <div className="grid grid-cols-2 gap-4 p-6">
+              {/* Student Name */}
+              <div>
+                <label className="text-sm text-gray-300">Student Name</label>
+                <input
+                  type="text"
+                  value={selectedUser.studentName}
+                  onChange={(e) =>
+                    setSelectedUser({
+                      ...selectedUser,
+                      studentName: e.target.value,
+                    })
+                  }
+                  className="w-full mt-1 bg-white/5 border border-white/10 
+          rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+                />
               </div>
 
-              <ModalDivider />
+              {/* Student ID */}
+              <div>
+                <label className="text-sm text-gray-300">Student ID</label>
+                <input
+                  type="text"
+                  value={selectedUser.schoolId}
+                  onChange={(e) =>
+                    setSelectedUser({
+                      ...selectedUser,
+                      schoolId: e.target.value,
+                    })
+                  }
+                  className="w-full mt-1 bg-white/5 border border-white/10 
+          rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+                />
+              </div>
 
-              <ModalFooter>
-                <button
-                  onClick={() => setIsEditOpen(false)}
-                  className="px-6 py-2 rounded-xl bg-white/10 
-          text-gray-300 hover:bg-white/20 transition"
+              {/* Program Dropdown */}
+              <div>
+                <label className="text-sm text-gray-300">Program</label>
+                <select
+                  value={selectedUser.program}
+                  onChange={(e) =>
+                    setSelectedUser({
+                      ...selectedUser,
+                      program: e.target.value,
+                    })
+                  }
+                  className="w-full mt-1 bg-white/5 border border-white/10 
+          rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
                 >
-                  Cancel
-                </button>
+                  <option value="BSIT">BSIT</option>
+                  <option value="BSCS">BSCS</option>
+                </select>
+              </div>
 
-                <button
-                  onClick={() => {
-                    setStudentData((prev) =>
-                      prev.map((student) =>
-                        student.id === selectedUser.id ? selectedUser : student,
-                      ),
-                    );
+              {/* Year / Section */}
+              <div>
+                <label className="text-sm text-gray-300">Year/Section</label>
+                <input
+                  type="text"
+                  value={selectedUser.yearSection}
+                  onChange={(e) =>
+                    setSelectedUser({
+                      ...selectedUser,
+                      yearSection: e.target.value,
+                    })
+                  }
+                  className="w-full mt-1 bg-white/5 border border-white/10 
+          rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+                />
+              </div>
 
-                    setIsEditOpen(false);
-                  }}
-                  className="px-6 py-2 rounded-xl bg-[#4A9B9B] 
-          hover:bg-[#3d8585] text-white transition"
+              {/* Status */}
+              <div>
+                <label className="text-sm text-gray-300">Status</label>
+                <select
+                  value={selectedUser.status}
+                  onChange={(e) =>
+                    setSelectedUser({
+                      ...selectedUser,
+                      status: e.target.value,
+                    })
+                  }
+                  className="w-full mt-1 bg-white/5 border border-white/10 
+          rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
                 >
-                  Save Changes
-                </button>
-              </ModalFooter>
-            </>
-          )}
-        </Modal>
-      </AnimatedContent>
+                  <option value="Regular">Regular</option>
+                  <option value="Irregular">Irregular</option>
+                </select>
+              </div>
+
+              {/* Violation Count */}
+              <div>
+                <label className="text-sm text-gray-300">Violation Count</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={selectedUser.violationCount}
+                  onChange={(e) =>
+                    setSelectedUser({
+                      ...selectedUser,
+                      violationCount: Number(e.target.value),
+                    })
+                  }
+                  className="w-full mt-1 bg-white/5 border border-white/10 
+          rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <ModalDivider />
+
+            <ModalFooter>
+              <button
+                onClick={() => setIsEditOpen(false)}
+                className="px-6 py-2 rounded-xl bg-white/10 
+        text-gray-300 hover:bg-white/20 transition-colors"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={() => {
+                  setStudentData((prev) =>
+                    prev.map((student) =>
+                      student.id === selectedUser.id ? selectedUser : student,
+                    ),
+                  );
+                  setIsEditOpen(false);
+                }}
+                className="px-6 py-2 rounded-xl bg-[#4A9B9B] 
+        hover:bg-[#3d8585] text-white transition-colors"
+              >
+                Save Changes
+              </button>
+            </ModalFooter>
+          </>
+        )}
+      </Modal>
     </div>
   );
 };
