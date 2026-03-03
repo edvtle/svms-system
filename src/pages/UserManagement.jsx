@@ -33,7 +33,6 @@ const UserManagement = () => {
 
   const emptyUser = {
     id: null,
-    no: null,
     schoolId: "",
     studentName: "",
     program: "BSIT",
@@ -228,7 +227,16 @@ const UserManagement = () => {
   }, [filteredStudents]);
 
   const columns = [
-    { key: "no", label: "No", width: "w-12" },
+    {
+      key: "no",
+      label: "No",
+      width: "w-12",
+      render: (value, row) => {
+        // Find the index of this row in the filtered data
+        const index = filteredStudents.findIndex((s) => s.id === row.id);
+        return <span>{index + 1}</span>;
+      },
+    },
     { key: "schoolId", label: "School ID" },
     {
       key: "studentName",
@@ -626,7 +634,6 @@ const UserManagement = () => {
               const newEntry = {
                 ...newUser,
                 id: newId,
-                no: studentData.length + 1,
               };
               setStudentData((prev) => [...prev, newEntry]);
               setIsAddOpen(false);
