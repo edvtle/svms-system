@@ -62,7 +62,7 @@ const EditProfileModal = ({
     <Modal 
       isOpen={isOpen} 
       onClose={onClose} 
-      title="Edit User Profile"
+      title={<span className="font-black font-inter">Edit User Profile</span>}
       size="md"
       showCloseButton={false}
     >
