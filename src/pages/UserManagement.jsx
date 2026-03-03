@@ -232,7 +232,6 @@ const UserManagement = () => {
       label: "No",
       width: "w-12",
       render: (value, row) => {
-        // Find the index of this row in the filtered data
         const index = filteredStudents.findIndex((s) => s.id === row.id);
         return <span>{index + 1}</span>;
       },
@@ -337,7 +336,7 @@ const UserManagement = () => {
       </AnimatedContent>
 
       <AnimatedContent distance={40} delay={0.1}>
-        <p className="text-white font-semibold mb-4">Students (2025-2026)</p>
+        <p className="text-white font-semibold mb-4">S.Y. 2025-2026</p>
       </AnimatedContent>
 
       <AnimatedContent distance={40} delay={0.2}>
