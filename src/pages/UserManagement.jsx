@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Plus,
   Archive,
@@ -27,6 +27,7 @@ const UserManagement = () => {
   const [selectedProgram, setSelectedProgram] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedSection, setSelectedSection] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -51,7 +52,7 @@ const UserManagement = () => {
     {
       id: 1,
       no: 1,
-      schoolId: "23-00000",
+      schoolId: "23-00001",
       studentName: "Arman Jeresano",
       program: "BSIT",
       yearSection: "3B",
@@ -61,9 +62,9 @@ const UserManagement = () => {
     {
       id: 2,
       no: 2,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
-      program: "BSIT",
+      schoolId: "23-00002",
+      studentName: "Maria Santos",
+      program: "BSCS",
       yearSection: "3A",
       status: "Regular",
       violationCount: 1,
@@ -71,19 +72,19 @@ const UserManagement = () => {
     {
       id: 3,
       no: 3,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
+      schoolId: "23-00003",
+      studentName: "John Doe",
       program: "BSIT",
       yearSection: "2C",
-      status: "Regular",
+      status: "Irregular",
       violationCount: 2,
     },
     {
       id: 4,
       no: 4,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
-      program: "BSIT",
+      schoolId: "23-00004",
+      studentName: "Jane Smith",
+      program: "BSCS",
       yearSection: "1B",
       status: "Regular",
       violationCount: 5,
@@ -91,8 +92,8 @@ const UserManagement = () => {
     {
       id: 5,
       no: 5,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
+      schoolId: "23-00005",
+      studentName: "Peter Pan",
       program: "BSIT",
       yearSection: "4B",
       status: "Regular",
@@ -101,18 +102,18 @@ const UserManagement = () => {
     {
       id: 6,
       no: 6,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
-      program: "BSIT",
+      schoolId: "23-00006",
+      studentName: "Wendy Darling",
+      program: "BSCS",
       yearSection: "3A",
-      status: "Regular",
+      status: "Irregular",
       violationCount: 2,
     },
     {
       id: 7,
       no: 7,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
+      schoolId: "23-00007",
+      studentName: "James Hook",
       program: "BSIT",
       yearSection: "3C",
       status: "Regular",
@@ -121,9 +122,9 @@ const UserManagement = () => {
     {
       id: 8,
       no: 8,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
-      program: "BSIT",
+      schoolId: "23-00008",
+      studentName: "Alice Wonder",
+      program: "BSCS",
       yearSection: "2D",
       status: "Regular",
       violationCount: 5,
@@ -131,19 +132,19 @@ const UserManagement = () => {
     {
       id: 9,
       no: 9,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
+      schoolId: "23-00009",
+      studentName: "Bob Builder",
       program: "BSIT",
       yearSection: "1E",
-      status: "Regular",
+      status: "Irregular",
       violationCount: 1,
     },
     {
       id: 10,
       no: 10,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
-      program: "BSIT",
+      schoolId: "23-00010",
+      studentName: "Charlie Brown",
+      program: "BSCS",
       yearSection: "4D",
       status: "Regular",
       violationCount: 2,
@@ -151,8 +152,8 @@ const UserManagement = () => {
     {
       id: 11,
       no: 11,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
+      schoolId: "23-00011",
+      studentName: "Lucy Liu",
       program: "BSIT",
       yearSection: "3A",
       status: "Regular",
@@ -161,14 +162,70 @@ const UserManagement = () => {
     {
       id: 12,
       no: 12,
-      schoolId: "23-00000",
-      studentName: "Arman Jeresano",
-      program: "BSIT",
+      schoolId: "23-00012",
+      studentName: "Snoopy Dog",
+      program: "BSCS",
       yearSection: "3C",
-      status: "Regular",
+      status: "Irregular",
       violationCount: 1,
     },
   ]);
+
+  // Filters
+  const filteredStudents = useMemo(() => {
+    return studentData.filter((student) => {
+      if (activeTab === "regular" && student.status !== "Regular") return false;
+      if (activeTab === "irregular" && student.status !== "Irregular")
+        return false;
+
+      if (
+        selectedProgram &&
+        student.program.toLowerCase() !== selectedProgram.toLowerCase()
+      )
+        return false;
+
+      if (selectedYear) {
+        const studentYear = student.yearSection.charAt(0);
+        if (studentYear !== selectedYear) return false;
+      }
+
+      if (selectedSection) {
+        const studentSection = student.yearSection.slice(1).toLowerCase();
+        if (studentSection !== selectedSection.toLowerCase()) return false;
+      }
+
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        return (
+          student.studentName.toLowerCase().includes(query) ||
+          student.schoolId.toLowerCase().includes(query) ||
+          student.program.toLowerCase().includes(query) ||
+          student.yearSection.toLowerCase().includes(query)
+        );
+      }
+
+      return true;
+    });
+  }, [
+    studentData,
+    activeTab,
+    selectedProgram,
+    selectedYear,
+    selectedSection,
+    searchQuery,
+  ]);
+
+  const statistics = useMemo(() => {
+    const total = filteredStudents.length;
+    const withViolations = filteredStudents.filter(
+      (s) => s.violationCount > 0,
+    ).length;
+    const highRisk = filteredStudents.filter(
+      (s) => s.violationCount >= 5,
+    ).length;
+
+    return { total, withViolations, highRisk };
+  }, [filteredStudents]);
 
   const columns = [
     { key: "no", label: "No", width: "w-12" },
@@ -176,7 +233,9 @@ const UserManagement = () => {
     {
       key: "studentName",
       label: "Student Name",
-      render: (value) => <span className="text-GREY font-bold">{value}</span>,
+      render: (value) => (
+        <span className="text-white-200 font-bold">{value}</span>
+      ),
     },
     { key: "program", label: "Program" },
     { key: "yearSection", label: "Year/Section" },
@@ -211,7 +270,15 @@ const UserManagement = () => {
     {
       label: "Delete",
       icon: <Trash2 className="w-4 h-4" />,
-      onClick: (row) => console.log("Delete", row),
+      onClick: (row) => {
+        if (
+          window.confirm(`Are you sure you want to delete ${row.studentName}?`)
+        ) {
+          setStudentData((prev) =>
+            prev.filter((student) => student.id !== row.id),
+          );
+        }
+      },
       variant: "danger",
     },
   ];
@@ -220,6 +287,14 @@ const UserManagement = () => {
     { key: "regular", label: "Regular" },
     { key: "irregular", label: "Irregular" },
   ];
+
+  const resetFilters = () => {
+    setSelectedProgram("");
+    setSelectedYear("");
+    setSelectedSection("");
+    setSearchQuery("");
+    setActiveTab("regular");
+  };
 
   return (
     <div className="text-white relative">
@@ -259,7 +334,13 @@ const UserManagement = () => {
 
       <AnimatedContent distance={40} delay={0.2}>
         <div className="flex items-center gap-3 mb-4">
-          <SearchBar placeholder="Search User" className="w-64" />
+          <SearchBar
+            placeholder="Search by name, ID, program, or section"
+            className="w-80"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+
           {/* Program Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -268,11 +349,16 @@ const UserManagement = () => {
                 size="sm"
                 className="min-w-[120px] justify-between"
               >
-                {selectedProgram ? selectedProgram.toUpperCase() : "Program"}
+                {selectedProgram
+                  ? selectedProgram.toUpperCase()
+                  : "All Programs"}
                 <ChevronDown className="ml-2 w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setSelectedProgram("")}>
+                All Programs
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSelectedProgram("bsit")}>
                 BSIT
               </DropdownMenuItem>
@@ -281,6 +367,7 @@ const UserManagement = () => {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
           {/* Year Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -289,11 +376,14 @@ const UserManagement = () => {
                 size="sm"
                 className="min-w-[120px] justify-between"
               >
-                {selectedYear ? `${selectedYear} Year` : "Year"}
+                {selectedYear ? `${selectedYear} Year` : "All Years"}
                 <ChevronDown className="ml-2 w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setSelectedYear("")}>
+                All Years
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSelectedYear("1")}>
                 1st Year
               </DropdownMenuItem>
@@ -308,6 +398,7 @@ const UserManagement = () => {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
           {/* Section Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -318,11 +409,14 @@ const UserManagement = () => {
               >
                 {selectedSection
                   ? `Section ${selectedSection.toUpperCase()}`
-                  : "Section"}
+                  : "All Sections"}
                 <ChevronDown className="ml-2 w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setSelectedSection("")}>
+                All Sections
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSelectedSection("a")}>
                 Section A
               </DropdownMenuItem>
@@ -340,6 +434,21 @@ const UserManagement = () => {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {(selectedProgram ||
+            selectedYear ||
+            selectedSection ||
+            searchQuery ||
+            activeTab !== "regular") && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={resetFilters}
+              className="gap-2 bg-[#4A5568] hover:bg-[#3d4654] border-0"
+            >
+              Reset Filters
+            </Button>
+          )}
         </div>
       </AnimatedContent>
 
@@ -357,15 +466,19 @@ const UserManagement = () => {
           <div className="flex items-center gap-6 text-sm">
             <span className="text-gray-400">
               Total Students:{" "}
-              <span className="text-white font-medium">1423</span>
+              <span className="text-white font-medium">{statistics.total}</span>
             </span>
             <span className="text-gray-400">
               Students with Violations:{" "}
-              <span className="text-white font-medium">78</span>
+              <span className="text-white font-medium">
+                {statistics.withViolations}
+              </span>
             </span>
             <span className="text-gray-400">
               High-Risk Students:{" "}
-              <span className="text-white font-medium">21</span>
+              <span className="text-white font-medium">
+                {statistics.highRisk}
+              </span>
             </span>
           </div>
           <div className="flex gap-3">
@@ -398,10 +511,19 @@ const UserManagement = () => {
       </AnimatedContent>
 
       <AnimatedContent distance={40} delay={0.5}>
-        <DataTable columns={columns} data={studentData} actions={actions} />
+        <DataTable
+          columns={columns}
+          data={filteredStudents}
+          actions={actions}
+        />
+
+        {filteredStudents.length === 0 && (
+          <div className="text-center py-8 text-gray-400">
+            No students found matching the selected filters.
+          </div>
+        )}
       </AnimatedContent>
 
-      {/* Add Student Modal - Moved outside AnimatedContent for better positioning */}
       <Modal
         isOpen={isAddOpen}
         onClose={() => setIsAddOpen(false)}
@@ -518,7 +640,6 @@ const UserManagement = () => {
         </ModalFooter>
       </Modal>
 
-      {/* Edit Student Modal - Moved outside AnimatedContent */}
       <Modal
         isOpen={isEditOpen}
         onClose={() => setIsEditOpen(false)}
