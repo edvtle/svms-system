@@ -62,7 +62,7 @@ const Sidebar = () => {
   ]
 
   return (
-    <aside className="w-60 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white min-h-screen p-6 font-inter">
+    <aside className="w-60 h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-6 font-inter">
       {/* Logo/Brand */}  
       <div className="mb-12">
         <img src={logo} alt="CSS Logo" className="h-14 mt-4 mb-4 object-contain" />
