@@ -20,15 +20,18 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "../components/ui/dropdown-menu";
+import Modal, { ModalFooter, ModalDivider } from "../components/ui/Modal";
 
 const UserManagement = () => {
   const [activeTab, setActiveTab] = useState("regular");
   const [selectedProgram, setSelectedProgram] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedSection, setSelectedSection] = useState("");
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
 
   // Sample student data
-  const studentData = [
+  const [studentData, setStudentData] = useState([
     {
       id: 1,
       no: 1,
@@ -149,7 +152,7 @@ const UserManagement = () => {
       status: "Regular",
       violationCount: 1,
     },
-  ];
+  ]);
 
   const columns = [
     { key: "no", label: "No", width: "w-12" },
@@ -186,7 +189,10 @@ const UserManagement = () => {
     {
       label: "Edit",
       icon: <Edit className="w-4 h-4" />,
-      onClick: (row) => console.log("Edit", row),
+      onClick: (row) => {
+        setSelectedUser(row);
+        setIsEditOpen(true);
+      },
     },
     {
       label: "Delete",
@@ -378,6 +384,161 @@ const UserManagement = () => {
 
       <AnimatedContent distance={40} delay={0.5}>
         <DataTable columns={columns} data={studentData} actions={actions} />
+        <Modal
+          isOpen={isEditOpen}
+          onClose={() => setIsEditOpen(false)}
+          title="Edit Student Profile"
+          size="xl"
+        >
+          {selectedUser && (
+            <>
+              {/* 2 Column Layout */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Student Name */}
+                <div>
+                  <label className="text-sm text-gray-300">Student Name</label>
+                  <input
+                    type="text"
+                    value={selectedUser.studentName}
+                    onChange={(e) =>
+                      setSelectedUser({
+                        ...selectedUser,
+                        studentName: e.target.value,
+                      })
+                    }
+                    className="w-full mt-1 bg-white/5 border border-white/10 
+            rounded-xl px-4 py-2 text-white focus:outline-none 
+            focus:ring-2 focus:ring-[#4A9B9B]"
+                  />
+                </div>
+
+                {/* Student ID */}
+                <div>
+                  <label className="text-sm text-gray-300">Student ID</label>
+                  <input
+                    type="text"
+                    value={selectedUser.schoolId}
+                    onChange={(e) =>
+                      setSelectedUser({
+                        ...selectedUser,
+                        schoolId: e.target.value,
+                      })
+                    }
+                    className="w-full mt-1 bg-white/5 border border-white/10 
+            rounded-xl px-4 py-2 text-white focus:outline-none 
+            focus:ring-2 focus:ring-[#4A9B9B]"
+                  />
+                </div>
+
+                {/* Program Dropdown */}
+                <div>
+                  <label className="text-sm text-gray-300">Program</label>
+                  <select
+                    value={selectedUser.program}
+                    onChange={(e) =>
+                      setSelectedUser({
+                        ...selectedUser,
+                        program: e.target.value,
+                      })
+                    }
+                    className="w-full mt-1 bg-white/5 border border-white/10 
+            rounded-xl px-4 py-2 text-white focus:outline-none 
+            focus:ring-2 focus:ring-[#4A9B9B]"
+                  >
+                    <option value="BSIT">BSIT</option>
+                    <option value="BSCS">BSCS</option>
+                  </select>
+                </div>
+
+                {/* Year / Section */}
+                <div>
+                  <label className="text-sm text-gray-300">Year/Section</label>
+                  <input
+                    type="text"
+                    value={selectedUser.yearSection}
+                    onChange={(e) =>
+                      setSelectedUser({
+                        ...selectedUser,
+                        yearSection: e.target.value,
+                      })
+                    }
+                    className="w-full mt-1 bg-white/5 border border-white/10 
+            rounded-xl px-4 py-2 text-white focus:outline-none 
+            focus:ring-2 focus:ring-[#4A9B9B]"
+                  />
+                </div>
+
+                {/* Status */}
+                <div>
+                  <label className="text-sm text-gray-300">Status</label>
+                  <select
+                    value={selectedUser.status}
+                    onChange={(e) =>
+                      setSelectedUser({
+                        ...selectedUser,
+                        status: e.target.value,
+                      })
+                    }
+                    className="w-full mt-1 bg-white/5 border border-white/10 
+            rounded-xl px-4 py-2 text-white focus:outline-none 
+            focus:ring-2 focus:ring-[#4A9B9B]"
+                  >
+                    <option value="Regular">Regular</option>
+                    <option value="Irregular">Irregular</option>
+                  </select>
+                </div>
+
+                {/* Violation Count */}
+                <div>
+                  <label className="text-sm text-gray-300">
+                    Violation Count
+                  </label>
+                  <input
+                    type="number"
+                    value={selectedUser.violationCount}
+                    onChange={(e) =>
+                      setSelectedUser({
+                        ...selectedUser,
+                        violationCount: Number(e.target.value),
+                      })
+                    }
+                    className="w-full mt-1 bg-white/5 border border-white/10 
+            rounded-xl px-4 py-2 text-white focus:outline-none 
+            focus:ring-2 focus:ring-[#4A9B9B]"
+                  />
+                </div>
+              </div>
+
+              <ModalDivider />
+
+              <ModalFooter>
+                <button
+                  onClick={() => setIsEditOpen(false)}
+                  className="px-6 py-2 rounded-xl bg-white/10 
+          text-gray-300 hover:bg-white/20 transition"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={() => {
+                    setStudentData((prev) =>
+                      prev.map((student) =>
+                        student.id === selectedUser.id ? selectedUser : student,
+                      ),
+                    );
+
+                    setIsEditOpen(false);
+                  }}
+                  className="px-6 py-2 rounded-xl bg-[#4A9B9B] 
+          hover:bg-[#3d8585] text-white transition"
+                >
+                  Save Changes
+                </button>
+              </ModalFooter>
+            </>
+          )}
+        </Modal>
       </AnimatedContent>
     </div>
   );
