@@ -42,7 +42,7 @@ const DataTable = ({
               </th>
             ))}
             {hasActions && (
-              <th className="text-center py-3 px-4 font-medium w-16">Actions</th>
+              <th className="text-center py-3 px-4 font-medium w-16"></th>
             )}
           </tr>
         </thead>
@@ -101,8 +101,8 @@ const DataTable = ({
       </table>
       
       {data.length === 0 && (
-        <div className="py-12 text-center text-gray-500">
-          No data available
+        <div className="py-12 text-center text-gray-500 text-lg font-semibold">
+          No results found
         </div>
       )}
     </div>
