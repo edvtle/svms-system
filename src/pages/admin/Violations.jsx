@@ -10,16 +10,23 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import { Plus } from 'lucide-react'
+import { Plus, Edit, Trash2 } from 'lucide-react'
 
 const Violations = () => {
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [selectedViolation, setSelectedViolation] = useState(null)
   const [categoryFilter, setCategoryFilter] = useState('minor') 
   const [specificDegree, setSpecificDegree] = useState('')
   const [formData, setFormData] = useState({
     type: '',
     degree: '',
     violation: '',
+  })
+  const [editFormData, setEditFormData] = useState({
+    id: '',
+    violation: '',
+    degree: '',
   })
   
   const violationsData = [
@@ -140,6 +147,28 @@ const Violations = () => {
     { key: 'degree', label: 'Degree', width: 'w-1/3' },
   ]
 
+  const actions = [
+    { 
+      label: 'Edit', 
+      icon: <Edit className="w-4 h-4" />, 
+      onClick: (row) => {
+        setSelectedViolation(row)
+        setEditFormData({
+          id: row.id,
+          violation: row.violation,
+          degree: row.degree,
+        })
+        setIsEditModalOpen(true)
+      }
+    },
+    { 
+      label: 'Delete', 
+      icon: <Trash2 className="w-4 h-4" />, 
+      onClick: (row) => console.log('Delete', row),
+      variant: 'danger'
+    },
+  ]
+
   const handleAddViolation = () => {
     console.log('New violation:', formData)
     setFormData({ type: '', degree: '', violation: '' })
@@ -227,7 +256,7 @@ const Violations = () => {
       <AnimatedContent distance={40} delay={0.3}>
         <div className="bg-[#23262B] rounded-xl p-6">
           <h3 className="text-lg font-bold mb-4">List of Violation</h3>
-          <DataTable columns={columns} data={filteredData} onRowClick={handleViolationRowClick} />
+          <DataTable columns={columns} data={filteredData} actions={actions} onRowClick={handleViolationRowClick} />
         </div>
       </AnimatedContent>
 
@@ -328,6 +357,84 @@ const Violations = () => {
               className="bg-blue-600 text-white hover:bg-blue-700"
             >
               Save
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Violation Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        title="Edit Violation"
+        size="md"
+      >
+        <div className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">Violation</label>
+            <input
+              type="text"
+              value={editFormData.violation}
+              onChange={(e) => setEditFormData({ ...editFormData, violation: e.target.value })}
+              placeholder="Enter violation details..."
+              className="w-full bg-[#3a3a3a] text-white rounded-lg px-4 py-3 border border-white/10 focus:outline-none focus:ring-1 focus:ring-white/20 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">Degree</label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="secondary" size="sm" className="w-full justify-between bg-[#3a3a3a] hover:bg-[#4a4a4a] h-10">
+                  {editFormData.degree ? editFormData.degree : 'Select Degree'}
+                  <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-full">
+                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'First' })}>
+                  First
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Second' })}>
+                  Second
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Third' })}>
+                  Third
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Fourth' })}>
+                  Fourth
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Fifth' })}>
+                  Fifth
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Sixth' })}>
+                  Sixth
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Seventh' })}>
+                  Seventh
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <div className="flex justify-center gap-3">
+            <Button
+              variant="secondary"
+              onClick={() => setIsEditModalOpen(false)}
+              className="bg-gray-500 text-white hover:bg-gray-600"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                console.log('Edit violation:', editFormData)
+                setIsEditModalOpen(false)
+              }}
+              className="bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Save Changes
             </Button>
           </div>
         </div>
