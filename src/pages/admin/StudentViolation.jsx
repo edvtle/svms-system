@@ -24,9 +24,12 @@ import {
 } from "../../components/ui/dropdown-menu";
 import SearchBar from "@/components/ui/SearchBar";
 import LogNewViolationModal from "@/components/modals/LogNewViolationModal";
+import EditViolationModal from "@/components/modals/EditViolationModal";
 
 const StudentViolation = () => {
   const [showLogModal, setShowLogModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedViolation, setSelectedViolation] = useState(null);
   // Example data for table and stats
   const columns = [
     { key: "no", label: "No", width: "w-10" },
@@ -54,7 +57,10 @@ const StudentViolation = () => {
     {
       label: "Edit",
       icon: <Edit className="w-4 h-4" />,
-      onClick: (row) => console.log("Edit", row),
+      onClick: (row) => {
+        setSelectedViolation(row);
+        setShowEditModal(true);
+      },
     },
     {
       label: "Delete",
@@ -139,6 +145,17 @@ const StudentViolation = () => {
         [rowId]: `${dateStr} ${timeStr}`,
       }));
     }
+  };
+
+  const handleAttachSignature = (rowId) => {
+    console.log("Attach signature for", rowId);
+    // Placeholder for attaching signature
+  };
+
+  const handleSaveEdit = (id, updatedData) => {
+    // In a real app, update the data via API or state
+    console.log("Saving edit for violation", id, updatedData);
+    // For demo, you could update the sampleUsers array, but since it's static, just log
   };
 
   const sampleUsers = [
@@ -572,6 +589,13 @@ const StudentViolation = () => {
       <LogNewViolationModal
         isOpen={showLogModal}
         onClose={() => setShowLogModal(false)}
+      />
+      {/* Edit Violation Modal */}
+      <EditViolationModal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        violation={selectedViolation}
+        onSave={handleSaveEdit}
       />
     </div>
   );

@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
 } from "../../components/ui/dropdown-menu";
 import Modal, { ModalFooter } from "../../components/ui/Modal";
-
+import EditArchiveModal from "@/components/modals/EditArchiveModal";
 
 const folderList = [
   { key: "users", label: "USERS" },
@@ -23,15 +23,12 @@ const folderList = [
   { key: "2020-2021", label: "S.Y. 2020-2021" },
 ];
 
-
 const tabs = [{ key: "users", label: "Users" }];
-
 
 const semesterTabs = [
   { key: "1st", label: "1st Semester" },
   { key: "2nd", label: "2nd Semester" },
 ];
-
 
 const Archives = () => {
   const [activeFolder, setActiveFolder] = useState("users");
@@ -41,10 +38,14 @@ const Archives = () => {
   const [filterType, setFilterType] = useState("");
   const [filterSignature, setFilterSignature] = useState("");
 
-
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
 
+  const handleSaveEdit = (id, updatedRecord) => {
+    setData((prev) =>
+      prev.map((record) => (record.id === id ? updatedRecord : record)),
+    );
+  };
 
   const formatDateTime = (date, time) => {
     return (
@@ -55,7 +56,6 @@ const Archives = () => {
       </span>
     );
   };
-
 
   const dataSample = Array.from({ length: 20 }).map((_, i) => ({
     id: i + 1,
@@ -75,14 +75,12 @@ const Archives = () => {
       i % 4 === 0
         ? "Warning issued"
         : i % 4 === 1
-        ? "Parent notified"
-        : "Lorem Ipsum",
+          ? "Parent notified"
+          : "Lorem Ipsum",
     signature: i % 2 === 0 ? "Signed" : "Attach",
   }));
 
-
   const [data, setData] = useState(dataSample);
-
 
   // Filter function
   const filteredData = useMemo(() => {
@@ -98,7 +96,6 @@ const Archives = () => {
             ? item.studentName.props.children[1].props.children
             : "";
 
-
         if (
           !studentName.toLowerCase().includes(query) &&
           !studentId.toLowerCase().includes(query) &&
@@ -109,21 +106,17 @@ const Archives = () => {
         }
       }
 
-
       if (filterType && item.violation !== filterType) {
         return false;
       }
-
 
       if (filterSignature && item.signature !== filterSignature) {
         return false;
       }
 
-
       return true;
     });
   }, [data, searchQuery, filterType, filterSignature]);
-
 
   const columns = [
     {
@@ -189,25 +182,21 @@ const Archives = () => {
     },
   ];
 
-
   const tableTitle =
     activeFolder === "users"
       ? "Archived Users"
       : `Archived Student Records - S.Y. ${activeFolder.replace("-", " - ")} (${activeSemester} Semester)`;
-
 
   const handleEdit = (row) => {
     setSelectedRow(row);
     setIsEditOpen(true);
   };
 
-
   const clearFilters = () => {
     setSearchQuery("");
     setFilterType("");
     setFilterSignature("");
   };
-
 
   return (
     <div className="text-white">
@@ -220,7 +209,6 @@ const Archives = () => {
         </h2>
       </AnimatedContent>
 
-
       <AnimatedContent delay={0.1}>
         <SearchBar
           placeholder="Search by name, ID, or section..."
@@ -229,7 +217,6 @@ const Archives = () => {
           onChange={(e) => setSearchQuery(e.target.value)}
         />
       </AnimatedContent>
-
 
       <AnimatedContent delay={0.2}>
         <div className="flex gap-4 mb-6">
@@ -254,7 +241,6 @@ const Archives = () => {
         </div>
       </AnimatedContent>
 
-
       {activeFolder !== "users" && (
         <AnimatedContent delay={0.25}>
           <TableTabs
@@ -266,11 +252,9 @@ const Archives = () => {
         </AnimatedContent>
       )}
 
-
       <AnimatedContent delay={0.4}>
         <div className="bg-[#23262B] rounded-xl p-6">
           <h3 className="text-lg font-bold mb-4">{tableTitle}</h3>
-
 
           <div className="flex justify-between items-center mb-4">
             <div className="flex gap-2">
@@ -302,7 +286,6 @@ const Archives = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-
               {/* Signature Status Filter */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -332,7 +315,6 @@ const Archives = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-
               {/* Clear Filters Button */}
               {(filterType || filterSignature || searchQuery) && (
                 <Button
@@ -346,7 +328,6 @@ const Archives = () => {
               )}
             </div>
 
-
             <Button
               variant="secondary"
               size="sm"
@@ -356,9 +337,7 @@ const Archives = () => {
             </Button>
           </div>
 
-
           <DataTable columns={columns} data={filteredData} />
-
 
           {filteredData.length === 0 && (
             <div className="text-center py-8 text-gray-400">
@@ -368,185 +347,17 @@ const Archives = () => {
         </div>
       </AnimatedContent>
 
-
       {/* Edit Modal */}
       {isEditOpen && selectedRow && (
-        <Modal
+        <EditArchiveModal
           isOpen={isEditOpen}
           onClose={() => setIsEditOpen(false)}
-          title="Edit Record"
-          size="lg"
-        >
-          <div className="grid grid-cols-2 gap-4 p-6">
-            {/* Student Name */}
-            <div>
-              <label className="text-sm text-gray-300">Student Name</label>
-              <input
-                type="text"
-                value={selectedRow.studentName.props.children[0].props.children}
-                onChange={(e) => {
-                  const updatedRow = { ...selectedRow };
-                  updatedRow.studentName = (
-                    <span>
-                      <b>{e.target.value}</b>
-                      <br />
-                      <span className="text-xs text-gray-500">
-                        {
-                          selectedRow.studentName.props.children[1].props
-                            .children
-                        }
-                      </span>
-                    </span>
-                  );
-                  setSelectedRow(updatedRow);
-                }}
-                className="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
-                placeholder="Enter student name"
-              />
-            </div>
-
-
-            {/* Student ID */}
-            <div>
-              <label className="text-sm text-gray-300">Student ID</label>
-              <input
-                type="text"
-                value={selectedRow.studentName.props.children[1].props.children}
-                onChange={(e) => {
-                  const updatedRow = { ...selectedRow };
-                  updatedRow.studentName = (
-                    <span>
-                      <b>
-                        {
-                          selectedRow.studentName.props.children[0].props
-                            .children
-                        }
-                      </b>
-                      <br />
-                      <span className="text-xs text-gray-500">
-                        {e.target.value}
-                      </span>
-                    </span>
-                  );
-                  setSelectedRow(updatedRow);
-                }}
-                className="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
-                placeholder="Enter student ID"
-              />
-            </div>
-
-
-            {/* Year/Section */}
-            <div>
-              <label className="text-sm text-gray-300">Year/Section</label>
-              <input
-                type="text"
-                value={selectedRow.yearSection}
-                onChange={(e) =>
-                  setSelectedRow({
-                    ...selectedRow,
-                    yearSection: e.target.value,
-                  })
-                }
-                className="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
-                placeholder="e.g., BSIT - 3B"
-              />
-            </div>
-
-
-            {/* Violation */}
-            <div>
-              <label className="text-sm text-gray-300">Violation</label>
-              <select
-                value={selectedRow.violation}
-                onChange={(e) =>
-                  setSelectedRow({ ...selectedRow, violation: e.target.value })
-                }
-                className="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
-              >
-                <option value="Academic">Academic</option>
-                <option value="Behavioral">Behavioral</option>
-                <option value="Uniform">Uniform</option>
-              </select>
-            </div>
-
-
-            {/* Reported By */}
-            <div>
-              <label className="text-sm text-gray-300">Reported By</label>
-              <input
-                type="text"
-                value={selectedRow.reportedBy}
-                onChange={(e) =>
-                  setSelectedRow({ ...selectedRow, reportedBy: e.target.value })
-                }
-                className="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
-                placeholder="Enter reporter name"
-              />
-            </div>
-
-
-            {/* Signature Status */}
-            <div>
-              <label className="text-sm text-gray-300">Signature</label>
-              <select
-                value={selectedRow.signature}
-                onChange={(e) =>
-                  setSelectedRow({ ...selectedRow, signature: e.target.value })
-                }
-                className="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
-              >
-                <option value="Signed">Signed</option>
-                <option value="Attach">Attach</option>
-              </select>
-            </div>
-
-
-            {/* Remarks */}
-            <div className="col-span-2">
-              <label className="text-sm text-gray-300">Remarks</label>
-              <textarea
-                value={selectedRow.remarks}
-                onChange={(e) =>
-                  setSelectedRow({ ...selectedRow, remarks: e.target.value })
-                }
-                rows="3"
-                className="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#4A9B9B] focus:outline-none"
-                placeholder="Enter remarks"
-              />
-            </div>
-          </div>
-
-
-          <ModalFooter>
-            <button
-              onClick={() => setIsEditOpen(false)}
-              className="px-6 py-2 rounded-xl bg-white/10 text-gray-300 hover:bg-white/20 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                setData((prev) =>
-                  prev.map((row) =>
-                    row.id === selectedRow.id ? selectedRow : row,
-                  ),
-                );
-                setIsEditOpen(false);
-              }}
-              className="px-6 py-2 rounded-xl bg-[#4A9B9B] hover:bg-[#3d8585] text-white transition-colors"
-            >
-              Save Changes
-            </button>
-          </ModalFooter>
-        </Modal>
+          record={selectedRow}
+          onSave={handleSaveEdit}
+        />
       )}
     </div>
   );
 };
 
-
 export default Archives;
-
-
-
