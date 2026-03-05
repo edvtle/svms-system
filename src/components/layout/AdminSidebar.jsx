@@ -79,6 +79,7 @@ const Sidebar = () => {
             <li key={item.path}>
               <NavLink
                 to={item.path}
+                end={item.path === '/admin'}
                 className={({ isActive }) =>
                   `flex items-center gap-3 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
                     isActive

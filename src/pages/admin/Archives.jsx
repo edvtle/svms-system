@@ -280,7 +280,7 @@ const Archives = () => {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className={`gap-2 ${filterType ? "bg-[#4A9B9B]" : "bg-[#A3AED0]"} text-[#23262B] hover:opacity-90 border-0`}
+                    className={`gap-2 ${filterType ? "bg-[#4A9B9B] hover:bg-[#5aabab]" : "bg-[#A3AED0] hover:bg-[#b3bde0]"} text-[#23262B] border-0 transition-colors`}
                   >
                     <Filter className="w-4 h-4" />
                     {filterType || "Violation Type"}
@@ -309,7 +309,7 @@ const Archives = () => {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className={`gap-2 ${filterSignature ? "bg-[#4A9B9B]" : "bg-[#A3AED0]"} text-[#23262B] hover:opacity-90 border-0`}
+                    className={`gap-2 ${filterSignature ? "bg-[#4A9B9B] hover:bg-[#5aabab]" : "bg-[#A3AED0] hover:bg-[#b3bde0]"} text-[#23262B] border-0 transition-colors`}
                   >
                     <Filter className="w-4 h-4" />
                     {filterSignature || "Signature Status"}

@@ -4,6 +4,7 @@ import Card from '../../components/ui/Card';
 import DataTable from '../../components/ui/DataTable';
 import Button from '../../components/ui/Button';
 import AnimatedContent from '../../components/ui/AnimatedContent';
+import { Filter } from 'lucide-react';
 
 const columns = [
 	{ key: 'date', label: 'Date', width: 'w-32' },
@@ -104,10 +105,7 @@ const StudentViolations = () => {
 					<div className="flex items-center justify-between mb-4">
 						       <h3 className="text-lg font-semibold text-white">Report Archive</h3>
 						       <Button variant="secondary" size="sm" className="gap-2 flex items-center">
-							       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M6 10v6a2 2 0 002 2h8a2 2 0 002-2v-6" />
-								       <line x1="10" y1="10" x2="14" y2="10" />
-							       </svg>
+							       <Filter className="w-4 h-4" />
 							       Filter
 						       </Button>
 					</div>
