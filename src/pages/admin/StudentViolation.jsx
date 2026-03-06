@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import AnimatedContent from "../../components/ui/AnimatedContent";
 import Card from "../../components/ui/Card";
 import AnalyticsLineGraph from "../../components/ui/AnalyticsLineGraph";
@@ -27,9 +28,19 @@ import LogNewViolationModal from "@/components/modals/LogNewViolationModal";
 import EditViolationModal from "@/components/modals/EditViolationModal";
 
 const StudentViolation = () => {
+  const location = useLocation();
   const [showLogModal, setShowLogModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedViolation, setSelectedViolation] = useState(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const shouldOpenModal =
+      location.state?.openLogModal || params.get("openLog") === "true";
+    if (shouldOpenModal) {
+      setShowLogModal(true);
+    }
+  }, [location]);
   // Example data for table and stats
   const columns = [
     { key: "no", label: "No", width: "w-10" },

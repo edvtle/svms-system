@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Card from "../../components/ui/Card";
 import AdminStatCard from "../../components/ui/AdminStatCard";
 import {
@@ -31,6 +32,7 @@ import {
 } from "lucide-react";
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const [selectedSemester, setSelectedSemester] = useState("1st Sem");
   const [trendModalOpen, setTrendModalOpen] = useState(false);
   const [rankingModalOpen, setRankingModalOpen] = useState(false);
@@ -268,11 +270,15 @@ const Dashboard = () => {
           {/* Action Buttons */}
           <div className="flex flex-col gap-4">
             <AddViolationButton
-              onClick={() => window.location.href = "/admin/student-violation"}
+              onClick={() =>
+                navigate("/admin/student-violation", {
+                  state: { openLogModal: true },
+                })
+              }
               className="flex-1"
             />
             <ViewStudentsButton
-              onClick={() => window.location.href = "/admin/user-management"}
+              onClick={() => navigate("/admin/user-management")}
               className="flex-1"
             />
           </div>
@@ -512,7 +518,9 @@ const Dashboard = () => {
         size="2xl"
         className="max-w-[1100px] max-h-[80vh] overflow-y-auto scrollbar-hide"
       >
-        <p className="text-sm text-gray-400 mb-4">This chart visualizes violation trends for the selected semester.</p>
+        <p className="text-sm text-gray-400 mb-4">
+          This chart visualizes violation trends for the selected semester.
+        </p>
         {/* Semester Dropdown & Actions */}
         <div className="flex items-center gap-2 mb-6">
           <DropdownMenu>
@@ -523,22 +531,37 @@ const Dashboard = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setSelectedSemester("1st Sem")}>1st Sem</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSelectedSemester("2nd Sem")}>2nd Sem</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSelectedSemester("1st Sem")}>
+                1st Sem
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSelectedSemester("2nd Sem")}>
+                2nd Sem
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <button
             className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors h-10"
-            onClick={() => {/* Add export logic here */}}
+            onClick={() => {
+              /* Add export logic here */
+            }}
           >
             Export
           </button>
         </div>
         {/* Chart Area */}
         <div className="h-[320px] flex items-end justify-between px-4 relative mb-6">
-          <svg className="w-full h-full absolute inset-0" preserveAspectRatio="none">
+          <svg
+            className="w-full h-full absolute inset-0"
+            preserveAspectRatio="none"
+          >
             <defs>
-              <linearGradient id="modalLineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <linearGradient
+                id="modalLineGradient"
+                x1="0%"
+                y1="0%"
+                x2="100%"
+                y2="0%"
+              >
                 <stop offset="0%" stopColor="#06b6d4" />
                 <stop offset="100%" stopColor="#06b6d4" />
               </linearGradient>
@@ -549,11 +572,46 @@ const Dashboard = () => {
               stroke="url(#modalLineGradient)"
               strokeWidth="2"
             />
-            <circle cx="150" cy="130" r="6" fill="#fff" stroke="#06b6d4" strokeWidth="2" />
-            <circle cx="250" cy="80" r="6" fill="#fff" stroke="#06b6d4" strokeWidth="2" />
-            <circle cx="450" cy="60" r="6" fill="#fff" stroke="#06b6d4" strokeWidth="2" />
-            <circle cx="650" cy="50" r="6" fill="#fff" stroke="#06b6d4" strokeWidth="2" />
-            <circle cx="850" cy="55" r="6" fill="#fff" stroke="#06b6d4" strokeWidth="2" />
+            <circle
+              cx="150"
+              cy="130"
+              r="6"
+              fill="#fff"
+              stroke="#06b6d4"
+              strokeWidth="2"
+            />
+            <circle
+              cx="250"
+              cy="80"
+              r="6"
+              fill="#fff"
+              stroke="#06b6d4"
+              strokeWidth="2"
+            />
+            <circle
+              cx="450"
+              cy="60"
+              r="6"
+              fill="#fff"
+              stroke="#06b6d4"
+              strokeWidth="2"
+            />
+            <circle
+              cx="650"
+              cy="50"
+              r="6"
+              fill="#fff"
+              stroke="#06b6d4"
+              strokeWidth="2"
+            />
+            <circle
+              cx="850"
+              cy="55"
+              r="6"
+              fill="#fff"
+              stroke="#06b6d4"
+              strokeWidth="2"
+            />
           </svg>
           <div className="absolute bottom-0 left-0 right-0 flex justify-between text-muted px-2">
             <span>Jan</span>
@@ -566,7 +624,10 @@ const Dashboard = () => {
         </div>
         {/* Analytics Description */}
         <div className="bg-white/5 border border-white/10 rounded-lg p-4 text-sm text-gray-300">
-          This chart visualizes the trend of recorded student violations throughout the selected semester. Administrators can analyze patterns of misconduct over time and identify months where violations increase, allowing earlier intervention strategies.
+          This chart visualizes the trend of recorded student violations
+          throughout the selected semester. Administrators can analyze patterns
+          of misconduct over time and identify months where violations increase,
+          allowing earlier intervention strategies.
         </div>
       </Modal>
 
@@ -579,7 +640,10 @@ const Dashboard = () => {
         className="max-w-[1100px] max-h-[80vh] overflow-y-auto scrollbar-hide"
       >
         <div className="flex items-center justify-between mb-6">
-          <p className="text-sm text-gray-400">This list shows the ranking of students based on recorded violations.</p>
+          <p className="text-sm text-gray-400">
+            This list shows the ranking of students based on recorded
+            violations.
+          </p>
           <button
             className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors"
             onClick={() => {
@@ -642,9 +706,15 @@ const Dashboard = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setProgramFilter("All")}>All</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setProgramFilter("BSIT")}>BSIT</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setProgramFilter("BSCS")}>BSCS</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setProgramFilter("All")}>
+                All
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setProgramFilter("BSIT")}>
+                BSIT
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setProgramFilter("BSCS")}>
+                BSCS
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -655,11 +725,21 @@ const Dashboard = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setYearLevelFilter("All")}>All</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("1")}>1</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("2")}>2</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("3")}>3</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("4")}>4</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setYearLevelFilter("All")}>
+                All
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setYearLevelFilter("1")}>
+                1
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setYearLevelFilter("2")}>
+                2
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setYearLevelFilter("3")}>
+                3
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setYearLevelFilter("4")}>
+                4
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -670,12 +750,24 @@ const Dashboard = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setSectionFilter("All")}>All</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("A")}>A</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("B")}>B</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("C")}>C</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("D")}>D</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("E")}>E</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSectionFilter("All")}>
+                All
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSectionFilter("A")}>
+                A
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSectionFilter("B")}>
+                B
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSectionFilter("C")}>
+                C
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSectionFilter("D")}>
+                D
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSectionFilter("E")}>
+                E
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
