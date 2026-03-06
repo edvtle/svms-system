@@ -498,14 +498,6 @@ const Dashboard = () => {
               },
             ]}
             data={recentActivity}
-            actions={[
-              {
-                label: "Delete",
-                icon: <Trash2 className="w-4 h-4" />,
-                variant: "danger",
-                onClick: (row) => console.log("Delete", row),
-              },
-            ]}
             onRowClick={(row) => console.log("Row clicked", row)}
           />
         </Card>
@@ -539,7 +531,7 @@ const Dashboard = () => {
             className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors h-10"
             onClick={() => {/* Add generate logic here */}}
           >
-            Generate
+            Export
           </button>
         </div>
         {/* Chart Area */}
@@ -631,7 +623,7 @@ const Dashboard = () => {
               document.body.removeChild(link);
             }}
           >
-            Generate
+            Export
           </button>
         </div>
         {/* Filter Row */}
