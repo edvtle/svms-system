@@ -37,6 +37,7 @@ Railway deploy behavior:
 
 - `railway.json` config sets Railway build command to `npm run railway:build`.
 - `railway:build` runs `vite build` for reliable frontend deployment.
+- Railway runs `npm run railway:start`, which starts Express (`server/index.js`) and serves the built frontend and `/api/*` from the same host.
 - Run `npm run db:test` separately in an environment where MySQL variables are available.
 
 Important notes:
@@ -74,6 +75,8 @@ Create the users table and seed the required admin/student accounts:
 ```bash
 npm run db:setup-auth
 ```
+
+The same auth schema/user synchronization also runs automatically when the API server starts.
 
 Seeded accounts:
 

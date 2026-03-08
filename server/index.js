@@ -2,10 +2,21 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
-import { closeDbPool, getDbPool, getMissingDbVars, hasDbConfig } from "./db.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  closeDbPool,
+  getDbPool,
+  getMissingDbVars,
+  hasDbConfig,
+  syncAuthDatabase,
+} from "./db.js";
 
 const app = express();
 const port = Number(process.env.API_PORT || process.env.PORT || 3001);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distPath = path.resolve(__dirname, "../dist");
 
 app.use(cors());
 app.use(express.json());
@@ -119,9 +130,38 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-const server = app.listen(port, () => {
-  console.log(`SVMS API running on port ${port}`);
+// In production/Railway, serve the built frontend from the same Express app.
+app.use(express.static(distPath));
+
+app.get("/{*path}", (req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    return next();
+  }
+
+  return res.sendFile(path.join(distPath, "index.html"));
 });
+
+let server;
+
+async function startServer() {
+  if (hasDbConfig()) {
+    try {
+      await syncAuthDatabase();
+      console.log("Auth database synchronized.");
+    } catch (error) {
+      console.error("Failed to synchronize auth database on startup.");
+      console.error(error.message);
+    }
+  } else {
+    console.warn(
+      "Database variables are missing. Login API will not work until DB config is set.",
+    );
+  }
+
+  server = app.listen(port, () => {
+    console.log(`SVMS API running on port ${port}`);
+  });
+}
 
 async function shutdown(signal) {
   console.log(`Received ${signal}, shutting down...`);
@@ -139,3 +179,5 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   shutdown("SIGTERM");
 });
+
+startServer();
