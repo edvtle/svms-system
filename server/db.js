@@ -9,6 +9,44 @@ const requiredVars = [
   "MYSQLDATABASE",
 ];
 
+function getConnectionUrl() {
+  return process.env.MYSQL_URL || process.env.DATABASE_URL || "";
+}
+
+function getConnectionConfig() {
+  const connectionUrl = getConnectionUrl();
+
+  if (connectionUrl) {
+    return {
+      uri: connectionUrl,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      connectTimeout: 10000,
+      ssl:
+        process.env.MYSQL_SSL === "true"
+          ? { rejectUnauthorized: false }
+          : undefined,
+    };
+  }
+
+  return {
+    host: process.env.MYSQLHOST,
+    port: Number(process.env.MYSQLPORT),
+    user: process.env.MYSQLUSER,
+    password: process.env.MYSQLPASSWORD,
+    database: process.env.MYSQLDATABASE,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    connectTimeout: 10000,
+    ssl:
+      process.env.MYSQL_SSL === "true"
+        ? { rejectUnauthorized: false }
+        : undefined,
+  };
+}
+
 function getSeedUserFromEnv(prefix, role) {
   const email = process.env[`${prefix}_EMAIL`];
   const username = process.env[`${prefix}_USERNAME`];
@@ -40,10 +78,18 @@ export function getSeedAccountsFromEnv() {
 }
 
 export function hasDbConfig() {
+  if (getConnectionUrl()) {
+    return true;
+  }
+
   return requiredVars.every((key) => Boolean(process.env[key]));
 }
 
 export function getMissingDbVars() {
+  if (getConnectionUrl()) {
+    return [];
+  }
+
   return requiredVars.filter((key) => !process.env[key]);
 }
 
@@ -55,21 +101,7 @@ export function getDbPool() {
   }
 
   if (!pool) {
-    pool = mysql.createPool({
-      host: process.env.MYSQLHOST,
-      port: Number(process.env.MYSQLPORT),
-      user: process.env.MYSQLUSER,
-      password: process.env.MYSQLPASSWORD,
-      database: process.env.MYSQLDATABASE,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-      connectTimeout: 10000,
-      ssl:
-        process.env.MYSQL_SSL === "true"
-          ? { rejectUnauthorized: false }
-          : undefined,
-    });
+    pool = mysql.createPool(getConnectionConfig());
   }
 
   return pool;
