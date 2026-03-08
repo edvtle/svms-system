@@ -26,14 +26,17 @@ const Login = () => {
 
   const getApiBaseUrl = () => {
     if (import.meta.env.VITE_API_BASE_URL) {
-      return import.meta.env.VITE_API_BASE_URL;
+      const configuredBase = import.meta.env.VITE_API_BASE_URL;
+      const isConfiguredLocal = /localhost|127\.0\.0\.1/i.test(configuredBase);
+
+      if (window.location.hostname !== "localhost" && isConfiguredLocal) {
+        return window.location.origin;
+      }
+
+      return configuredBase;
     }
 
-    if (window.location.hostname === "localhost") {
-      return "http://localhost:3001";
-    }
-
-    return window.location.origin;
+    return "";
   };
 
   const handleLogin = async (e) => {

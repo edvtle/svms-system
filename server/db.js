@@ -9,23 +9,35 @@ const requiredVars = [
   "MYSQLDATABASE",
 ];
 
-const REQUIRED_ACCOUNTS = [
-  {
-    email: "jennypatanag@gmail.com",
-    username: "jen25",
-    password: "admin123",
-    role: "admin",
-  },
-  {
-    email: "hermoso_lyrika@plpasig.edu.ph",
-    username: "leeRiKang",
-    password: "student123",
-    role: "student",
-  },
-];
+function getSeedUserFromEnv(prefix, role) {
+  const email = process.env[`${prefix}_EMAIL`];
+  const username = process.env[`${prefix}_USERNAME`];
+  const password = process.env[`${prefix}_PASSWORD`];
 
-const ALLOWED_USERNAMES = REQUIRED_ACCOUNTS.map((account) => account.username);
-const ALLOWED_EMAILS = REQUIRED_ACCOUNTS.map((account) => account.email);
+  if (!email && !username && !password) {
+    return null;
+  }
+
+  if (!email || !username || !password) {
+    throw new Error(
+      `Incomplete seed variables for ${prefix}. Required: ${prefix}_EMAIL, ${prefix}_USERNAME, ${prefix}_PASSWORD`,
+    );
+  }
+
+  return {
+    email,
+    username,
+    password,
+    role,
+  };
+}
+
+export function getSeedAccountsFromEnv() {
+  const admin = getSeedUserFromEnv("AUTH_ADMIN", "admin");
+  const student = getSeedUserFromEnv("AUTH_STUDENT", "student");
+
+  return [admin, student].filter(Boolean);
+}
 
 export function hasDbConfig() {
   return requiredVars.every((key) => Boolean(process.env[key]));
@@ -70,7 +82,9 @@ export async function closeDbPool() {
   }
 }
 
-export async function syncAuthDatabase() {
+export async function syncAuthDatabase(options = {}) {
+  const { seedAccounts = [] } = options;
+
   if (!hasDbConfig()) {
     throw new Error(
       `Missing required environment variables: ${getMissingDbVars().join(", ")}`,
@@ -92,21 +106,16 @@ export async function syncAuthDatabase() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  // Remove any accounts that are not one of the two required seeded users.
+  // Remove old dummy users from legacy prototype login.
   await dbPool.query(
     `
     DELETE FROM users
-    WHERE username NOT IN (?, ?) OR email NOT IN (?, ?)
+    WHERE username IN (?, ?) OR email IN (?, ?)
     `,
-    [
-      ALLOWED_USERNAMES[0],
-      ALLOWED_USERNAMES[1],
-      ALLOWED_EMAILS[0],
-      ALLOWED_EMAILS[1],
-    ],
+    ["admin", "student", "admin@example.com", "student@example.com"],
   );
 
-  for (const account of REQUIRED_ACCOUNTS) {
+  for (const account of seedAccounts) {
     const passwordHash = await bcrypt.hash(account.password, 12);
 
     await dbPool.query(
@@ -124,7 +133,7 @@ export async function syncAuthDatabase() {
 
   return {
     synced: true,
-    accounts: REQUIRED_ACCOUNTS.map(({ email, username, role }) => ({
+    accounts: seedAccounts.map(({ email, username, role }) => ({
       email,
       username,
       role,

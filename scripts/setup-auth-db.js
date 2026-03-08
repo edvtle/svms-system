@@ -1,10 +1,23 @@
 import "dotenv/config";
-import { closeDbPool, syncAuthDatabase } from "../server/db.js";
+import {
+  closeDbPool,
+  getSeedAccountsFromEnv,
+  syncAuthDatabase,
+} from "../server/db.js";
 
 async function setupAuthDatabase() {
   try {
-    await syncAuthDatabase();
+    const seedAccounts = getSeedAccountsFromEnv();
+    const result = await syncAuthDatabase({ seedAccounts });
+
     console.log("Auth database setup completed successfully.");
+    if (result.accounts.length > 0) {
+      console.log("Seeded accounts:", result.accounts);
+    } else {
+      console.log(
+        "No account seed variables found. Table was created/updated without inserting users.",
+      );
+    }
   } catch (error) {
     console.error("Failed to setup auth database.");
     console.error(error.message);

@@ -11,6 +11,7 @@ import {
 
 const Navbar = () => {
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false)
+  const currentUser = JSON.parse(localStorage.getItem('svms_user') || '{}')
 
   const handleSaveProfile = (formData) => {
     console.log('Profile saved:', formData)
@@ -82,9 +83,9 @@ const Navbar = () => {
         isOpen={isEditProfileOpen}
         onClose={() => setIsEditProfileOpen(false)}
         initialData={{
-          fullName: 'Admin User',
-          idNumber: 'ADM-001',
-          email: 'admin@example.com'
+          fullName: currentUser?.username || 'User',
+          idNumber: '',
+          email: currentUser?.email || ''
         }}
         onSave={handleSaveProfile}
       />

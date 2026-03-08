@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   closeDbPool,
+  getSeedAccountsFromEnv,
   getDbPool,
   getMissingDbVars,
   hasDbConfig,
@@ -146,8 +147,12 @@ let server;
 async function startServer() {
   if (hasDbConfig()) {
     try {
-      await syncAuthDatabase();
+      const seedAccounts = getSeedAccountsFromEnv();
+      await syncAuthDatabase({ seedAccounts });
       console.log("Auth database synchronized.");
+      if (seedAccounts.length === 0) {
+        console.log("No account seed variables detected during startup.");
+      }
     } catch (error) {
       console.error("Failed to synchronize auth database on startup.");
       console.error(error.message);

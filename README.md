@@ -70,7 +70,7 @@ Health endpoints:
 
 ## Auth Database Setup (MySQL)
 
-Create the users table and seed the required admin/student accounts:
+Create/update the `users` table and seed login users from environment variables:
 
 ```bash
 npm run db:setup-auth
@@ -78,10 +78,14 @@ npm run db:setup-auth
 
 The same auth schema/user synchronization also runs automatically when the API server starts.
 
-Seeded accounts:
+Seed account env vars (set these in Railway Variables):
 
-- Admin: `jennypatanag@gmail.com` / `jen25`
-- Student: `hermoso_lyrika@plpasig.edu.ph` / `leeRiKang`
+- `AUTH_ADMIN_EMAIL`
+- `AUTH_ADMIN_USERNAME`
+- `AUTH_ADMIN_PASSWORD`
+- `AUTH_STUDENT_EMAIL`
+- `AUTH_STUDENT_USERNAME`
+- `AUTH_STUDENT_PASSWORD`
 
 Passwords are stored as bcrypt hashes in `users.password_hash`.
 
