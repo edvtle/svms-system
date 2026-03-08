@@ -14,3 +14,33 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+## Railway MySQL Setup
+
+This repository includes a database connectivity check script:
+
+```bash
+npm run db:test
+```
+
+Required environment variables:
+
+- `MYSQLHOST`
+- `MYSQLPORT`
+- `MYSQLUSER`
+- `MYSQLPASSWORD`
+- `MYSQLDATABASE`
+
+Use `.env` for local development and set the same variables in Railway Service Variables for deployment.
+
+Railway deploy behavior:
+
+- `railway.json` config sets Railway build command to `npm run railway:build`.
+- `railway:build` runs `db:test` first, then `vite build`.
+- This ensures each Railway redeploy (including GitHub push-triggered deploys) validates DB connectivity before building the frontend.
+
+Important notes:
+
+- `mysql.railway.internal` is typically only reachable from Railway's private network.
+- If `npm run db:test` fails locally with DNS/network errors, run the same command in a Railway deployment context to verify connectivity there.
+- GitHub pushes trigger Railway redeploys only when the service is connected to the repo/branch and auto-deploy is enabled in Railway settings.
