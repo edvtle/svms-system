@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import Modal, { ModalFooter, ModalDivider } from '../ui/Modal'
 import GlassInput from '../ui/GlassInput'
-import Button from '../ui/button'
+import Button from '../ui/Button'
 
 /**
  * EditProfileModal - Modal for editing user profile
