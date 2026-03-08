@@ -17,6 +17,7 @@ const Navbar = () => {
     const nextUser = {
       ...currentUser,
       username: formData.username,
+      schoolId: formData.schoolId,
       email: formData.email,
       firstName: formData.firstName,
       lastName: formData.lastName,
@@ -122,7 +123,9 @@ const Navbar = () => {
         isOpen={isEditProfileOpen}
         onClose={() => setIsEditProfileOpen(false)}
         initialData={{
+          role: currentUser?.role || '',
           username: currentUser?.username || '',
+          schoolId: currentUser?.schoolId || '',
           firstName: currentUser?.firstName || '',
           lastName: currentUser?.lastName || '',
           email: currentUser?.email || ''
