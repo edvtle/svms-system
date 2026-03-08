@@ -24,28 +24,12 @@ const Login = () => {
 
   const CORRECT_VERIFICATION_CODE = "123456";
 
-  const getApiBaseUrl = () => {
-    if (import.meta.env.VITE_API_BASE_URL) {
-      const configuredBase = import.meta.env.VITE_API_BASE_URL;
-      const isConfiguredLocal = /localhost|127\.0\.0\.1/i.test(configuredBase);
-
-      if (window.location.hostname !== "localhost" && isConfiguredLocal) {
-        return window.location.origin;
-      }
-
-      return configuredBase;
-    }
-
-    return "";
-  };
-
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
 
     try {
-      const apiBaseUrl = getApiBaseUrl();
-      const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
+      const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
