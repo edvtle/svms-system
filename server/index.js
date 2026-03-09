@@ -18,6 +18,7 @@ import {
   syncStudentsFromUsers,
   syncStudentsDatabase,
   syncSystemSettingsDatabase,
+  syncViolationsDatabase,
 } from "./db.js";
 import { encryptImagePath, decryptImagePath } from "./encryption.js";
 
@@ -1567,6 +1568,214 @@ app.delete("/api/settings/logo", async (req, res) => {
   }
 });
 
+// ==================== VIOLATIONS API ====================
+
+// GET all violations
+app.get("/api/violations", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+    const result = await pool.query(`
+      SELECT id, category, degree, name, parent_id, created_at, updated_at
+      FROM violations
+      ORDER BY
+        CASE degree
+          WHEN 'First Degree' THEN 1
+          WHEN 'Second Degree' THEN 2
+          WHEN 'Third Degree' THEN 3
+          WHEN 'Fourth Degree' THEN 4
+          WHEN 'Fifth Degree' THEN 5
+          WHEN 'Sixth Degree' THEN 6
+          WHEN 'Seventh Degree' THEN 7
+          ELSE 99
+        END,
+        category,
+        name
+    `);
+
+    return res.status(200).json({
+      status: "ok",
+      violations: result.rows || [],
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to load violations (${error.message}).`,
+    });
+  }
+});
+
+// POST create new violation
+app.post("/api/violations", async (req, res) => {
+  const { category, degree, name, parentId, children } = req.body ?? {};
+
+  if (!category || !degree || !name) {
+    return res.status(400).json({
+      status: "error",
+      message: "category, degree, and name are required.",
+    });
+  }
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // insert parent violation first
+    const result = await pool.query(
+      `
+      INSERT INTO violations (category, degree, name, parent_id)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, category, degree, name, parent_id, created_at, updated_at
+      `,
+      [category, degree, name, parentId || null]
+    );
+
+    const parent = result.rows[0];
+
+    // if children array provided, insert each as a child of the newly created parent
+    if (Array.isArray(children) && children.length > 0) {
+      for (const childName of children) {
+        await pool.query(
+          `
+          INSERT INTO violations (category, degree, name, parent_id)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (category, degree, name) DO NOTHING
+          `,
+          [category, degree, childName, parent.id]
+        );
+      }
+    }
+
+    return res.status(201).json({
+      status: "ok",
+      violation: parent,
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to create violation (${error.message}).`,
+    });
+  }
+});
+
+// PUT update violation
+app.put("/api/violations/:id", async (req, res) => {
+  const { id } = req.params;
+  const { category, degree, name, parentId, children } = req.body ?? {};
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `
+      UPDATE violations
+      SET category = COALESCE($1, category),
+          degree = COALESCE($2, degree),
+          name = COALESCE($3, name),
+          parent_id = $4,
+          updated_at = NOW()
+      WHERE id = $5
+      RETURNING id, category, degree, name, parent_id, created_at, updated_at
+      `,
+      [category || null, degree || null, name || null, parentId || null, id]
+    );
+
+    // if editing parent and children provided, wipe existing children then insert new list
+    if (Array.isArray(children)) {
+      await pool.query(`DELETE FROM violations WHERE parent_id = $1`, [id]);
+      for (const childName of children) {
+        await pool.query(
+          `
+          INSERT INTO violations (category, degree, name, parent_id)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (category, degree, name) DO NOTHING
+          `,
+          [category || result.rows[0].category, degree || result.rows[0].degree, childName, id]
+        );
+      }
+    }
+
+    if (!result.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Violation not found.",
+      });
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      violation: result.rows[0],
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to update violation (${error.message}).`,
+    });
+  }
+});
+
+// DELETE violation
+app.delete("/api/violations/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // First delete children
+    await pool.query(`DELETE FROM violations WHERE parent_id = $1`, [id]);
+
+    // Then delete the violation
+    const result = await pool.query(
+      `DELETE FROM violations WHERE id = $1 RETURNING id`,
+      [id]
+    );
+
+    if (!result.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Violation not found.",
+      });
+    }
+
+    return res.status(200).json({ status: "ok" });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to delete violation (${error.message}).`,
+    });
+  }
+});
+
 // In production, serve the built frontend from the same Express app.
 app.use("/uploads", express.static(uploadsDir));
 app.use(express.static(distPath));
@@ -1590,6 +1799,7 @@ async function ensureAuthDatabaseReady() {
       await syncStudentsDatabase();
       await syncStudentsFromUsers();
       await syncSystemSettingsDatabase();
+      await syncViolationsDatabase();
     })();
   }
 

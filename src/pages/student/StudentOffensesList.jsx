@@ -1,7 +1,5 @@
-import React, { useState } from 'react'
-import DataTable from '@/components/ui/DataTable'
+import React, { useState, useEffect } from 'react'
 import Button from '@/components/ui/Button'
-import Modal from '@/components/ui/Modal'
 import SearchBar from '@/components/ui/SearchBar'
 import AnimatedContent from '@/components/ui/AnimatedContent'
 import {
@@ -10,126 +8,81 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import { Edit, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 
 const StudentOffensesList = () => {
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-  const [selectedViolation, setSelectedViolation] = useState(null)
   const [categoryFilter, setCategoryFilter] = useState('minor') 
   const [specificDegree, setSpecificDegree] = useState('')
-  const [editFormData, setEditFormData] = useState({
-    id: '',
-    violation: '',
-    degree: '',
-  })
+  const [violationsData, setViolationsData] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [expandedRows, setExpandedRows] = useState(new Set())
   
-  const violationsData = [
+  useEffect(() => {
+    fetchViolations()
+  }, [])
 
-    // First Degree Minor Offenses
-    { id: 1, violation: 'Loitering', degree: 'First' },
-    { id: 2, violation: 'Littering', degree: 'First' },
-    { id: 3, violation: 'Classroom Disturbance', degree: 'First' },
-    { id: 4, violation: 'Eating/Drinking in Academic Facilities', degree: 'First' },
-    { id: 5, violation: 'Improper disposal of waste/littering', degree: 'First' },
-    { id: 6, violation: 'Not wearing a school ID', degree: 'First' },
-    { id: 7, violation: 'Unauthorized use of school property', degree: 'First' },
-    { id: 8, violation: 'Shorts, skirts, or dresses above mid-thigh', degree: 'First' },
-    { id: 9, violation: 'Low-rise, tattered, or ripped jeans', degree: 'First' },
-    { id: 10, violation: 'Lounge wear, Pajamas, Leggings worn as outwear', degree: 'First' },
-    { id: 11, violation: 'Sleeveless tops, tube tops, or low-cut shirts', degree: 'First' },
-    { id: 12, violation: 'Midriff-exposing tops or see-through garments', degree: 'First' },
-    { id: 13, violation: 'Shirts with offensive messages', degree: 'First' },
-    { id: 14, violation: 'Unnaturally bright or extreme hair colors', degree: 'First' },
-    { id: 15, violation: 'Wearing multiple or oversized accessories', degree: 'First' },
-    { id: 16, violation: 'Slippers, flip-flops', degree: 'First' },
-    { id: 17, violation: 'Slip on clogs with open backs', degree: 'First' },
-    { id: 18, violation: 'Open-toe and strappy sandals', degree: 'First' },
-    { id: 19, violation: 'Step-ins or shoes without heel supports', degree: 'First' },
-    { id: 20, violation: 'Sitting on the stairs', degree: 'First' },
-
-    // Second Degree Minor Offenses
-    { id: 21, violation: 'Courting/Coupling', degree: 'Second' },
-    { id: 22, violation: 'PDA (Public Display of Affection)', degree: 'Second' },
-    { id: 23, violation: 'Holding or Touching', degree: 'Second' },
-    { id: 24, violation: 'Rough games / Quarreling / Boisterous behavior', degree: 'Second' },
-    { id: 25, violation: 'Use of Vulgar Expressions', degree: 'Second' },
-    { id: 26, violation: 'Unauthorized use of gadgets within class hours', degree: 'Second' },
-    { id: 27, violation: 'Cutting classes', degree: 'Second' },
-
-    // Third Degree Major Offenses
-    { id: 28, violation: 'Lending or using somebody else\'s ID', degree: 'Third' },
-    { id: 29, violation: 'Insubordination', degree: 'Third' },
-    { id: 30, violation: 'Vandalism', degree: 'Third' },
-    { id: 31, violation: 'Pornographic Materials / Obscenity', degree: 'Third' },
-    { id: 32, violation: 'Disrespect to Authority', degree: 'Third' },
-    { id: 33, violation: 'Unauthorized Use of School Name/Representation', degree: 'Third' },
-    { id: 34, violation: 'Cat calling / name calling', degree: 'Third' },
-
-    // Fourth Degree Major Offenses
-    { id: 35, violation: 'Cheating', degree: 'Fourth' },
-    { id: 36, violation: 'Stealing', degree: 'Fourth' },
-
-    // Fifth Degree Major Offenses
-    { id: 37, violation: 'Possession or Passing of Fireworks', degree: 'Fifth' },
-    { id: 38, violation: 'Bribery', degree: 'Fifth' },
-    { id: 39, violation: 'Theft', degree: 'Fifth' },
-    { id: 40, violation: 'Extortion', degree: 'Fifth' },
-    { id: 41, violation: 'Acts of Violence', degree: 'Fifth' },
-    { id: 42, violation: 'Falsification', degree: 'Fifth' },
-    { id: 43, violation: 'Deceitful acts', degree: 'Fifth' },
-    { id: 44, violation: 'Slander', degree: 'Fifth' },
-    { id: 45, violation: 'Gambling', degree: 'Fifth' },
-    { id: 46, violation: 'Fist fighting / Physical Injury', degree: 'Fifth' },
-    { id: 47, violation: 'Choking', degree: 'Fifth' },
-    { id: 48, violation: 'Threatening and Intimidating others', degree: 'Fifth' },
-    { id: 49, violation: 'Bullying (Written or Action)', degree: 'Fifth' },
-    { id: 50, violation: 'Possession or Passing of Deadly weapons', degree: 'Fifth' },
-    { id: 51, violation: 'Alcohol (Bringing or drinking)', degree: 'Fifth' },
-    { id: 52, violation: 'Coming to school intoxicated', degree: 'Fifth' },
-    { id: 53, violation: 'Smoking or Vaping', degree: 'Fifth' },
-
-    // Sixth Degree Major Offenses
-    { id: 54, violation: 'Any act of dishonesty', degree: 'Sixth' },
-    { id: 55, violation: 'Defamation', degree: 'Sixth' },
-    { id: 56, violation: 'Immoralities', degree: 'Sixth' },
-    { id: 57, violation: 'Sexual Harassment', degree: 'Sixth' },
-    { id: 58, violation: 'Malicious acts', degree: 'Sixth' },
-
-    // Seventh Degree Major Offenses (Most Serious)
-    { id: 59, violation: 'Unrecognized Organizations', degree: 'Seventh' },
-    { id: 60, violation: 'Drug Possession/Distribution', degree: 'Seventh' },
-    { id: 61, violation: 'Acts of Harm', degree: 'Seventh' },
-    { id: 62, violation: 'Explosives', degree: 'Seventh' },
-    { id: 63, violation: 'Unauthorized Strikes', degree: 'Seventh' },
-    { id: 64, violation: 'Dishonor to PLP', degree: 'Seventh' },
-    { id: 65, violation: 'Public Misconduct', degree: 'Seventh' },
-    { id: 66, violation: 'Defamatory/Obscene Content', degree: 'Seventh' },
-    { id: 67, violation: 'Unauthorized Representation', degree: 'Seventh' },
-    { id: 68, violation: 'Unauthorized Media Statements', degree: 'Seventh' },
-    { id: 69, violation: 'Event Disruption', degree: 'Seventh' },
-  ]
-
+  const fetchViolations = async () => {
+    setError('')
+    try {
+      const response = await fetch('/api/violations')
+      const data = await response.json()
+      if (data.status === 'ok') {
+        const degreeOrder = ['First Degree','Second Degree','Third Degree','Fourth Degree','Fifth Degree','Sixth Degree','Seventh Degree'];
+        const sorted = [...data.violations].sort((a, b) => {
+          const da = degreeOrder.indexOf(a.degree);
+          const db = degreeOrder.indexOf(b.degree);
+          if (da !== db) return da - db;
+          if (a.category !== b.category) return a.category.localeCompare(b.category);
+          return a.name.localeCompare(b.name);
+        });
+        setViolationsData(sorted)
+      } else {
+        setError(data.message || 'Unknown error')
+      }
+    } catch (error) {
+      console.error('Error fetching violations:', error)
+      setError(error.message || 'Network error')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const getAvailableDegrees = () => {
     if (categoryFilter === 'minor') {
-      return ['First', 'Second']
+      return ['First Degree', 'Second Degree']
     } else if (categoryFilter === 'major') {
-      return ['Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh']
+      return ['Third Degree', 'Fourth Degree', 'Fifth Degree', 'Sixth Degree', 'Seventh Degree']
     }
-    return ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh']
+    return ['First Degree', 'Second Degree', 'Third Degree', 'Fourth Degree', 'Fifth Degree', 'Sixth Degree', 'Seventh Degree']
   }
 
   const availableDegrees = getAvailableDegrees()
 
-  const filteredData = violationsData.filter(item => {
+  // Group violations by parent
+  const groupedViolations = violationsData.reduce((acc, violation) => {
+    if (!violation.parent_id) {
+      const existing = acc[violation.id] || {};
+      acc[violation.id] = {
+        ...violation,
+        children: existing.children || []
+      }
+    } else {
+      if (!acc[violation.parent_id]) {
+        acc[violation.parent_id] = { children: [] }
+      }
+      acc[violation.parent_id].children.push(violation)
+    }
+    return acc
+  }, {})
 
+  const filteredData = Object.values(groupedViolations).filter(item => {
     let categoryMatch = true
     if (categoryFilter === 'minor') {
-      categoryMatch = ['First', 'Second'].includes(item.degree)
+      categoryMatch = ['First Degree', 'Second Degree'].includes(item.degree)
     } else if (categoryFilter === 'major') {
-      categoryMatch = ['Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh'].includes(item.degree)
+      categoryMatch = ['Third Degree', 'Fourth Degree', 'Fifth Degree', 'Sixth Degree', 'Seventh Degree'].includes(item.degree)
     }
-
 
     let degreeMatch = !specificDegree || item.degree === specificDegree
 
@@ -137,34 +90,72 @@ const StudentOffensesList = () => {
   })
 
   const columns = [
-    { key: 'violation', label: 'Violation', width: 'w-2/3' },
+    { 
+      key: 'name', 
+      label: 'Violation', 
+      width: 'w-2/3',
+      render: (value, row) => (
+        <div className="flex items-center gap-2">
+          {row.children && row.children.length > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleExpanded(row.id)
+              }}
+              className="p-1 hover:bg-gray-200 rounded"
+            >
+              {expandedRows.has(row.id) ? 
+                <ChevronDown className="w-4 h-4" /> : 
+                <ChevronRight className="w-4 h-4" />
+              }
+            </button>
+          )}
+          <span className="text-[14px] text-[#1a1a1a] font-semibold">{value}</span>
+        </div>
+      )
+    },
     { key: 'degree', label: 'Degree', width: 'w-1/3' },
   ]
 
-  const actions = [
-    { 
-      label: 'Edit', 
-      icon: <Edit className="w-4 h-4" />, 
-      onClick: (row) => {
-        setSelectedViolation(row)
-        setEditFormData({
-          id: row.id,
-          violation: row.violation,
-          degree: row.degree,
-        })
-        setIsEditModalOpen(true)
-      }
-    },
-    { 
-      label: 'Delete', 
-      icon: <Trash2 className="w-4 h-4" />, 
-      onClick: (row) => console.log('Delete', row),
-      variant: 'danger'
-    },
-  ]
+  const toggleExpanded = (id) => {
+    const newExpanded = new Set(expandedRows)
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id)
+    } else {
+      newExpanded.add(id)
+    }
+    setExpandedRows(newExpanded)
+  }
+
 
   const handleViolationRowClick = (violation) => {
-    console.log('Violation clicked:', violation)
+    if (violation.children && violation.children.length > 0) {
+      toggleExpanded(violation.id)
+    }
+  }
+
+  // Render expanded children
+  const renderExpandedRow = (parentId, children) => {
+    if (!expandedRows.has(parentId)) return null
+
+    return children.map(child => (
+      <tr key={child.id} className="bg-gray-50">
+        <td className="py-2 px-4 pl-12">
+          <span className="text-[13px] text-[#666] font-medium">• {child.name}</span>
+        </td>
+        <td className="py-2 px-4">
+          <span className="text-[13px] text-[#666]">{child.degree}</span>
+        </td>
+      </tr>
+    ))
+  }
+
+  if (loading) {
+    return <div className="text-white">Loading...</div>
+  }
+
+  if (error) {
+    return <div className="text-white">Error loading violations: {error}</div>
   }
 
   return (
@@ -172,14 +163,14 @@ const StudentOffensesList = () => {
       {/* Header */}
       <AnimatedContent>
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold tracking-wide">OFFENSES</h2>
+          <h2 className="text-xl font-bold tracking-wide">OFFENSES LIST</h2>
         </div>
       </AnimatedContent>
 
       {/* Search and Filters */}
       <AnimatedContent distance={40} delay={0.1}>
         <div className="flex gap-4 mb-6 items-center">
-          <SearchBar placeholder="Search Offense" className="flex-1 max-w-xs" />
+          <SearchBar placeholder="Search Violation" className="flex-1 max-w-xs" />
           
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -234,87 +225,70 @@ const StudentOffensesList = () => {
       <AnimatedContent distance={40} delay={0.3}>
         <div className="bg-[#23262B] rounded-xl p-6">
           <h3 className="text-lg font-bold mb-4">List of Offenses</h3>
-          <DataTable columns={columns} data={filteredData} actions={actions} onRowClick={handleViolationRowClick} />
+          <div className="bg-[#EAECF0] rounded-xl overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-[#FFFFFF]">
+                <tr className="text-gray-900/50 text-[13px]">
+                  {columns.map((column) => (
+                    <th
+                      key={column.key}
+                      className={`py-3 px-4 font-medium ${
+                        column.align === "center"
+                          ? "text-center"
+                          : column.align === "right"
+                            ? "text-right"
+                            : "text-left"
+                      } ${column.width || ""}`}
+                    >
+                      {column.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="text-[#1a1a1a]">
+                {filteredData.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="py-4 px-4 text-center text-gray-500">
+                      No violations found.
+                    </td>
+                  </tr>
+                )}
+                {filteredData.map((row) => (
+                  <React.Fragment key={row.id}>
+                    <tr
+                      className={`border-b border-gray-100 hover:bg-gray-100 transition-colors text-[#1a1a1a] ${row.children && row.children.length > 0 ? "cursor-pointer" : ""}`}
+                      onClick={() => handleViolationRowClick(row)}
+                    >
+                      {columns.map((column) => (
+                        <td
+                          key={column.key}
+                          className={`py-3 px-4 ${
+                            column.align === "center"
+                              ? "text-center"
+                              : column.align === "right"
+                                ? "text-right"
+                                : ""
+                          }`}
+                        >
+                          {column.render ? (
+                            column.render(row[column.key], row)
+                          ) : (
+                            <span className="text-[14px] text-[#1a1a1a] font-semibold">
+                              {row[column.key]}
+                            </span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                    {renderExpandedRow(row.id, row.children)}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </AnimatedContent>
 
-      {/* Edit Violation Modal */}
-      <Modal
-        isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
-        title="Edit Offense"
-        size="md"
-      >
-        <div className="space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-white mb-2">Offense</label>
-            <input
-              type="text"
-              value={editFormData.violation}
-              onChange={(e) => setEditFormData({ ...editFormData, violation: e.target.value })}
-              placeholder="Enter offense details..."
-              className="w-full bg-[#3a3a3a] text-white rounded-lg px-4 py-3 border border-white/10 focus:outline-none focus:ring-1 focus:ring-white/20 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-white mb-2">Degree</label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="secondary" size="sm" className="w-full justify-between bg-[#3a3a3a] hover:bg-[#4a4a4a] h-10">
-                  {editFormData.degree ? editFormData.degree : 'Select Degree'}
-                  <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-full">
-                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'First' })}>
-                  First
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Second' })}>
-                  Second
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Third' })}>
-                  Third
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Fourth' })}>
-                  Fourth
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Fifth' })}>
-                  Fifth
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Sixth' })}>
-                  Sixth
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setEditFormData({ ...editFormData, degree: 'Seventh' })}>
-                  Seventh
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-
-          <div className="flex justify-center gap-3">
-            <Button
-              variant="secondary"
-              onClick={() => setIsEditModalOpen(false)}
-              className="bg-gray-500 text-white hover:bg-gray-600"
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                console.log('Edit offense:', editFormData)
-                setIsEditModalOpen(false)
-              }}
-              className="bg-blue-600 text-white hover:bg-blue-700"
-            >
-              Save Changes
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   )
 }
