@@ -60,14 +60,55 @@ const StudentOffensesList = () => {
     const highlightId = searchParams.get('highlight')
     if (highlightId) {
       setHighlightedViolation(highlightId)
-      // Clear the highlight after 10 seconds or when navigating away
-      const timer = setTimeout(() => {
+
+      // Clear the highlight after 10 seconds (and remove from URL)
+      const clearTimer = setTimeout(() => {
         setHighlightedViolation(null)
         setSearchParams({})
       }, 10000)
-      return () => clearTimeout(timer)
+
+      return () => {
+        clearTimeout(clearTimer)
+      }
     }
+
+    return undefined
   }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (!highlightedViolation) return
+
+    const target = violationsData.find(v => String(v.id) === String(highlightedViolation))
+
+    // If it is a child violation, expand the parent group so it becomes visible
+    if (target && target.parent_id) {
+      setExpandedRows(prev => {
+        const next = new Set(prev)
+        next.add(target.parent_id)
+        return next
+      })
+    }
+
+    // Ensure category filter includes the target violation so it is contained in the current table
+    if (target) {
+      const minorDegrees = ['First Degree', 'Second Degree']
+      setCategoryFilter(minorDegrees.includes(target.degree) ? 'minor' : 'major')
+      setSpecificDegree('')
+    }
+
+    const scrollToItem = () => {
+      const element = document.getElementById(`violation-row-${highlightedViolation}`)
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+
+    // run immediately and fallback after brief delay to ensure DOM is ready
+    scrollToItem()
+    const timeout = setTimeout(scrollToItem, 300)
+
+    return () => clearTimeout(timeout)
+  }, [highlightedViolation, violationsData])
 
   const fetchViolations = async ({ silent = false, isMounted = true } = {}) => {
     if (!silent) {
@@ -212,9 +253,12 @@ const StudentOffensesList = () => {
     if (!expandedRows.has(parentId)) return null
 
     return children.map(child => (
-      <tr key={child.id} className={`bg-gray-50 ${
-        highlightedViolation === child.id ? "bg-blue-50 border-l-4 border-blue-500 font-bold" : ""
-      }`}>
+      <tr
+        id={`violation-row-${child.id}`}
+        key={child.id}
+        className={`bg-gray-50 ${
+          highlightedViolation === child.id ? "bg-yellow-200/80 ring-2 ring-yellow-400 font-bold animate-pulse" : ""
+        }`}>
         <td className="py-2 px-4 pl-12">
           <span className="text-[13px] text-[#666] font-medium">• {child.name}</span>
         </td>
@@ -336,10 +380,11 @@ const StudentOffensesList = () => {
                 {filteredData.map((row) => (
                   <React.Fragment key={row.id}>
                     <tr
-                      className={`border-b border-gray-100 hover:bg-gray-100 transition-colors text-[#1a1a1a] ${
+                      id={`violation-row-${row.id}`}
+                      className={`border-b border-gray-100  transition-colors text-[#1a1a1a] ${
                         row.children && row.children.length > 0 ? "cursor-pointer" : ""
                       } ${
-                        highlightedViolation === row.id ? "bg-blue-50 border-l-4 border-blue-500 font-bold" : ""
+                        highlightedViolation === row.id ? "bg-yellow-200/80 ring-2 ring-yellow-400 font-bold animate-pulse" : "hover:bg-gray-100"
                       }`}
                       onClick={() => handleViolationRowClick(row)}
                     >

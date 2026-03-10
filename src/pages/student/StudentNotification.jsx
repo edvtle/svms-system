@@ -98,12 +98,13 @@ const StudentNotification = () => {
                       }
                     }
                     // Navigate based on metadata
-                    if (note.metadata?.type === 'violation_added' || note.metadata?.type === 'violation_updated') {
-                      navigate(`/student/offenses?highlight=${note.metadata.violationId}`);
-                    } else if (note.metadata?.type === 'violation_deleted') {
-                      // Deleted violation is no longer in list, go to offenses list
+                    if (note.metadata?.violationId) {
+                      const highlightParam = `?highlight=${note.metadata.violationId}`;
+                      navigate(`/student/offenses${highlightParam}`);
+                    } else {
                       navigate('/student/offenses');
                     }
+
                     // Emit event so sidebar/navbar refresh unread state
                     window.dispatchEvent(new Event('notificationRead'));
                   }}
