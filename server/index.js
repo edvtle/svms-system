@@ -1846,8 +1846,10 @@ app.get("/api/violations", async (req, res) => {
           WHEN 'Seventh Degree' THEN 7
           ELSE 99
         END,
-        category,
-        name
+        COALESCE(parent_id, id),
+        parent_id IS NOT NULL,
+        created_at,
+        id
     `);
 
     return res.status(200).json({

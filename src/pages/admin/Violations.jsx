@@ -51,14 +51,17 @@ const Violations = () => {
       const response = await fetch('/api/violations')
       const data = await response.json()
       if (data.status === 'ok') {
-        // ensure client-side ordering in case backend isn't restarted
+        // ensure client-side ordering in case backend isn\'t restarted
         const degreeOrder = ['First Degree','Second Degree','Third Degree','Fourth Degree','Fifth Degree','Sixth Degree','Seventh Degree'];
         const sorted = [...data.violations].sort((a, b) => {
           const da = degreeOrder.indexOf(a.degree);
           const db = degreeOrder.indexOf(b.degree);
           if (da !== db) return da - db;
           if (a.category !== b.category) return a.category.localeCompare(b.category);
-          return a.name.localeCompare(b.name);
+          const timeA = new Date(a.created_at).getTime();
+          const timeB = new Date(b.created_at).getTime();
+          if (timeA !== timeB) return timeA - timeB;
+          return a.id - b.id;
         });
         setViolationsData(sorted)
       }
@@ -91,25 +94,23 @@ const Violations = () => {
     return ['First Degree', 'Second Degree', 'Third Degree', 'Fourth Degree', 'Fifth Degree', 'Sixth Degree', 'Seventh Degree'];
   }
 
-  // Group violations by parent
-  const groupedViolations = violationsData.reduce((acc, violation) => {
-    if (!violation.parent_id) {
-      // preserve any children that were added before parent in the list
-      const existing = acc[violation.id] || {};
-      acc[violation.id] = {
-        ...violation,
-        children: existing.children || []
-      }
-    } else {
-      if (!acc[violation.parent_id]) {
-        acc[violation.parent_id] = { children: [] }
-      }
-      acc[violation.parent_id].children.push(violation)
+  // Group violations by parent (keep the top-level order from sorted violationsData)
+  const parentChildrenMap = violationsData.reduce((acc, violation) => {
+    if (violation.parent_id) {
+      if (!acc[violation.parent_id]) acc[violation.parent_id] = []
+      acc[violation.parent_id].push(violation)
     }
     return acc
   }, {})
 
-  const filteredData = Object.values(groupedViolations).filter(item => {
+  const groupedViolations = violationsData
+    .filter((violation) => !violation.parent_id)
+    .map((violation) => ({
+      ...violation,
+      children: (parentChildrenMap[violation.id] || []).sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+
+  const filteredData = groupedViolations.filter(item => {
     let categoryMatch = true
     if (categoryFilter === 'minor') {
       categoryMatch = ['First Degree', 'Second Degree'].includes(item.degree)
