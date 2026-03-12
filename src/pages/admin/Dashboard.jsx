@@ -50,128 +50,8 @@ const Dashboard = () => {
   });
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
 
-  const rankingData = [
-    {
-      rank: "01",
-      name: "Jenny Hernandez",
-      violations: 6,
-      color: "bg-cyan-500",
-      id: "23-0001",
-      program: "BSIT",
-      year: "1",
-      section: "A",
-    },
-    {
-      rank: "02",
-      name: "Edrianne Lumabas",
-      violations: 4,
-      color: "bg-cyan-500",
-      id: "23-0002",
-      program: "BSIT",
-      year: "2",
-      section: "A",
-    },
-    {
-      rank: "03",
-      name: "Jessa Marie Balnig",
-      violations: 3,
-      color: "bg-cyan-500",
-      id: "23-0003",
-      program: "BSCS",
-      year: "3",
-      section: "A",
-    },
-    {
-      rank: "04",
-      name: "Raiza Roces",
-      violations: 2,
-      color: "bg-cyan-500",
-      id: "23-0004",
-      program: "BSCS",
-      year: "4",
-      section: "A",
-    },
-    {
-      rank: "05",
-      name: "Lyrika Hermozo",
-      violations: 5,
-      color: "bg-cyan-500",
-      id: "23-0005",
-      program: "BSIT",
-      year: "1",
-      section: "B",
-    },
-    {
-      rank: "06",
-      name: "Mark Anthony Reyes",
-      violations: 4,
-      color: "bg-cyan-500",
-      id: "23-0006",
-      program: "BSCS",
-      year: "2",
-      section: "B",
-    },
-    {
-      rank: "07",
-      name: "Samantha Cruz",
-      violations: 3,
-      color: "bg-cyan-500",
-      id: "23-0007",
-      program: "BSIT",
-      year: "3",
-      section: "C",
-    },
-    {
-      rank: "08",
-      name: "Carlos Mendoza",
-      violations: 2,
-      color: "bg-cyan-500",
-      id: "23-0008",
-      program: "BSCS",
-      year: "4",
-      section: "C",
-    },
-    {
-      rank: "09",
-      name: "Angelica Santos",
-      violations: 4,
-      color: "bg-cyan-500",
-      id: "23-0009",
-      program: "BSIT",
-      year: "1",
-      section: "D",
-    },
-    {
-      rank: "10",
-      name: "Ramon Garcia",
-      violations: 3,
-      color: "bg-cyan-500",
-      id: "23-0010",
-      program: "BSCS",
-      year: "2",
-      section: "D",
-    },
-    {
-      rank: "11",
-      name: "Patricia Lopez",
-      violations: 2,
-      color: "bg-cyan-500",
-      id: "23-0011",
-      program: "BSIT",
-      year: "3",
-      section: "E",
-    },
-    {
-      rank: "12",
-      name: "Jose Martinez",
-      violations: 1,
-      color: "bg-cyan-500",
-      id: "23-0012",
-      program: "BSCS",
-      year: "4",
-      section: "E",
-    },
-  ];
+  const [rankingData, setRankingData] = useState([]);
+  const [isLoadingRanking, setIsLoadingRanking] = useState(true);
 
   const filteredRankingData = rankingData.filter((student) => {
     const matchesSearch = student.name
@@ -189,40 +69,49 @@ const Dashboard = () => {
   useEffect(() => {
     let isMounted = true;
 
+    const degreeRank = {
+      "First Degree": 1,
+      "Second Degree": 2,
+      "Third Degree": 3,
+      "Fourth Degree": 4,
+      "Fifth Degree": 5,
+      "Sixth Degree": 6,
+      "Seventh Degree": 7,
+    };
+
     const fetchViolationMetrics = async () => {
       setIsLoadingMetrics(true);
 
       try {
-        const response = await fetch("/api/students");
+        const response = await fetch("/api/student-violations");
         const result = await response.json().catch(() => ({}));
 
-        if (!response.ok || !Array.isArray(result?.students)) {
+        if (!response.ok || !Array.isArray(result?.records)) {
           throw new Error("Failed to load violation metrics.");
         }
 
-        const students = result.students;
-        const activeViolations = students.reduce(
-          (sum, student) => sum + (Number(student.violation_count) || 0),
-          0,
-        );
+        const activeRecords = result.records.filter((rec) => !rec.cleared_at);
 
-        const atRiskStudents = students.filter(
-          (student) => {
-            const count = Number(student.violation_count) || 0;
-            return count >= 3 && count < 5;
-          },
+        const studentMaxDegree = activeRecords.reduce((acc, rec) => {
+          const studentId = Number(rec.student_id);
+          if (!studentId) return acc;
+
+          const rank = degreeRank[String(rec.violation_degree)] || 0;
+          acc[studentId] = Math.max(acc[studentId] || 0, rank);
+          return acc;
+        }, {});
+
+        const atRiskStudents = Object.values(studentMaxDegree).filter(
+          (rank) => rank >= 3 && rank < 5,
         ).length;
 
-        const highRiskStudents = students.filter(
-          (student) => {
-            const count = Number(student.violation_count) || 0;
-            return count >= 5;
-          },
+        const highRiskStudents = Object.values(studentMaxDegree).filter(
+          (rank) => rank >= 5,
         ).length;
 
         if (isMounted) {
           setViolationMetrics({
-            activeViolations,
+            activeViolations: activeRecords.length,
             atRiskStudents,
             highRiskStudents,
           });
@@ -243,6 +132,114 @@ const Dashboard = () => {
     };
 
     fetchViolationMetrics();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const degreeRank = {
+      "First Degree": 1,
+      "Second Degree": 2,
+      "Third Degree": 3,
+      "Fourth Degree": 4,
+      "Fifth Degree": 5,
+      "Sixth Degree": 6,
+      "Seventh Degree": 7,
+    };
+
+    const getRiskColor = (rank) => {
+      if (rank >= 5) return "bg-red-500";
+      if (rank >= 3) return "bg-orange-500";
+      if (rank === 2) return "bg-yellow-500";
+      return "bg-cyan-500";
+    };
+
+    const fetchRankingData = async () => {
+      setIsLoadingRanking(true);
+
+      try {
+        const [studentsRes, violationsRes] = await Promise.all([
+          fetch("/api/students"),
+          fetch("/api/student-violations"),
+        ]);
+
+        const studentsResult = await studentsRes.json().catch(() => ({}));
+        const violationsResult = await violationsRes.json().catch(() => ({}));
+
+        if (!studentsRes.ok || !Array.isArray(studentsResult?.students)) {
+          throw new Error("Failed to load students for ranking.");
+        }
+        if (!violationsRes.ok || !Array.isArray(violationsResult?.records)) {
+          throw new Error("Failed to load violation logs for ranking.");
+        }
+
+        const studentById = new Map(
+          studentsResult.students.map((student) => [Number(student.id), student]),
+        );
+
+        const activeViolations = violationsResult.records.filter(
+          (rec) => !rec.cleared_at,
+        );
+
+        const stats = activeViolations.reduce((acc, rec) => {
+          const studentId = Number(rec.student_id);
+          if (!studentId || !studentById.has(studentId)) return acc;
+
+          if (!acc[studentId]) {
+            acc[studentId] = {
+              count: 0,
+              maxDegreeRank: 0,
+            };
+          }
+
+          acc[studentId].count += 1;
+          const rank = degreeRank[String(rec.violation_degree)] || 0;
+          if (rank > acc[studentId].maxDegreeRank) {
+            acc[studentId].maxDegreeRank = rank;
+          }
+          return acc;
+        }, {});
+
+        const newRankingData = Object.entries(stats)
+          .map(([studentId, data]) => {
+            const student = studentById.get(Number(studentId));
+            return {
+              rank: "", // assigned later
+              name: student?.full_name || student?.username || "Unknown",
+              violations: data.count,
+              color: getRiskColor(data.maxDegreeRank),
+              id: student?.school_id || "",
+              program: student?.program || "",
+              year: student?.year_section?.split(" ")[0] || "",
+              section: student?.year_section?.split(" ")[1] || "",
+              maxDegreeRank: data.maxDegreeRank,
+            };
+          })
+          .sort((a, b) => b.violations - a.violations || b.maxDegreeRank - a.maxDegreeRank)
+          .map((item, index) => ({
+            ...item,
+            rank: String(index + 1).padStart(2, "0"),
+          }));
+
+        if (isMounted) {
+          setRankingData(newRankingData);
+        }
+      } catch (_error) {
+        if (isMounted) {
+          setRankingData([]);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingRanking(false);
+        }
+      }
+    };
+
+    fetchRankingData();
 
     return () => {
       isMounted = false;
