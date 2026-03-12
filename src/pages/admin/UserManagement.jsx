@@ -282,9 +282,9 @@ const UserManagement = () => {
       key: "violationCount",
       label: "Violation Count",
       render: (value) => {
-        let bgColor = "bg-green-500";
-        if (value >= 5) bgColor = "bg-red-500";
-        else if (value >= 2) bgColor = "bg-yellow-500";
+        let bgColor = "bg-green-700";
+        if (value >= 5) bgColor = "bg-red-700";
+        else if (value >= 2) bgColor = "bg-yellow-700";
         return (
           <span
             className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-white text-sm font-medium ${bgColor}`}
