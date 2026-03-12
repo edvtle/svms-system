@@ -10,6 +10,17 @@ const StudentNotification = () => {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
+  const parseNotificationMetadata = (rawMetadata) => {
+    if (!rawMetadata) return null;
+    if (typeof rawMetadata === 'object') return rawMetadata;
+
+    try {
+      return JSON.parse(rawMetadata);
+    } catch (_error) {
+      return null;
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -23,9 +34,9 @@ const StudentNotification = () => {
         const data = await resp.json().catch(() => ({}));
         if (resp.ok) {
           if (isMounted) {
-            const notifications = (data.notifications || []).map(note => ({
+            const notifications = (data.notifications || []).map((note) => ({
               ...note,
-              metadata: note.metadata ? JSON.parse(note.metadata) : null
+              metadata: parseNotificationMetadata(note.metadata),
             }));
             setNotifications(notifications);
           }
@@ -42,8 +53,11 @@ const StudentNotification = () => {
 
     loadNotifications();
 
+    const intervalId = setInterval(loadNotifications, 15000);
+
     return () => {
       isMounted = false;
+      clearInterval(intervalId);
     };
   }, []);
 
@@ -63,6 +77,7 @@ const StudentNotification = () => {
                     headers: { ...getAuditHeaders() },
                   });
                   setNotifications(prev => prev.map(n => ({ ...n, read_at: new Date().toISOString() })));
+                  window.dispatchEvent(new Event('notificationsRead'));
                 } catch (err) {
                   console.error('Failed to mark all read', err);
                 }
@@ -98,7 +113,15 @@ const StudentNotification = () => {
                       }
                     }
                     // Navigate based on metadata
-                    if (note.metadata?.violationId) {
+                    const metadataType = String(note.metadata?.type || '');
+
+                    if (metadataType.startsWith('student_violation_')) {
+                      if (note.metadata?.violationLogId) {
+                        navigate(`/student/violations?highlight=${note.metadata.violationLogId}`);
+                      } else {
+                        navigate('/student/violations');
+                      }
+                    } else if (note.metadata?.violationId) {
                       const highlightParam = `?highlight=${note.metadata.violationId}`;
                       navigate(`/student/offenses${highlightParam}`);
                     } else {

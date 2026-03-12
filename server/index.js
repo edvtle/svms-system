@@ -21,6 +21,7 @@ import {
   syncAuditLogsDatabase,
   syncViolationsDatabase,
   syncNotificationsDatabase,
+  syncStudentViolationLogsDatabase,
 } from "./db.js";
 import { encryptImagePath, decryptImagePath } from "./encryption.js";
 
@@ -1332,6 +1333,14 @@ app.put("/api/students/:id", async (req, res) => {
 
     const cleanedFirst = String(firstName || "").trim();
     const cleanedLast = String(lastName || "").trim();
+    const normalizedUsername = String(username || "").trim();
+    const normalizedSchoolId = String(schoolId || "").trim();
+    const normalizedEmail = String(email || "")
+      .trim()
+      .toLowerCase();
+    const normalizedProgram = String(program || "").trim();
+    const normalizedYearSection = String(yearSection || "").trim();
+    const normalizedStatus = String(status || "").trim();
     const fullName = `${cleanedFirst} ${cleanedLast}`.trim();
 
     if (username != null) {
@@ -1348,7 +1357,7 @@ app.put("/api/students/:id", async (req, res) => {
           SET username = COALESCE(NULLIF($1, ''), username)
           WHERE id = $2 AND role = 'student'
           `,
-          [username || null, userId],
+          [normalizedUsername || null, userId],
         );
       }
     }
@@ -1370,14 +1379,14 @@ app.put("/api/students/:id", async (req, res) => {
       RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, status, violation_count
       `,
       [
-        email || null,
-        schoolId || null,
+        normalizedEmail || null,
+        normalizedSchoolId || null,
         cleanedFirst || null,
         cleanedLast || null,
         fullName || null,
-        program || null,
-        yearSection || null,
-        status || null,
+        normalizedProgram || null,
+        normalizedYearSection || null,
+        normalizedStatus || null,
         violationCount ?? null,
         id,
       ],
@@ -1463,6 +1472,630 @@ app.delete("/api/students/:id", async (req, res) => {
     return res.status(503).json({
       status: "error",
       message: `Unable to delete student (${error.message}).`,
+    });
+  }
+});
+
+async function refreshStudentViolationCount(pool, studentId) {
+  await pool.query(
+    `
+    UPDATE "Students"
+    SET violation_count = (
+      SELECT COUNT(*)::int
+      FROM student_violation_logs svl
+      WHERE svl.student_id = $1 AND svl.cleared_at IS NULL
+    )
+    WHERE id = $1
+    `,
+    [studentId],
+  );
+}
+
+// ==================== STUDENT VIOLATION LOGS API ====================
+
+app.get("/api/student-violations", async (_req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `
+      SELECT
+        svl.id,
+        svl.student_id,
+        svl.violation_catalog_id,
+        svl.violation_label,
+        svl.reported_by,
+        svl.remarks,
+        svl.signature_image,
+        svl.signature_updated_at,
+        svl.cleared_at,
+        svl.cleared_by_user_id,
+        svl.cleared_by_name,
+        svl.created_at,
+        svl.updated_at,
+        s.school_id,
+        s.full_name,
+        s.year_section,
+        v.category AS violation_category,
+        v.degree AS violation_degree,
+        v.name AS violation_name
+      FROM student_violation_logs svl
+      INNER JOIN "Students" s ON s.id = svl.student_id
+      LEFT JOIN violations v ON v.id = svl.violation_catalog_id
+      ORDER BY svl.created_at DESC, svl.id DESC
+      `,
+    );
+
+    return res.status(200).json({
+      status: "ok",
+      records: result.rows || [],
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to load student violations (${error.message}).`,
+    });
+  }
+});
+
+app.get("/api/student-violations/me", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+    const userId = getCurrentUserId(req);
+
+    if (!userId) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "User not identified." });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT
+        svl.id,
+        svl.student_id,
+        svl.violation_catalog_id,
+        svl.violation_label,
+        svl.reported_by,
+        svl.remarks,
+        svl.signature_image,
+        svl.signature_updated_at,
+        svl.cleared_at,
+        svl.cleared_by_user_id,
+        svl.cleared_by_name,
+        svl.created_at,
+        svl.updated_at,
+        s.school_id,
+        s.full_name,
+        s.year_section,
+        v.category AS violation_category,
+        v.degree AS violation_degree,
+        v.name AS violation_name
+      FROM student_violation_logs svl
+      INNER JOIN "Students" s ON s.id = svl.student_id
+      LEFT JOIN violations v ON v.id = svl.violation_catalog_id
+      WHERE s.user_id = $1
+      ORDER BY svl.created_at DESC, svl.id DESC
+      `,
+      [userId],
+    );
+
+    return res.status(200).json({
+      status: "ok",
+      records: result.rows || [],
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to load your student violations (${error.message}).`,
+    });
+  }
+});
+
+app.post("/api/student-violations", async (req, res) => {
+  const {
+    studentId,
+    violationCatalogId,
+    violationLabel,
+    reportedBy,
+    remarks,
+    signatureImage,
+  } = req.body ?? {};
+
+  const parsedStudentId = Number(studentId);
+  const parsedCatalogId =
+    violationCatalogId == null || violationCatalogId === ""
+      ? null
+      : Number(violationCatalogId);
+
+  if (!Number.isFinite(parsedStudentId)) {
+    return res.status(400).json({
+      status: "error",
+      message: "studentId is required.",
+    });
+  }
+
+  if (!violationLabel || !String(violationLabel).trim()) {
+    return res.status(400).json({
+      status: "error",
+      message: "violationLabel is required.",
+    });
+  }
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const studentLookup = await pool.query(
+      `SELECT id, user_id FROM "Students" WHERE id = $1 LIMIT 1`,
+      [parsedStudentId],
+    );
+
+    if (!studentLookup.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Student not found.",
+      });
+    }
+
+    const insertResult = await pool.query(
+      `
+      INSERT INTO student_violation_logs
+        (student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image, signature_updated_at)
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6::text,
+        CASE WHEN $6::text IS NULL OR $6::text = '' THEN NULL ELSE NOW() END
+      )
+      RETURNING id, student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image,
+                signature_updated_at, cleared_at, cleared_by_user_id, cleared_by_name, created_at, updated_at
+      `,
+      [
+        parsedStudentId,
+        Number.isFinite(parsedCatalogId) ? parsedCatalogId : null,
+        String(violationLabel).trim(),
+        String(reportedBy || "").trim() || null,
+        String(remarks || "").trim() || null,
+        String(signatureImage || "").trim() || null,
+      ],
+    );
+
+    await refreshStudentViolationCount(pool, parsedStudentId);
+
+    const created = insertResult.rows?.[0] || null;
+
+    try {
+      await createStudentNotificationForViolation(pool, parsedStudentId, {
+        title: "New violation logged",
+        description: `A new violation was logged for you: ${created?.violation_label || String(violationLabel).trim()}.`,
+        metadata: {
+          type: "student_violation_created",
+          violationLogId: created?.id || null,
+          studentId: parsedStudentId,
+        },
+      });
+    } catch (notifErr) {
+      console.warn("Failed to create student violation notification", notifErr);
+    }
+
+    await logAuditEvent(req, {
+      action: "CREATE_STUDENT_VIOLATION_LOG",
+      targetType: "student_violation",
+      targetId: created?.id,
+      details: `Logged violation for student #${parsedStudentId}.`,
+      metadata: {
+        studentId: parsedStudentId,
+        violationCatalogId: Number.isFinite(parsedCatalogId)
+          ? parsedCatalogId
+          : null,
+      },
+    });
+
+    return res.status(201).json({
+      status: "ok",
+      record: created,
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to create student violation log (${error.message}).`,
+    });
+  }
+});
+
+app.put("/api/student-violations/:id", async (req, res) => {
+  const { id } = req.params;
+  const {
+    reportedBy,
+    remarks,
+    violationCatalogId,
+    violationLabel,
+    dateLogged,
+  } = req.body ?? {};
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const parsedCatalogId =
+      violationCatalogId == null || violationCatalogId === ""
+        ? null
+        : Number(violationCatalogId);
+
+    // Parse dateLogged and create a new Date at midnight to preserve time zone
+    let createdAtValue = null;
+    if (dateLogged) {
+      const parsed = new Date(dateLogged);
+      if (!Number.isNaN(parsed.getTime())) {
+        createdAtValue = parsed.toISOString();
+      }
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE student_violation_logs
+      SET
+        reported_by = COALESCE(NULLIF($1, ''), reported_by),
+        remarks = COALESCE($2, remarks),
+        violation_catalog_id = COALESCE($3, violation_catalog_id),
+        violation_label = COALESCE(NULLIF($4, ''), violation_label),
+        created_at = COALESCE($5, created_at)
+      WHERE id = $6
+      RETURNING id, student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image,
+                signature_updated_at, cleared_at, cleared_by_user_id, cleared_by_name, created_at, updated_at
+      `,
+      [
+        reportedBy == null ? "" : String(reportedBy).trim(),
+        remarks == null ? null : String(remarks),
+        Number.isFinite(parsedCatalogId) ? parsedCatalogId : null,
+        violationLabel == null ? "" : String(violationLabel).trim(),
+        createdAtValue,
+        id,
+      ],
+    );
+
+    const updated = result.rows?.[0] || null;
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Record not found." });
+    }
+
+    try {
+      await createStudentNotificationForViolation(pool, updated.student_id, {
+        title: "Violation record updated",
+        description: `Your violation record was updated: ${updated.violation_label || "Violation"}.`,
+        metadata: {
+          type: "student_violation_updated",
+          violationLogId: updated.id,
+          studentId: updated.student_id,
+        },
+      });
+    } catch (notifErr) {
+      console.warn(
+        "Failed to create student violation update notification",
+        notifErr,
+      );
+    }
+
+    await logAuditEvent(req, {
+      action: "UPDATE_STUDENT_VIOLATION_LOG",
+      targetType: "student_violation",
+      targetId: updated.id,
+      details: `Updated student violation log #${updated.id}.`,
+    });
+
+    return res.status(200).json({ status: "ok", record: updated });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to update student violation log (${error.message}).`,
+    });
+  }
+});
+
+app.put("/api/student-violations/:id/signature", async (req, res) => {
+  const { id } = req.params;
+  const { signatureImage } = req.body ?? {};
+
+  if (!signatureImage || !String(signatureImage).trim()) {
+    return res.status(400).json({
+      status: "error",
+      message: "signatureImage is required.",
+    });
+  }
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `
+      UPDATE student_violation_logs
+      SET signature_image = $1,
+          signature_updated_at = NOW()
+      WHERE id = $2
+      RETURNING id, student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image,
+                signature_updated_at, cleared_at, cleared_by_user_id, cleared_by_name, created_at, updated_at
+      `,
+      [String(signatureImage).trim(), id],
+    );
+
+    const updated = result.rows?.[0] || null;
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Record not found." });
+    }
+
+    try {
+      await createStudentNotificationForViolation(pool, updated.student_id, {
+        title: "Violation signature updated",
+        description: `A signature was attached/updated for: ${updated.violation_label || "Violation"}.`,
+        metadata: {
+          type: "student_violation_signature_updated",
+          violationLogId: updated.id,
+          studentId: updated.student_id,
+        },
+      });
+    } catch (notifErr) {
+      console.warn("Failed to create student signature notification", notifErr);
+    }
+
+    await logAuditEvent(req, {
+      action: "ATTACH_STUDENT_VIOLATION_SIGNATURE",
+      targetType: "student_violation",
+      targetId: updated.id,
+      details: `Attached signature for student violation log #${updated.id}.`,
+    });
+
+    return res.status(200).json({ status: "ok", record: updated });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to save signature (${error.message}).`,
+    });
+  }
+});
+
+app.put("/api/student-violations/:id/clear", async (req, res) => {
+  const { id } = req.params;
+  const { actorUserId, actorName } = getAuditActor(req);
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `
+      UPDATE student_violation_logs
+      SET cleared_at = NOW(),
+          cleared_by_user_id = $1,
+          cleared_by_name = $2
+      WHERE id = $3
+      RETURNING id, student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image,
+                signature_updated_at, cleared_at, cleared_by_user_id, cleared_by_name, created_at, updated_at
+      `,
+      [actorUserId, actorName, id],
+    );
+
+    const updated = result.rows?.[0] || null;
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Record not found." });
+    }
+
+    try {
+      await createStudentNotificationForViolation(pool, updated.student_id, {
+        title: "Violation marked as cleared",
+        description: `A violation was marked cleared: ${updated.violation_label || "Violation"}.`,
+        metadata: {
+          type: "student_violation_cleared",
+          violationLogId: updated.id,
+          studentId: updated.student_id,
+        },
+      });
+    } catch (notifErr) {
+      console.warn("Failed to create cleared violation notification", notifErr);
+    }
+
+    await refreshStudentViolationCount(pool, updated.student_id);
+
+    await logAuditEvent(req, {
+      action: "CLEAR_STUDENT_VIOLATION_LOG",
+      targetType: "student_violation",
+      targetId: updated.id,
+      details: `Cleared student violation log #${updated.id}.`,
+      metadata: {
+        clearedAt: updated.cleared_at,
+      },
+    });
+
+    return res.status(200).json({ status: "ok", record: updated });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to clear record (${error.message}).`,
+    });
+  }
+});
+
+app.put("/api/student-violations/:id/unclear", async (req, res) => {
+  const { id } = req.params;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `
+      UPDATE student_violation_logs
+      SET cleared_at = NULL,
+          cleared_by_user_id = NULL,
+          cleared_by_name = NULL
+      WHERE id = $1
+      RETURNING id, student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image,
+                signature_updated_at, cleared_at, cleared_by_user_id, cleared_by_name, created_at, updated_at
+      `,
+      [id],
+    );
+
+    const updated = result.rows?.[0] || null;
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Record not found." });
+    }
+
+    try {
+      await createStudentNotificationForViolation(pool, updated.student_id, {
+        title: "Violation reopened",
+        description: `A violation was reopened: ${updated.violation_label || "Violation"}.`,
+        metadata: {
+          type: "student_violation_uncleared",
+          violationLogId: updated.id,
+          studentId: updated.student_id,
+        },
+      });
+    } catch (notifErr) {
+      console.warn(
+        "Failed to create reopened violation notification",
+        notifErr,
+      );
+    }
+
+    await refreshStudentViolationCount(pool, updated.student_id);
+
+    await logAuditEvent(req, {
+      action: "UNCLEAR_STUDENT_VIOLATION_LOG",
+      targetType: "student_violation",
+      targetId: updated.id,
+      details: `Reopened student violation log #${updated.id}.`,
+    });
+
+    return res.status(200).json({ status: "ok", record: updated });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to unclear record (${error.message}).`,
+    });
+  }
+});
+
+app.delete("/api/student-violations/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `
+      DELETE FROM student_violation_logs
+      WHERE id = $1
+      RETURNING id, student_id, violation_label
+      `,
+      [id],
+    );
+
+    const deleted = result.rows?.[0] || null;
+    if (!deleted) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Record not found." });
+    }
+
+    try {
+      await createStudentNotificationForViolation(pool, deleted.student_id, {
+        title: "Violation record removed",
+        description: `A violation record was removed: ${deleted.violation_label || "Violation"}.`,
+        metadata: {
+          type: "student_violation_deleted",
+          violationLogId: deleted.id,
+          studentId: deleted.student_id,
+        },
+      });
+    } catch (notifErr) {
+      console.warn("Failed to create violation delete notification", notifErr);
+    }
+
+    await refreshStudentViolationCount(pool, deleted.student_id);
+
+    await logAuditEvent(req, {
+      action: "DELETE_STUDENT_VIOLATION_LOG",
+      targetType: "student_violation",
+      targetId: deleted.id,
+      details: `Deleted student violation log #${deleted.id}.`,
+    });
+
+    return res.status(200).json({ status: "ok" });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to delete record (${error.message}).`,
     });
   }
 });
@@ -1935,10 +2568,14 @@ app.post("/api/violations", async (req, res) => {
         FROM users u
         WHERE u.role = 'student'
         `,
-        [notifTitle, notifDesc, JSON.stringify({ type: 'violation_added', violationId: parent.id })],
+        [
+          notifTitle,
+          notifDesc,
+          JSON.stringify({ type: "violation_added", violationId: parent.id }),
+        ],
       );
     } catch (notifErr) {
-      console.warn('Failed to insert violation notifications', notifErr);
+      console.warn("Failed to insert violation notifications", notifErr);
     }
 
     return res.status(201).json({
@@ -2033,10 +2670,17 @@ app.put("/api/violations/:id", async (req, res) => {
         FROM users u
         WHERE u.role = 'student'
         `,
-        [notifTitle, notifDesc, JSON.stringify({ type: 'violation_updated', violationId: result.rows[0].id })],
+        [
+          notifTitle,
+          notifDesc,
+          JSON.stringify({
+            type: "violation_updated",
+            violationId: result.rows[0].id,
+          }),
+        ],
       );
     } catch (notifErr) {
-      console.warn('Failed to insert violation update notifications', notifErr);
+      console.warn("Failed to insert violation update notifications", notifErr);
     }
 
     return res.status(200).json({
@@ -2115,10 +2759,18 @@ app.delete("/api/violations/:id", async (req, res) => {
         FROM users u
         WHERE u.role = 'student'
         `,
-        [notifTitle, notifDesc, JSON.stringify({ type: 'violation_deleted', violationId: id, violationName: violation.name })],
+        [
+          notifTitle,
+          notifDesc,
+          JSON.stringify({
+            type: "violation_deleted",
+            violationId: id,
+            violationName: violation.name,
+          }),
+        ],
       );
     } catch (notifErr) {
-      console.warn('Failed to insert violation delete notifications', notifErr);
+      console.warn("Failed to insert violation delete notifications", notifErr);
     }
 
     return res.status(200).json({ status: "ok" });
@@ -2140,6 +2792,40 @@ function getCurrentUserId(req) {
   return actorUserId || null;
 }
 
+async function createStudentNotificationForViolation(
+  pool,
+  studentId,
+  { title, description, metadata = null },
+) {
+  const parsedStudentId = Number(studentId);
+  if (!Number.isFinite(parsedStudentId)) {
+    return;
+  }
+
+  const studentLookup = await pool.query(
+    `SELECT user_id FROM "Students" WHERE id = $1 LIMIT 1`,
+    [parsedStudentId],
+  );
+
+  const studentUserId = Number(studentLookup.rows?.[0]?.user_id);
+  if (!Number.isFinite(studentUserId)) {
+    return;
+  }
+
+  await pool.query(
+    `
+    INSERT INTO notifications (student_user_id, title, description, metadata)
+    VALUES ($1, $2, $3, $4::jsonb)
+    `,
+    [
+      studentUserId,
+      String(title || "Update"),
+      String(description || "A record related to your violations was updated."),
+      metadata ? JSON.stringify(metadata) : null,
+    ],
+  );
+}
+
 // GET notifications for logged-in student
 app.get("/api/notifications", async (req, res) => {
   if (!hasDbConfig()) {
@@ -2154,7 +2840,9 @@ app.get("/api/notifications", async (req, res) => {
     const pool = getDbPool();
     const userId = getCurrentUserId(req);
     if (!userId) {
-      return res.status(400).json({ status: "error", message: "User not identified." });
+      return res
+        .status(400)
+        .json({ status: "error", message: "User not identified." });
     }
 
     const result = await pool.query(
@@ -2167,7 +2855,9 @@ app.get("/api/notifications", async (req, res) => {
       [userId],
     );
 
-    return res.status(200).json({ status: "ok", notifications: result.rows || [] });
+    return res
+      .status(200)
+      .json({ status: "ok", notifications: result.rows || [] });
   } catch (error) {
     return res.status(503).json({
       status: "error",
@@ -2179,7 +2869,9 @@ app.get("/api/notifications", async (req, res) => {
 // count unread notifications
 app.get("/api/notifications/unread-count", async (req, res) => {
   if (!hasDbConfig()) {
-    return res.status(500).json({ status: "error", message: "Database is not configured." });
+    return res
+      .status(500)
+      .json({ status: "error", message: "Database is not configured." });
   }
 
   try {
@@ -2187,7 +2879,9 @@ app.get("/api/notifications/unread-count", async (req, res) => {
     const pool = getDbPool();
     const userId = getCurrentUserId(req);
     if (!userId) {
-      return res.status(400).json({ status: "error", message: "User not identified." });
+      return res
+        .status(400)
+        .json({ status: "error", message: "User not identified." });
     }
 
     const result = await pool.query(
@@ -2199,14 +2893,19 @@ app.get("/api/notifications/unread-count", async (req, res) => {
     const count = Number(result.rows[0]?.count || 0);
     return res.status(200).json({ status: "ok", count });
   } catch (error) {
-    return res.status(503).json({ status: "error", message: `Unable to count notifications (${error.message}).` });
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to count notifications (${error.message}).`,
+    });
   }
 });
 
 // mark all notifications as read
 app.put("/api/notifications/mark-read-all", async (req, res) => {
   if (!hasDbConfig()) {
-    return res.status(500).json({ status: "error", message: "Database is not configured." });
+    return res
+      .status(500)
+      .json({ status: "error", message: "Database is not configured." });
   }
 
   try {
@@ -2214,7 +2913,9 @@ app.put("/api/notifications/mark-read-all", async (req, res) => {
     const pool = getDbPool();
     const userId = getCurrentUserId(req);
     if (!userId) {
-      return res.status(400).json({ status: "error", message: "User not identified." });
+      return res
+        .status(400)
+        .json({ status: "error", message: "User not identified." });
     }
 
     await pool.query(
@@ -2225,14 +2926,19 @@ app.put("/api/notifications/mark-read-all", async (req, res) => {
 
     return res.status(200).json({ status: "ok" });
   } catch (error) {
-    return res.status(503).json({ status: "error", message: `Unable to mark notifications read (${error.message}).` });
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to mark notifications read (${error.message}).`,
+    });
   }
 });
 
 // mark specific notification as read
 app.put("/api/notifications/:id/mark-read", async (req, res) => {
   if (!hasDbConfig()) {
-    return res.status(500).json({ status: "error", message: "Database is not configured." });
+    return res
+      .status(500)
+      .json({ status: "error", message: "Database is not configured." });
   }
 
   try {
@@ -2241,7 +2947,9 @@ app.put("/api/notifications/:id/mark-read", async (req, res) => {
     const userId = getCurrentUserId(req);
     const { id } = req.params;
     if (!userId) {
-      return res.status(400).json({ status: "error", message: "User not identified." });
+      return res
+        .status(400)
+        .json({ status: "error", message: "User not identified." });
     }
 
     const result = await pool.query(
@@ -2252,12 +2960,18 @@ app.put("/api/notifications/:id/mark-read", async (req, res) => {
     );
 
     if (!result.rows?.[0]) {
-      return res.status(404).json({ status: "error", message: "Notification not found or already read." });
+      return res.status(404).json({
+        status: "error",
+        message: "Notification not found or already read.",
+      });
     }
 
     return res.status(200).json({ status: "ok" });
   } catch (error) {
-    return res.status(503).json({ status: "error", message: `Unable to mark notification read (${error.message}).` });
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to mark notification read (${error.message}).`,
+    });
   }
 });
 
@@ -2288,6 +3002,7 @@ async function ensureAuthDatabaseReady() {
       await syncViolationsDatabase();
       await syncNotificationsDatabase();
       await syncAuditLogsDatabase();
+      await syncStudentViolationLogsDatabase();
     })();
   }
 

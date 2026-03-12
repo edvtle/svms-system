@@ -43,6 +43,11 @@ const Dashboard = () => {
   const [recentActivity, setRecentActivity] = useState([]);
   const [isLoadingActivity, setIsLoadingActivity] = useState(true);
   const [activityModalOpen, setActivityModalOpen] = useState(false);
+  const [violationMetrics, setViolationMetrics] = useState({
+    activeViolations: 0,
+    atRiskStudents: 0,
+  });
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
 
   const rankingData = [
     {
@@ -179,6 +184,49 @@ const Dashboard = () => {
       sectionFilter === "All" || student.section === sectionFilter;
     return matchesSearch && matchesProgram && matchesYear && matchesSection;
   });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchViolationMetrics = async () => {
+      setIsLoadingMetrics(true);
+
+      try {
+        const response = await fetch("/api/student-violations");
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok || !Array.isArray(result?.records)) {
+          throw new Error("Failed to load violation metrics.");
+        }
+
+        const activeRecords = result.records.filter((record) => !record.cleared_at);
+        const activeViolations = activeRecords.length;
+        const atRiskStudents = new Set(
+          activeRecords
+            .map((record) => record.student_id)
+            .filter((studentId) => studentId != null),
+        ).size;
+
+        if (isMounted) {
+          setViolationMetrics({ activeViolations, atRiskStudents });
+        }
+      } catch (_error) {
+        if (isMounted) {
+          setViolationMetrics({ activeViolations: 0, atRiskStudents: 0 });
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingMetrics(false);
+        }
+      }
+    };
+
+    fetchViolationMetrics();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -328,7 +376,9 @@ const Dashboard = () => {
           <div className="flex gap-4 flex-1">
             <AdminStatCard
               title="Active Violations"
-              value="0"
+              value={
+                isLoadingMetrics ? "-" : violationMetrics.activeViolations.toString()
+              }
               percentage={0}
               comparisonLabel="vs last semester"
               icon={<AlertTriangle className="w-5 h-5 text-orange-400" />}
@@ -337,7 +387,9 @@ const Dashboard = () => {
             />
             <AdminStatCard
               title="At-Risk Students"
-              value="0"
+              value={
+                isLoadingMetrics ? "-" : violationMetrics.atRiskStudents.toString()
+              }
               percentage={0}
               comparisonLabel="vs last semester"
               icon={<Users className="w-5 h-5 text-cyan-400" />}

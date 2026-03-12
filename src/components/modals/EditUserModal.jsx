@@ -22,12 +22,12 @@ const EditUserModal = ({ isOpen, onClose, user, onSave }) => {
         username: user.username || "",
         firstName: user.firstName || "",
         lastName: user.lastName || "",
-        schoolId: user.schoolId,
-        program: user.program,
-        yearSection: user.yearSection,
+        schoolId: user.schoolId || "",
+        program: user.program || "",
+        yearSection: user.yearSection || "",
         email: user.email || "",
-        status: user.status,
-        violationCount: user.violationCount,
+        status: user.status || "",
+        violationCount: Number(user.violationCount) || 0,
       });
     }
   }, [user]);

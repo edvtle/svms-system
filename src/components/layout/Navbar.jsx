@@ -39,6 +39,17 @@ const Navbar = () => {
     return unread.slice(0, 10)
   }
 
+  const parseNotificationMetadata = (rawMetadata) => {
+    if (!rawMetadata) return null
+    if (typeof rawMetadata === 'object') return rawMetadata
+
+    try {
+      return JSON.parse(rawMetadata)
+    } catch (_error) {
+      return null
+    }
+  }
+
   useEffect(() => {
     let isMounted = true
     async function loadData() {
@@ -59,9 +70,9 @@ const Navbar = () => {
         })
         const notifData = await notifRes.json().catch(() => ({}))
         if (notifRes.ok && isMounted) {
-          const notifications = (notifData.notifications || []).map(note => ({
+          const notifications = (notifData.notifications || []).map((note) => ({
             ...note,
-            metadata: note.metadata ? JSON.parse(note.metadata) : null
+            metadata: parseNotificationMetadata(note.metadata),
           }))
 
           setAllNotifications(notifications)
@@ -285,7 +296,19 @@ const Navbar = () => {
                             }
                           }
 
-                          if (note.metadata?.type === 'violation_added' || note.metadata?.type === 'violation_updated' || note.metadata?.type === 'violation_deleted') {
+                          const metadataType = String(note.metadata?.type || '')
+
+                          if (metadataType.startsWith('student_violation_')) {
+                            if (note.metadata?.violationLogId) {
+                              navigate(`/student/violations?highlight=${note.metadata.violationLogId}`)
+                            } else {
+                              navigate('/student/violations')
+                            }
+                          } else if (
+                            metadataType === 'violation_added' ||
+                            metadataType === 'violation_updated' ||
+                            metadataType === 'violation_deleted'
+                          ) {
                             if (note.metadata?.violationId) {
                               navigate(`/student/offenses?highlight=${note.metadata.violationId}`)
                             } else {
