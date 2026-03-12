@@ -29,6 +29,7 @@ const Violations = () => {
     children: [],
   })
   const [formError, setFormError] = useState('')
+  const [formErrors, setFormErrors] = useState({ category: '', degree: '', name: '' })
   const [editFormData, setEditFormData] = useState({
     id: '',
     category: '',
@@ -38,6 +39,7 @@ const Violations = () => {
     children: [],
   })
   const [editFormError, setEditFormError] = useState('')
+  const [editFormErrors, setEditFormErrors] = useState({ category: '', degree: '', name: '' })
   const [violationsData, setViolationsData] = useState([])
   const [loading, setLoading] = useState(true)
   const [expandedRows, setExpandedRows] = useState(new Set())
@@ -215,6 +217,7 @@ const Violations = () => {
           children: (row.children || []).map(c => c.name),
         })
         setEditFormError('')
+        setEditFormErrors({ category: '', degree: '', name: '' })
         setIsEditModalOpen(true)
       }
     },
@@ -226,13 +229,35 @@ const Violations = () => {
     },
   ]
 
-  const handleAddViolation = async () => {
-    // basic validation
-    if (!formData.category || !formData.degree || !formData.name) {
-      setFormError('Category, degree, and name are required.');
-      return;
+  const validateAddForm = () => {
+    const errors = { category: '', degree: '', name: '' }
+
+    if (!formData.category) {
+      errors.category = 'Category is required.'
     }
-    setFormError('');
+    if (!formData.degree) {
+      errors.degree = 'Degree is required.'
+    }
+    if (!formData.name || !formData.name.trim()) {
+      errors.name = 'Violation name is required.'
+    }
+
+    setFormErrors(errors)
+    const hasError = Object.values(errors).some(Boolean)
+    return !hasError
+  }
+
+  const handleAddViolation = async () => {
+    if (!validateAddForm()) {
+      setFormError('Please answer all the required fields.')
+      return
+    }
+    setFormError('')
+
+    const payload = {
+      ...formData,
+      children: (formData.children || []).map((c) => c.trim()).filter(Boolean),
+    }
 
     try {
       const response = await fetch('/api/violations', {
@@ -241,7 +266,7 @@ const Violations = () => {
           'Content-Type': 'application/json',
           ...getAuditHeaders(),
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       })
       if (response.ok) {
         setFormData({ category: '', degree: '', name: '', parentId: null, children: [] })
@@ -257,10 +282,28 @@ const Violations = () => {
     }
   }
 
+  const validateEditForm = () => {
+    const errors = { category: '', degree: '', name: '' }
+
+    if (!editFormData.category) {
+      errors.category = 'Category is required.'
+    }
+    if (!editFormData.degree) {
+      errors.degree = 'Degree is required.'
+    }
+    if (!editFormData.name || !editFormData.name.trim()) {
+      errors.name = 'Violation name is required.'
+    }
+
+    setEditFormErrors(errors)
+    const hasError = Object.values(errors).some(Boolean)
+    return !hasError
+  }
+
   const handleEditViolation = async () => {
-    if (!editFormData.category || !editFormData.degree || !editFormData.name) {
-      setEditFormError('Category, degree, and name are required.');
-      return;
+    if (!validateEditForm()) {
+      setEditFormError('Please answer all the required fields.')
+      return
     }
     setEditFormError('');
 
@@ -271,7 +314,10 @@ const Violations = () => {
           'Content-Type': 'application/json',
           ...getAuditHeaders(),
         },
-        body: JSON.stringify(editFormData)
+        body: JSON.stringify({
+          ...editFormData,
+          children: (editFormData.children || []).map((c) => c.trim()).filter(Boolean),
+        })
       })
       if (response.ok) {
         setIsEditModalOpen(false)
@@ -327,6 +373,7 @@ const Violations = () => {
             className="gap-2 flex items-center"
             onClick={() => {
               setFormError('')
+              setFormErrors({ category: '', degree: '', name: '' })
               setFormData({ category: '', degree: '', name: '', parentId: null, children: [] })
               setIsModalOpen(true)
             }}
@@ -550,6 +597,9 @@ const Violations = () => {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            {formErrors.category && (
+              <p className="text-red-400 text-xs mt-1">{formErrors.category}</p>
+            )}
           </div>
 
           <div>
@@ -578,6 +628,9 @@ const Violations = () => {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            {formErrors.degree && (
+              <p className="text-red-400 text-xs mt-1">{formErrors.degree}</p>
+            )}
           </div>
 
           <div>
@@ -589,6 +642,9 @@ const Violations = () => {
               className="w-full px-3 py-2 bg-[#3a3a3a] border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Enter violation name"
             />
+            {formErrors.name && (
+              <p className="text-red-400 text-xs mt-1">{formErrors.name}</p>
+            )}
           </div>
 
           <div>
@@ -644,6 +700,7 @@ const Violations = () => {
         onClose={() => {
           setIsEditModalOpen(false);
           setEditFormError('');
+          setEditFormErrors({ category: '', degree: '', name: '' });
         }}
         title="Edit Violation"
         size="md"
@@ -692,6 +749,9 @@ const Violations = () => {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            {editFormErrors.category && (
+              <p className="text-red-400 text-xs mt-1">{editFormErrors.category}</p>
+            )}
           </div>
 
           <div>
@@ -720,6 +780,9 @@ const Violations = () => {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            {editFormErrors.degree && (
+              <p className="text-red-400 text-xs mt-1">{editFormErrors.degree}</p>
+            )}
           </div>
 
           <div>
@@ -731,6 +794,9 @@ const Violations = () => {
               className="w-full px-3 py-2 bg-[#3a3a3a] border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Enter violation name"
             />
+            {editFormErrors.name && (
+              <p className="text-red-400 text-xs mt-1">{editFormErrors.name}</p>
+            )}
           </div>
 
           <div>
