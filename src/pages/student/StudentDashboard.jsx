@@ -4,6 +4,8 @@ import Card from '../../components/ui/Card';
 import StudentStatCard from '../../components/ui/StudentStatCard';
 // GaugeIndicator is now used inside StatCard
 import AnimatedContent from '../../components/ui/AnimatedContent';
+import { getAuditHeaders } from '@/lib/auditHeaders';
+import { ShieldCheck, AlertTriangle, ListChecks, Eye } from 'lucide-react';
 
 function formatStudentName(lastName, firstName, fallbackFullName) {
   if (lastName && firstName) {
@@ -58,31 +60,11 @@ function toOrdinalYearLabel(yearNumber) {
   return `${n}${suffix} YEAR`;
 }
 
-const recentActivities = [
-  {
-    title: 'Proffesor Lorem Ipsum',
-    description: 'Lorem ipsum dolor sit amet consectetur. Eleifend condimentum mauris consequat tellus turpis vitae.',
-    time: 'Just now',
-  },
-  {
-    title: 'Proffesor Lorem Ipsum',
-    description: 'Lorem ipsum dolor sit amet consectetur. Eleifend condimentum mauris consequat tellus turpis vitae.',
-    time: 'Just now',
-  },
-  {
-    title: 'Proffesor Lorem Ipsum',
-    description: 'Lorem ipsum dolor sit amet consectetur. Eleifend condimentum mauris consequat tellus turpis vitae.',
-    time: 'Just now',
-  },
-  {
-    title: 'Proffesor Lorem Ipsum',
-    description: 'Lorem ipsum dolor sit amet consectetur. Eleifend condimentum mauris consequat tellus turpis vitae.',
-    time: 'Just now',
-  },
-];
+
 
 const StudentDashboard = () => {
   const [studentProfile, setStudentProfile] = useState(null);
+  const [studentViolations, setStudentViolations] = useState([]);
   const [studentUser, setStudentUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('svms_user') || '{}');
@@ -128,6 +110,34 @@ const StudentDashboard = () => {
     loadStudentProfile();
   }, [studentUser?.id]);
 
+  useEffect(() => {
+    const userId = studentUser?.id;
+    if (!userId) {
+      return;
+    }
+
+    const loadStudentViolations = async () => {
+      try {
+        const response = await fetch('/api/student-violations/me', {
+          headers: { ...getAuditHeaders() },
+        });
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          return;
+        }
+
+        setStudentViolations(Array.isArray(result.records) ? result.records : []);
+      } catch (_error) {
+        // Ignore violation fetch errors for dashboard counts.
+      }
+    };
+
+    loadStudentViolations();
+    const intervalId = setInterval(loadStudentViolations, 15000);
+    return () => clearInterval(intervalId);
+  }, [studentUser?.id]);
+
   const dashboardInfo = useMemo(() => {
     const firstName = studentProfile?.first_name || studentUser?.firstName || '';
     const lastName = studentProfile?.last_name || studentUser?.lastName || '';
@@ -136,11 +146,46 @@ const StudentDashboard = () => {
     const rawProgram = studentProfile?.program || studentUser?.program || '';
     const rawYearSection =
       studentProfile?.year_section || studentUser?.yearSection || '';
-    const violationCount = Number(
-      studentProfile?.violation_count ?? studentUser?.violationCount ?? 0,
-    );
+
+    const fetchedViolations = Array.isArray(studentViolations) ? studentViolations : [];
+    const activeViolations = fetchedViolations.filter((record) => !record?.cleared_at);
+    const profileViolationCount = Number(studentProfile?.violation_count ?? studentUser?.violationCount ?? 0);
+    const hasViolationData = fetchedViolations.length > 0;
+
+    const violationCount = hasViolationData
+      ? activeViolations.length
+      : Number.isFinite(profileViolationCount)
+      ? profileViolationCount
+      : 0;
 
     const parsed = parseYearSection(rawYearSection);
+
+    const majorViolationCount = hasViolationData
+      ? activeViolations.filter((record) => {
+          const category = String(record?.violation_category || '').trim().toLowerCase();
+          const degree = String(record?.violation_degree || '').trim().toLowerCase();
+          const degreeMajorClass = /third degree|fourth degree|fifth degree|sixth degree|seventh degree/i;
+          return (
+            category.includes('major') ||
+            degree.includes('major') ||
+            degreeMajorClass.test(record?.violation_degree || '') ||
+            (String(record?.violation_label || '').toLowerCase().includes('major'))
+          );
+        }).length
+      : 0;
+
+    const disciplinaryStanding = violationCount <= 0 ? 'Good Standing' : 'Under Review';
+    const disciplinaryMessage =
+      violationCount <= 0
+        ? 'You currently have no disciplinary sanctions affecting your academic status.'
+        : 'You have active violation records. Please check the Violations tab for details.';
+
+    const disciplinaryIcon =
+      violationCount <= 0 ? (
+        <ShieldCheck className="w-5 h-5 text-emerald-400" />
+      ) : (
+        <AlertTriangle className="w-5 h-5 text-amber-400" />
+      );
 
     return {
       name: formatStudentName(lastName, firstName, fullName),
@@ -149,8 +194,12 @@ const StudentDashboard = () => {
       section: parsed.section || 'N/A',
       year: toOrdinalYearLabel(parsed.yearNumber),
       violationCount: Number.isFinite(violationCount) ? violationCount : 0,
+      majorViolationCount: Number.isFinite(majorViolationCount) ? majorViolationCount : 0,
+      disciplinaryStanding,
+      disciplinaryMessage,
+      disciplinaryIcon,
     };
-  }, [studentProfile, studentUser]);
+  }, [studentProfile, studentUser, studentViolations]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -165,11 +214,11 @@ const StudentDashboard = () => {
       <AnimatedContent delay={0.3}>
         <div className="flex flex-col md:flex-row gap-6">
           {/* Student Info */}
-          <Card variant="glass" padding="lg" className="flex-1 min-w-[320px]">
+          <Card variant="glass" padding="lg" className="flex-1 min-w-[320px] min-h-[320px]">
             <div>
-              <span className="text-3xl font-extrabold text-white leading-tight">{dashboardInfo.name}</span>
+              <span className="text-3xl md:text-4xl font-extrabold text-white leading-tight">{dashboardInfo.name}</span>
               <span className="text-lg text-white font-normal ml-1"> </span>
-              <div className="text-gray-400 font-medium text-sm mt-1">SCHOOL ID: {dashboardInfo.schoolId}</div>
+              <div className="text-gray-400 font-medium text-sm md:text-base mt-1">SCHOOL ID: {dashboardInfo.schoolId}</div>
             </div>
             <div className="mt-4 text-white text-sm space-y-1">
               <div><span className="font-bold">PROGRAM:</span> {dashboardInfo.program}</div>
@@ -181,7 +230,7 @@ const StudentDashboard = () => {
           {/* Stat Cards */}
           <div className="flex flex-col md:flex-row gap-6 flex-1">
             <StudentStatCard
-              title="Good Standing!"
+              title=""
               value={dashboardInfo.violationCount}
               max={10}
               color="#60A5FA"
@@ -189,8 +238,8 @@ const StudentDashboard = () => {
               className="flex-1"
             />
             <StudentStatCard
-              title="You are in good disciplinary standing"
-              value={dashboardInfo.violationCount}
+              title=""
+              value={dashboardInfo.majorViolationCount}
               max={10}
               color="#F59E42"
               comparisonLabel="Major Violation"
@@ -200,29 +249,41 @@ const StudentDashboard = () => {
         </div>
       </AnimatedContent>
 
-      {/* Recent Activity */}
+      {/* Disciplinary Standing */}
       <AnimatedContent delay={0.5}>
-        <Card variant="glass" padding="lg" className="w-full">
+        <Card variant="glass" padding="lg" className="w-full min-h-[280px]">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Recent Activity</h3>
-            <button className="text-gray-400 hover:text-white transition-colors">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="1" />
-                <circle cx="19" cy="12" r="1" />
-                <circle cx="5" cy="12" r="1" />
-              </svg>
-            </button>
+            <h3 className="text-xl md:text-2xl font-semibold text-white">Disciplinary Standing</h3>
           </div>
-          <div className="space-y-2">
-            {recentActivities.map((activity, idx) => (
-              <div key={idx} className="bg-[#232528]/60 rounded-lg px-4 py-3 flex justify-between items-center border border-white/10">
-                <div>
-                  <div className="font-bold text-white text-sm mb-1">{activity.title}</div>
-                  <div className="text-gray-400 text-xs">{activity.description}</div>
-                </div>
-                <div className="text-gray-500 text-xs font-medium">{activity.time}</div>
-              </div>
-            ))}
+
+          <div className="flex flex-col sm:flex-row sm:items-start gap-4 mb-4">
+            <div className="flex-shrink-0">
+              {React.cloneElement(dashboardInfo.disciplinaryIcon, {
+                className: `${dashboardInfo.disciplinaryIcon.props.className || ""} w-8 h-8`.trim(),
+              })}
+            </div>
+            <div>
+              <div className="text-white text-xl md:text-2xl font-semibold">Status: {dashboardInfo.disciplinaryStanding}</div>
+              <div className="mt-1 text-gray-200 text-sm md:text-base">{dashboardInfo.disciplinaryMessage}</div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              onClick={() => window.location.href = '/student/violations'}
+              className="flex items-center justify-center gap-2 rounded-lg bg-[rgb(36,38,41)] px-4 py-3 text-sm md:text-base font-semibold text-white hover:bg-gray-700 transition-colors"
+            >
+              <Eye className="w-5 h-5 text-white" />
+              View My Violations
+            </button>
+
+            <button
+              onClick={() => window.location.href = '/student/offenses'}
+              className="flex items-center justify-center gap-2 rounded-lg border border-gray-500/30 bg-transparent px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 transition-colors"
+            >
+              <ListChecks className="w-4 h-4" />
+              View List of Offenses
+            </button>
           </div>
         </Card>
       </AnimatedContent>
