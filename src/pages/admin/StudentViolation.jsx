@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import AnimatedContent from "../../components/ui/AnimatedContent";
 import Card from "../../components/ui/Card";
@@ -29,6 +29,21 @@ import EditViolationModal from "@/components/modals/EditViolationModal";
 import Modal, { ModalFooter } from "@/components/ui/Modal";
 import { getAuditHeaders } from "@/lib/auditHeaders";
 
+const EXPORT_HEADER_IMAGE_CANDIDATES = [
+  "/plpasig_header.png",
+  "/system-logo.jpg",
+];
+
+const csvEscape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
 const StudentViolation = () => {
   const location = useLocation();
   const [showLogModal, setShowLogModal] = useState(false);
@@ -43,9 +58,12 @@ const StudentViolation = () => {
   const [records, setRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [signatureSuccessModal, setSignatureSuccessModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState("excel");
+  const [isExporting, setIsExporting] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [sortOrder, setSortOrder] = useState("Desc");
+  const [sortOrder, setSortOrder] = useState("A-Z");
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
@@ -305,6 +323,15 @@ const StudentViolation = () => {
     return true;
   };
 
+  const getLastNameText = (fullName) => {
+    const parts = String(fullName || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (parts.length === 0) return "";
+    return parts[parts.length - 1].toLowerCase();
+  };
+
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
 
@@ -330,10 +357,24 @@ const StudentViolation = () => {
         );
       })
       .sort((a, b) => {
-        if (sortOrder === "Asc") {
-          return Number(a.id) - Number(b.id);
+        const lastNameA = getLastNameText(a.full_name);
+        const lastNameB = getLastNameText(b.full_name);
+        const fullNameA = String(a.full_name || "").trim().toLowerCase();
+        const fullNameB = String(b.full_name || "").trim().toLowerCase();
+
+        if (lastNameA === lastNameB) {
+          if (fullNameA === fullNameB) {
+            return Number(b.id) - Number(a.id);
+          }
+          return sortOrder === "A-Z"
+            ? fullNameA.localeCompare(fullNameB)
+            : fullNameB.localeCompare(fullNameA);
         }
-        return Number(b.id) - Number(a.id);
+
+        if (sortOrder === "A-Z") {
+          return lastNameA.localeCompare(lastNameB);
+        }
+        return lastNameB.localeCompare(lastNameA);
       });
   }, [records, searchTerm, selectedStatus, selectedYear, selectedDate, sortOrder]);
 
@@ -481,6 +522,280 @@ const StudentViolation = () => {
     };
   });
 
+  const exportRows = useMemo(
+    () =>
+      tableData.map((row) => ({
+        no: row.no,
+        date: row.date,
+        studentName: row.studentNameText || "",
+        schoolId: row.studentIdText || "",
+        yearSection: row.yearSection || "",
+        violation: row.violation || "",
+        reportedBy: row.reportedBy || "-",
+        remarks: row.remarks || "-",
+        status: row.clearedAt ? `Cleared (${row.clearedAt})` : "Pending",
+      })),
+    [tableData],
+  );
+
+  const formatDateForFileName = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const downloadBlob = useCallback((blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const resolveHeaderImage = useCallback(async () => {
+    for (const candidate of EXPORT_HEADER_IMAGE_CANDIDATES) {
+      try {
+        const response = await fetch(candidate);
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        const dataUrl = await blobToDataUrl(blob);
+        const imageFormat = String(blob.type || "").toLowerCase().includes("jpeg")
+          ? "JPEG"
+          : "PNG";
+        return { dataUrl, sourcePath: candidate, imageFormat };
+      } catch (_error) {
+        // Try next candidate.
+      }
+    }
+
+    return {
+      dataUrl: null,
+      sourcePath: EXPORT_HEADER_IMAGE_CANDIDATES[0],
+      imageFormat: "PNG",
+    };
+  }, []);
+
+  const exportAsCsv = useCallback(() => {
+    const lines = [
+      csvEscape("Pamantasan ng Lungsod ng Pasig"),
+      csvEscape("Alkalde Jose St. Kapasigan, Pasig City"),
+      csvEscape("College of Computer Studies"),
+      "",
+      [
+        "No",
+        "Date",
+        "Student Name",
+        "School ID",
+        "Year/Section",
+        "Violation",
+        "Reported By",
+        "Remarks",
+        "Status",
+      ]
+        .map(csvEscape)
+        .join(","),
+      ...exportRows.map((row) =>
+        [
+          row.no,
+          row.date,
+          row.studentName,
+          row.schoolId,
+          row.yearSection,
+          row.violation,
+          row.reportedBy,
+          row.remarks,
+          row.status,
+        ]
+          .map(csvEscape)
+          .join(","),
+      ),
+    ];
+
+    const csvContent = `\ufeff${lines.join("\n")}`;
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const filename = `student_violations_${formatDateForFileName()}.csv`;
+    downloadBlob(blob, filename);
+  }, [downloadBlob, exportRows]);
+
+  const exportAsExcel = useCallback(async () => {
+    const { dataUrl, sourcePath } = await resolveHeaderImage();
+    const headerImageHtml = dataUrl
+      ? `<img src="${dataUrl}" alt="PLP Header" style="width:100%;max-width:1000px;height:auto;display:block;margin:0 auto 8px auto;" />`
+      : `<div style="text-align:center;font-size:12px;color:#6b7280;margin-bottom:8px;">Header image not found at ${sourcePath}</div>`;
+
+    const rowsHtml = exportRows
+      .map(
+        (row) => `
+          <tr>
+            <td>${row.no}</td>
+            <td>${row.date}</td>
+            <td>${row.studentName}</td>
+            <td>${row.schoolId}</td>
+            <td>${row.yearSection}</td>
+            <td>${row.violation}</td>
+            <td>${row.reportedBy}</td>
+            <td>${row.remarks}</td>
+            <td>${row.status}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="UTF-8" />
+          <style>
+            body { font-family: Calibri, Arial, sans-serif; padding: 16px; color: #111827; }
+            .title { font-size: 18px; font-weight: 700; margin: 6px 0 4px; text-align: center; }
+            .subtitle { font-size: 12px; color: #4b5563; text-align: center; margin-bottom: 14px; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; vertical-align: top; word-wrap: break-word; }
+            th { background: #f1f5f9; font-weight: 700; }
+            tr:nth-child(even) td { background: #f8fafc; }
+          </style>
+        </head>
+        <body>
+          ${headerImageHtml}
+          <div class="title">Student Violation Report</div>
+          <div class="subtitle">Generated: ${new Date().toLocaleString()}</div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 4%;">No</th>
+                <th style="width: 9%;">Date</th>
+                <th style="width: 17%;">Student Name</th>
+                <th style="width: 10%;">School ID</th>
+                <th style="width: 9%;">Year/Section</th>
+                <th style="width: 17%;">Violation</th>
+                <th style="width: 11%;">Reported By</th>
+                <th style="width: 15%;">Remarks</th>
+                <th style="width: 8%;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
+    const filename = `student_violations_${formatDateForFileName()}.xls`;
+    downloadBlob(blob, filename);
+  }, [downloadBlob, exportRows, resolveHeaderImage]);
+
+  const exportAsPdf = useCallback(async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const { dataUrl, imageFormat } = await resolveHeaderImage();
+    let startY = 28;
+
+    if (dataUrl) {
+      doc.addImage(dataUrl, imageFormat, 10, 8, 277, 22);
+      startY = 34;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("Student Violation Report", 148.5, startY, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 148.5, startY + 5, {
+      align: "center",
+    });
+
+    autoTable(doc, {
+      startY: startY + 9,
+      head: [
+        [
+          "No",
+          "Date",
+          "Student Name",
+          "School ID",
+          "Year/Section",
+          "Violation",
+          "Reported By",
+          "Remarks",
+          "Status",
+        ],
+      ],
+      body: exportRows.map((row) => [
+        row.no,
+        row.date,
+        row.studentName,
+        row.schoolId,
+        row.yearSection,
+        row.violation,
+        row.reportedBy,
+        row.remarks,
+        row.status,
+      ]),
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.3,
+        textColor: [31, 41, 55],
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      margin: { left: 10, right: 10 },
+      columnStyles: {
+        0: { cellWidth: 10 },
+        1: { cellWidth: 22 },
+        2: { cellWidth: 40 },
+        3: { cellWidth: 26 },
+        4: { cellWidth: 22 },
+        5: { cellWidth: 50 },
+        6: { cellWidth: 28 },
+        7: { cellWidth: 58 },
+        8: { cellWidth: 24 },
+      },
+    });
+
+    doc.save(`student_violations_${formatDateForFileName()}.pdf`);
+  }, [exportRows, resolveHeaderImage]);
+
+  const handleConfirmExport = async () => {
+    if (exportRows.length === 0) {
+      alert("No rows available to export.");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      if (exportFormat === "csv") {
+        exportAsCsv();
+      } else if (exportFormat === "excel") {
+        await exportAsExcel();
+      } else {
+        await exportAsPdf();
+      }
+
+      setShowExportModal(false);
+    } catch (error) {
+      alert(error?.message || "Unable to export report.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const actions = [
     {
       label: "Edit",
@@ -593,8 +908,8 @@ const StudentViolation = () => {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => setSortOrder("Asc")}>Asc</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setSortOrder("Desc")}>Desc</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortOrder("A-Z")}>A-Z</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortOrder("Z-A")}>Z-A</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -645,7 +960,15 @@ const StudentViolation = () => {
             </DropdownMenu>
           </div>
 
-          <Button variant="secondary" size="sm" className="px-6 gap-2" onClick={fetchStudentViolations}>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="px-6 gap-2"
+            onClick={() => {
+              setExportFormat("excel");
+              setShowExportModal(true);
+            }}
+          >
             <Download className="w-4 h-4" />
             Generate
           </Button>
@@ -671,6 +994,63 @@ const StudentViolation = () => {
           }
         }}
       />
+
+      <Modal
+        isOpen={showExportModal}
+        onClose={() => {
+          if (!isExporting) {
+            setShowExportModal(false);
+          }
+        }}
+        title={<span className="font-black font-inter">Export Student Violation Report</span>}
+        size="md"
+        showCloseButton={!isExporting}
+      >
+        <p className="text-sm text-gray-300 mb-3">
+          Choose a format for exporting the current table view.
+        </p>
+        <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 mb-4">
+          <p className="text-xs text-gray-300">
+            Rows to export: <span className="font-semibold text-white">{exportRows.length}</span>
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            The report uses <span className="font-semibold text-white">plpasig_header.png</span> for the header when available.
+          </p>
+        </div>
+
+        <label className="block text-sm font-medium text-white mb-2">Format</label>
+        <select
+          value={exportFormat}
+          onChange={(event) => setExportFormat(event.target.value)}
+          disabled={isExporting}
+          className="w-full backdrop-blur-md border border-white/10 rounded-xl px-4 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-white/20 transition-all appearance-none"
+        >
+          <option value="csv">CSV</option>
+          <option value="excel">Excel (.xls)</option>
+          <option value="pdf">PDF</option>
+        </select>
+
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowExportModal(false)}
+            disabled={isExporting}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleConfirmExport}
+            disabled={isExporting}
+            className="px-6 py-2.5"
+          >
+            {isExporting ? "Exporting..." : "Export"}
+          </Button>
+        </ModalFooter>
+      </Modal>
 
       <EditViolationModal
         isOpen={showEditModal}

@@ -32,6 +32,7 @@ const UserManagement = () => {
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedSection, setSelectedSection] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortOrder, setSortOrder] = useState("A-Z");
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -303,6 +304,26 @@ const UserManagement = () => {
       }
 
       return true;
+    }).sort((a, b) => {
+      const lastNameA = toText(a.lastName);
+      const lastNameB = toText(b.lastName);
+      const fullNameA = toText(a.studentName);
+      const fullNameB = toText(b.studentName);
+
+      if (lastNameA === lastNameB) {
+        if (fullNameA === fullNameB) {
+          return Number(a.id) - Number(b.id);
+        }
+        return sortOrder === "A-Z"
+          ? fullNameA.localeCompare(fullNameB)
+          : fullNameB.localeCompare(fullNameA);
+      }
+
+      if (sortOrder === "A-Z") {
+        return lastNameA.localeCompare(lastNameB);
+      }
+
+      return lastNameB.localeCompare(lastNameA);
     });
   }, [
     studentData,
@@ -311,6 +332,7 @@ const UserManagement = () => {
     selectedYear,
     selectedSection,
     searchQuery,
+    sortOrder,
   ]);
 
   const statistics = useMemo(() => {
@@ -412,6 +434,7 @@ const UserManagement = () => {
     setSelectedYear("");
     setSelectedSection("");
     setSearchQuery("");
+    setSortOrder("A-Z");
     setActiveTab("regular");
   };
 
@@ -456,6 +479,23 @@ const UserManagement = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="min-w-[90px] justify-between"
+              >
+                {sortOrder}
+                <ChevronDown className="ml-2 w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setSortOrder("A-Z")}>A-Z</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSortOrder("Z-A")}>Z-A</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Program Dropdown */}
           <DropdownMenu>
@@ -554,6 +594,7 @@ const UserManagement = () => {
           {(selectedProgram ||
             selectedYear ||
             selectedSection ||
+            sortOrder !== "A-Z" ||
             searchQuery ||
             activeTab !== "regular") && (
             <Button

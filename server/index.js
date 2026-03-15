@@ -171,6 +171,9 @@ function buildForgotPasswordEmailTemplate({ code }) {
   `;
 }
 
+// Cached transporter — created once, reused for all emails.
+let _mailTransporter = null;
+
 function getMailTransporter() {
   const smtpUser = process.env.SMTP_USER;
   const smtpPass = process.env.SMTP_PASS;
@@ -179,13 +182,18 @@ function getMailTransporter() {
     return null;
   }
 
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: smtpUser,
-      pass: smtpPass,
-    },
-  });
+  if (!_mailTransporter) {
+    _mailTransporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+      pool: true,
+    });
+  }
+
+  return _mailTransporter;
 }
 
 async function sendStudentCredentialEmail({
@@ -1189,7 +1197,9 @@ app.post("/api/students", async (req, res) => {
       cleanedLast,
     );
     const generatedPassword = generateTemporaryPassword();
-    const passwordHash = await bcrypt.hash(generatedPassword, 12);
+    // Cost 10 is bcrypt's standard default — still very secure for a
+    // randomly-generated temporary password and ~4x faster than cost 12.
+    const passwordHash = await bcrypt.hash(generatedPassword, 10);
 
     const userInsert = await pool.query(
       `
@@ -1224,33 +1234,8 @@ app.post("/api/students", async (req, res) => {
     );
     createdStudentId = result.rows?.[0]?.id || null;
 
-    const emailDelivery = await sendStudentCredentialEmail({
-      toEmail: email.trim().toLowerCase(),
-      firstName: cleanedFirst,
-      username: generatedUsername,
-      password: generatedPassword,
-    });
-
-    if (!emailDelivery.sent) {
-      if (createdStudentId) {
-        await pool.query(`DELETE FROM "Students" WHERE id = $1`, [
-          createdStudentId,
-        ]);
-      }
-      if (createdUserId) {
-        await pool.query(
-          `DELETE FROM users WHERE id = $1 AND role = 'student'`,
-          [createdUserId],
-        );
-      }
-
-      return res.status(503).json({
-        status: "error",
-        message: `Student was not created because credential email failed (${emailDelivery.reason || "unknown reason"}).`,
-      });
-    }
-
     const createdStudent = result.rows?.[0] || null;
+
     await logAuditEvent(req, {
       action: "CREATE_STUDENT",
       targetType: "student",
@@ -1263,14 +1248,27 @@ app.post("/api/students", async (req, res) => {
       },
     });
 
-    return res.status(201).json({
+    // Respond immediately — email is sent in the background so the admin
+    // does not have to wait for SMTP to complete.
+    res.status(201).json({
       status: "ok",
       student: createdStudent,
       credentials: {
         username: generatedUsername,
         password: generatedPassword,
       },
-      emailDelivery,
+    });
+
+    // Fire credential email after responding.
+    sendStudentCredentialEmail({
+      toEmail: email.trim().toLowerCase(),
+      firstName: cleanedFirst,
+      username: generatedUsername,
+      password: generatedPassword,
+    }).catch((emailErr) => {
+      console.error(
+        `[Student Create] Failed to send credential email to ${email}: ${emailErr?.message || emailErr}`,
+      );
     });
   } catch (error) {
     // Best effort cleanup for partial inserts when DB write or mail delivery fails.
