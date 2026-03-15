@@ -59,8 +59,8 @@ const StudentViolation = () => {
     }
   }, [location]);
 
-  const fetchStudentViolations = async () => {
-    setIsLoading(true);
+  const fetchStudentViolations = async ({ silent = false } = {}) => {
+    if (!silent) setIsLoading(true);
     try {
       const response = await fetch("/api/student-violations");
       const data = await response.json().catch(() => ({}));
@@ -69,11 +69,15 @@ const StudentViolation = () => {
       }
       setRecords(Array.isArray(data.records) ? data.records : []);
     } catch (error) {
-      alert(error.message || "Unable to load records.");
-      setRecords([]);
+      if (!silent) alert(error.message || "Unable to load records.");
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
+  };
+
+  const mergeRecord = (updated) => {
+    if (!updated) return;
+    setRecords((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
   };
 
   useEffect(() => {
@@ -92,7 +96,7 @@ const StudentViolation = () => {
       if (!response.ok) {
         throw new Error(result?.message || "Unable to delete record.");
       }
-      await fetchStudentViolations();
+      setRecords((prev) => prev.filter((r) => r.id !== row.id));
     } catch (error) {
       alert(error.message || "Unable to delete record.");
     }
@@ -110,7 +114,7 @@ const StudentViolation = () => {
       if (!response.ok) {
         throw new Error(result?.message || "Unable to clear record.");
       }
-      await fetchStudentViolations();
+      mergeRecord(result.record);
     } catch (error) {
       alert(error.message || "Unable to clear record.");
     }
@@ -156,7 +160,7 @@ const StudentViolation = () => {
       if (!response.ok) {
         throw new Error(result?.message || "Unable to unclear record.");
       }
-      await fetchStudentViolations();
+      mergeRecord(result.record);
     } catch (error) {
       alert(error.message || "Unable to unclear record.");
     }
@@ -179,7 +183,7 @@ const StudentViolation = () => {
         throw new Error(result?.message || "Unable to unclear record.");
       }
 
-      await fetchStudentViolations();
+      mergeRecord(result.record);
       setShowEditModal(false);
       setEditTarget(null);
     } catch (error) {
@@ -205,7 +209,7 @@ const StudentViolation = () => {
         throw new Error(result?.message || "Unable to update record.");
       }
 
-      await fetchStudentViolations();
+      mergeRecord(result.record);
       setShowEditModal(false);
       setEditTarget(null);
     } catch (error) {
@@ -245,7 +249,7 @@ const StudentViolation = () => {
       if (!response.ok) {
         throw new Error(result?.message || "Unable to save signature.");
       }
-      await fetchStudentViolations();
+      mergeRecord(result.record);
       // Update editTarget so the edit modal reflects the new signature immediately
       setEditTarget((prev) =>
         prev ? { ...prev, signature_image: signatureImage } : prev,
@@ -659,7 +663,13 @@ const StudentViolation = () => {
       <LogNewViolationModal
         isOpen={showLogModal}
         onClose={() => setShowLogModal(false)}
-        onSaved={fetchStudentViolations}
+        onSaved={(record) => {
+          if (record) {
+            setRecords((prev) => [record, ...prev]);
+          } else {
+            fetchStudentViolations();
+          }
+        }}
       />
 
       <EditViolationModal

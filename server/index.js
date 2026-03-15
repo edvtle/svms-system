@@ -1491,6 +1491,40 @@ async function refreshStudentViolationCount(pool, studentId) {
   );
 }
 
+// Returns a full violation record with student + violation catalog joined fields.
+async function getFullViolationRecord(pool, id) {
+  const result = await pool.query(
+    `
+    SELECT
+      svl.id,
+      svl.student_id,
+      svl.violation_catalog_id,
+      svl.violation_label,
+      svl.reported_by,
+      svl.remarks,
+      svl.signature_image,
+      svl.signature_updated_at,
+      svl.cleared_at,
+      svl.cleared_by_user_id,
+      svl.cleared_by_name,
+      svl.created_at,
+      svl.updated_at,
+      s.school_id,
+      s.full_name,
+      s.year_section,
+      v.category AS violation_category,
+      v.degree AS violation_degree,
+      v.name AS violation_name
+    FROM student_violation_logs svl
+    INNER JOIN "Students" s ON s.id = svl.student_id
+    LEFT JOIN violations v ON v.id = svl.violation_catalog_id
+    WHERE svl.id = $1
+    `,
+    [id],
+  );
+  return result.rows?.[0] || null;
+}
+
 // ==================== STUDENT VIOLATION LOGS API ====================
 
 app.get("/api/student-violations", async (_req, res) => {
@@ -1718,9 +1752,13 @@ app.post("/api/student-violations", async (req, res) => {
       },
     });
 
+    const fullRecord = created
+      ? await getFullViolationRecord(pool, created.id)
+      : null;
+
     return res.status(201).json({
       status: "ok",
-      record: created,
+      record: fullRecord || created,
     });
   } catch (error) {
     return res.status(503).json({
@@ -1819,7 +1857,11 @@ app.put("/api/student-violations/:id", async (req, res) => {
       details: `Updated student violation log #${updated.id}.`,
     });
 
-    return res.status(200).json({ status: "ok", record: updated });
+    const fullRecord = await getFullViolationRecord(pool, updated.id);
+
+    return res
+      .status(200)
+      .json({ status: "ok", record: fullRecord || updated });
   } catch (error) {
     return res.status(503).json({
       status: "error",
@@ -1890,7 +1932,11 @@ app.put("/api/student-violations/:id/signature", async (req, res) => {
       details: `Attached signature for student violation log #${updated.id}.`,
     });
 
-    return res.status(200).json({ status: "ok", record: updated });
+    const fullRecord = await getFullViolationRecord(pool, updated.id);
+
+    return res
+      .status(200)
+      .json({ status: "ok", record: fullRecord || updated });
   } catch (error) {
     return res.status(503).json({
       status: "error",
@@ -1960,7 +2006,11 @@ app.put("/api/student-violations/:id/clear", async (req, res) => {
       },
     });
 
-    return res.status(200).json({ status: "ok", record: updated });
+    const fullRecord = await getFullViolationRecord(pool, updated.id);
+
+    return res
+      .status(200)
+      .json({ status: "ok", record: fullRecord || updated });
   } catch (error) {
     return res.status(503).json({
       status: "error",
@@ -2029,7 +2079,11 @@ app.put("/api/student-violations/:id/unclear", async (req, res) => {
       details: `Reopened student violation log #${updated.id}.`,
     });
 
-    return res.status(200).json({ status: "ok", record: updated });
+    const fullRecord = await getFullViolationRecord(pool, updated.id);
+
+    return res
+      .status(200)
+      .json({ status: "ok", record: fullRecord || updated });
   } catch (error) {
     return res.status(503).json({
       status: "error",
