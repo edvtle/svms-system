@@ -1510,6 +1510,85 @@ app.put("/api/students/:id", async (req, res) => {
   }
 });
 
+app.post("/api/students/promote-all", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database environment variables are missing.",
+      missing: getMissingDbVars(),
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Get all active REGULAR students (not irregular, not archived)
+    const result = await pool.query(
+      `
+      SELECT id, year_section
+      FROM "Students"
+      WHERE status = 'Regular'
+      ORDER BY id ASC
+      `,
+    );
+
+    const students = result.rows || [];
+    let promotedCount = 0;
+
+    for (const student of students) {
+      const yearSection = String(student.year_section || '').trim();
+      const match = yearSection.match(/^(\d+)\s*([a-zA-Z]+)$/);
+
+      if (!match) {
+        // Skip students with invalid year_section format
+        continue;
+      }
+
+      const year = Number(match[1]);
+      const section = match[2];
+
+      // Only promote if year is less than 4 (prevent overflow)
+      if (year >= 4) {
+        continue;
+      }
+
+      const newYear = year + 1;
+      const newYearSection = `${newYear}${section}`;
+
+      await pool.query(
+        `UPDATE "Students" SET year_section = $1 WHERE id = $2`,
+        [newYearSection, student.id],
+      );
+
+      promotedCount += 1;
+    }
+
+    await logAuditEvent(req, {
+      action: "PROMOTE_STUDENTS",
+      targetType: "student",
+      targetId: null,
+      details: `Promoted ${promotedCount} students to next year level.`,
+      metadata: {
+        promotedCount,
+        totalStudents: students.length,
+      },
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      message: `Promoted ${promotedCount} student(s) to the next year level.`,
+      promotedCount,
+      totalStudents: students.length,
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to promote students (${error.message}).`,
+    });
+  }
+});
+
 app.delete("/api/students/:id", async (req, res) => {
   const { id } = req.params;
 

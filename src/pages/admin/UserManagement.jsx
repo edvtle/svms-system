@@ -68,6 +68,10 @@ const UserManagement = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState("excel");
   const [isExporting, setIsExporting] = useState(false);
+  const [showPromoteConfirmModal, setShowPromoteConfirmModal] = useState(false);
+  const [isPromoting, setIsPromoting] = useState(false);
+  const [promoteResult, setPromoteResult] = useState(null);
+  const [showPromoteResultModal, setShowPromoteResultModal] = useState(false);
 
   const [studentData, setStudentData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -314,6 +318,36 @@ const UserManagement = () => {
       alert(error.message || "Unable to delete student.");
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handlePromoteAll = async () => {
+    setIsPromoting(true);
+    try {
+      const response = await fetch("/api/students/promote-all", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.message || "Failed to promote students.");
+      }
+
+      setPromoteResult(result);
+      setShowPromoteResultModal(true);
+      setShowPromoteConfirmModal(false);
+
+      // Refresh student data
+      await fetchStudents();
+    } catch (error) {
+      alert(error.message || "Unable to promote students.");
+      setShowPromoteConfirmModal(false);
+    } finally {
+      setIsPromoting(false);
     }
   };
 
@@ -1050,6 +1084,7 @@ const UserManagement = () => {
               variant="secondary"
               size="sm"
               className="gap-2 bg-[#4A9B9B] hover:bg-[#3d8585] border-0"
+              onClick={() => setShowPromoteConfirmModal(true)}
             >
               <Gift className="w-4 h-4" />
               Promote
@@ -1274,6 +1309,78 @@ const UserManagement = () => {
             type="button"
             variant="primary"
             onClick={() => setShowCreateSuccessModal(false)}
+            className="px-6 py-2.5"
+          >
+            OK
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Promote Confirmation Modal */}
+      <Modal
+        isOpen={showPromoteConfirmModal}
+        onClose={() => !isPromoting && setShowPromoteConfirmModal(false)}
+        title="Confirm Year Level Promotion"
+        size="sm"
+        showCloseButton
+      >
+        <div className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-4 py-3 mb-4">
+          <p className="text-sm font-medium text-blue-300">
+            This will promote all active Regular students to the next year level (1st → 2nd, etc.). 
+            Students at 4th year will not be promoted to prevent overflow.
+          </p>
+        </div>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowPromoteConfirmModal(false)}
+            disabled={isPromoting}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handlePromoteAll}
+            disabled={isPromoting}
+            className="px-6 py-2.5"
+          >
+            {isPromoting ? "Promoting..." : "Confirm Promotion"}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Promote Result Modal */}
+      <Modal
+        isOpen={showPromoteResultModal}
+        onClose={() => setShowPromoteResultModal(false)}
+        title={
+          <span className="font-black font-inter flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-green-400" />
+            Promotion Complete
+          </span>
+        }
+        size="sm"
+        showCloseButton
+      >
+        <div className="rounded-lg border border-green-400/25 bg-green-500/10 px-4 py-3 mb-4">
+          <p className="text-sm font-medium text-green-300">
+            {promoteResult?.message}
+          </p>
+          {promoteResult && (
+            <div className="mt-3 space-y-1 text-xs text-green-200">
+              <p>Students promoted: <span className="font-bold">{promoteResult.promotedCount}</span></p>
+              <p>Total students: <span className="font-bold">{promoteResult.totalStudents}</span></p>
+            </div>
+          )}
+        </div>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => setShowPromoteResultModal(false)}
             className="px-6 py-2.5"
           >
             OK
