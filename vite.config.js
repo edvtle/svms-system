@@ -5,6 +5,12 @@ import path from "path";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // Skip gzip/brotli size reporting to speed up production builds.
+    reportCompressedSize: false,
+    // Target modern runtime used by current Electron/Chromium and modern browsers.
+    target: "es2022",
+  },
   server: {
     proxy: {
       "/api": {

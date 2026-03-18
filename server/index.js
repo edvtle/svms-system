@@ -1160,14 +1160,22 @@ app.post("/api/students", async (req, res) => {
     req.body ?? {};
   let createdUserId = null;
   let createdStudentId = null;
+  const normalizedSchoolId = String(schoolId || "").trim();
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
+  const cleanedFirst = String(firstName || "").trim();
+  const cleanedLast = String(lastName || "").trim();
+  const normalizedProgram = String(program || "").trim();
+  const normalizedYearSection = String(yearSection || "").trim();
 
   if (
-    !schoolId ||
-    !email ||
-    !firstName ||
-    !lastName ||
-    !program ||
-    !yearSection
+    !normalizedSchoolId ||
+    !normalizedEmail ||
+    !cleanedFirst ||
+    !cleanedLast ||
+    !normalizedProgram ||
+    !normalizedYearSection
   ) {
     return res.status(400).json({
       status: "error",
@@ -1188,9 +1196,32 @@ app.post("/api/students", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
     const normalizedStatus = status === "Irregular" ? "Irregular" : "Regular";
-    const cleanedFirst = String(firstName).trim();
-    const cleanedLast = String(lastName).trim();
     const fullName = `${cleanedFirst} ${cleanedLast}`.trim();
+
+    const [existingSchoolIdResult, existingEmailResult] = await Promise.all([
+      pool.query(
+        `SELECT id FROM "Students" WHERE LOWER(school_id) = LOWER($1) LIMIT 1`,
+        [normalizedSchoolId],
+      ),
+      pool.query(`SELECT id FROM "Students" WHERE LOWER(email) = $1 LIMIT 1`, [
+        normalizedEmail,
+      ]),
+    ]);
+
+    if (existingSchoolIdResult.rows?.[0]) {
+      return res.status(409).json({
+        status: "error",
+        message: "School ID already exists. Please use a unique School ID.",
+      });
+    }
+
+    if (existingEmailResult.rows?.[0]) {
+      return res.status(409).json({
+        status: "error",
+        message: "Email already exists. Please use a different email.",
+      });
+    }
+
     const generatedUsername = await generateStudentUsername(
       pool,
       cleanedFirst,
@@ -1222,13 +1253,13 @@ app.post("/api/students", async (req, res) => {
       `,
       [
         userId,
-        email.trim().toLowerCase(),
-        schoolId.trim(),
+        normalizedEmail,
+        normalizedSchoolId,
         cleanedFirst,
         cleanedLast,
         fullName,
-        program,
-        yearSection,
+        normalizedProgram,
+        normalizedYearSection,
         normalizedStatus,
       ],
     );
@@ -1242,9 +1273,9 @@ app.post("/api/students", async (req, res) => {
       targetId: createdStudent?.id,
       details: `Added student ${createdStudent?.full_name || fullName}.`,
       metadata: {
-        schoolId: createdStudent?.school_id || schoolId,
-        program: createdStudent?.program || program,
-        yearSection: createdStudent?.year_section || yearSection,
+        schoolId: createdStudent?.school_id || normalizedSchoolId,
+        program: createdStudent?.program || normalizedProgram,
+        yearSection: createdStudent?.year_section || normalizedYearSection,
       },
     });
 
@@ -1261,7 +1292,7 @@ app.post("/api/students", async (req, res) => {
 
     // Fire credential email after responding.
     sendStudentCredentialEmail({
-      toEmail: email.trim().toLowerCase(),
+      toEmail: normalizedEmail,
       firstName: cleanedFirst,
       username: generatedUsername,
       password: generatedPassword,
@@ -1271,6 +1302,21 @@ app.post("/api/students", async (req, res) => {
       );
     });
   } catch (error) {
+    let conflictMessage = "";
+    if (String(error?.code || "") === "23505") {
+      const detail = String(error?.detail || "").toLowerCase();
+      const constraint = String(error?.constraint || "").toLowerCase();
+
+      if (detail.includes("school_id") || constraint.includes("school_id")) {
+        conflictMessage =
+          "School ID already exists. Please use a unique School ID.";
+      }
+
+      if (detail.includes("email") || constraint.includes("email")) {
+        conflictMessage = "Email already exists. Please use a different email.";
+      }
+    }
+
     // Best effort cleanup for partial inserts when DB write or mail delivery fails.
     const pool = getDbPool();
     if (pool) {
@@ -1294,6 +1340,13 @@ app.post("/api/students", async (req, res) => {
       } catch (_userCleanupError) {
         // Ignore cleanup failure and continue response.
       }
+    }
+
+    if (conflictMessage) {
+      return res.status(409).json({
+        status: "error",
+        message: conflictMessage,
+      });
     }
 
     return res.status(503).json({
@@ -1424,6 +1477,32 @@ app.put("/api/students/:id", async (req, res) => {
       student: updatedStudent,
     });
   } catch (error) {
+    if (String(error?.code || "") === "23505") {
+      const detail = String(error?.detail || "").toLowerCase();
+      const constraint = String(error?.constraint || "").toLowerCase();
+
+      if (detail.includes("school_id") || constraint.includes("school_id")) {
+        return res.status(409).json({
+          status: "error",
+          message: "School ID already exists. Please use a unique School ID.",
+        });
+      }
+
+      if (detail.includes("email") || constraint.includes("email")) {
+        return res.status(409).json({
+          status: "error",
+          message: "Email already exists. Please use a different email.",
+        });
+      }
+
+      if (detail.includes("username") || constraint.includes("username")) {
+        return res.status(409).json({
+          status: "error",
+          message: "Username already exists. Please use a different username.",
+        });
+      }
+    }
+
     return res.status(503).json({
       status: "error",
       message: `Unable to update student (${error.message}).`,

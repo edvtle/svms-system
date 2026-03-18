@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Plus,
   Archive,
@@ -26,6 +26,28 @@ import EditUserModal from "@/components/modals/EditUserModal";
 import AddUserModal from "@/components/modals/AddUserModal";
 import { getAuditHeaders } from "@/lib/auditHeaders";
 
+const EXPORT_HEADER_IMAGE_PATH = "/plpasig_header.png";
+const EXCEL_HEADER_IMAGE_WIDTH_PX = 560;
+const EXCEL_HEADER_IMAGE_HEIGHT_PX = 82;
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const getDataUrlDimensions = (dataUrl) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+    };
+    img.onerror = () => reject(new Error("Unable to load image dimensions."));
+    img.src = dataUrl;
+  });
+
 const UserManagement = () => {
   const [activeTab, setActiveTab] = useState("regular");
   const [selectedProgram, setSelectedProgram] = useState("");
@@ -42,6 +64,10 @@ const UserManagement = () => {
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [showEditSuccessModal, setShowEditSuccessModal] = useState(false);
   const [showCreateSuccessModal, setShowCreateSuccessModal] = useState(false);
+  const [showDuplicateSchoolIdModal, setShowDuplicateSchoolIdModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState("excel");
+  const [isExporting, setIsExporting] = useState(false);
 
   const [studentData, setStudentData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -141,6 +167,22 @@ const UserManagement = () => {
   });
 
   const handleSaveEdit = async (id, updatedData) => {
+    const normalizedSchoolId = String(updatedData.schoolId || "")
+      .trim()
+      .toLowerCase();
+    const duplicateSchoolId = studentData.some(
+      (student) =>
+        Number(student.id) !== Number(id) &&
+        String(student.schoolId || "")
+          .trim()
+          .toLowerCase() === normalizedSchoolId,
+    );
+
+    if (duplicateSchoolId) {
+      setShowDuplicateSchoolIdModal(true);
+      return false;
+    }
+
     try {
       const response = await fetch(`/api/students/${id}`, {
         method: "PUT",
@@ -149,14 +191,14 @@ const UserManagement = () => {
           ...getAuditHeaders(),
         },
         body: JSON.stringify({
-          username: updatedData.username,
-          schoolId: updatedData.schoolId,
-          email: updatedData.email,
-          firstName: updatedData.firstName,
-          lastName: updatedData.lastName,
-          program: updatedData.program,
-          yearSection: updatedData.yearSection,
-          status: updatedData.status,
+          username: String(updatedData.username || "").trim(),
+          schoolId: String(updatedData.schoolId || "").trim(),
+          email: String(updatedData.email || "").trim(),
+          firstName: String(updatedData.firstName || "").trim(),
+          lastName: String(updatedData.lastName || "").trim(),
+          program: String(updatedData.program || "").trim(),
+          yearSection: String(updatedData.yearSection || "").trim(),
+          status: String(updatedData.status || "").trim(),
           violationCount: Number(updatedData.violationCount),
         }),
       });
@@ -178,12 +220,35 @@ const UserManagement = () => {
       setShowEditSuccessModal(true);
       return true;
     } catch (error) {
-      alert(error.message || "Unable to update student.");
+      const message = String(error?.message || "");
+      if (
+        message.includes("School ID already exists") ||
+        message.toLowerCase().includes("school_id")
+      ) {
+        setShowDuplicateSchoolIdModal(true);
+      } else {
+        alert(error.message || "Unable to update student.");
+      }
       return false;
     }
   };
 
   const handleSaveNewUser = async (userData) => {
+    const normalizedSchoolId = String(userData.schoolId || "")
+      .trim()
+      .toLowerCase();
+    const duplicateSchoolId = studentData.some(
+      (student) =>
+        String(student.schoolId || "")
+          .trim()
+          .toLowerCase() === normalizedSchoolId,
+    );
+
+    if (duplicateSchoolId) {
+      setShowDuplicateSchoolIdModal(true);
+      return false;
+    }
+
     setIsAddingUser(true);
     try {
       const response = await fetch("/api/students", {
@@ -193,13 +258,13 @@ const UserManagement = () => {
           ...getAuditHeaders(),
         },
         body: JSON.stringify({
-          schoolId: userData.schoolId,
-          email: userData.email,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          program: userData.program,
-          yearSection: userData.yearSection,
-          status: userData.status,
+          schoolId: String(userData.schoolId || "").trim(),
+          email: String(userData.email || "").trim(),
+          firstName: String(userData.firstName || "").trim(),
+          lastName: String(userData.lastName || "").trim(),
+          program: String(userData.program || "").trim(),
+          yearSection: String(userData.yearSection || "").trim(),
+          status: String(userData.status || "").trim(),
         }),
       });
 
@@ -214,7 +279,11 @@ const UserManagement = () => {
       setShowCreateSuccessModal(true);
       return true;
     } catch (error) {
-      alert(error.message || "Unable to add student.");
+      if (String(error?.message || "").includes("School ID already exists")) {
+        setShowDuplicateSchoolIdModal(true);
+      } else {
+        alert(error.message || "Unable to add student.");
+      }
       return false;
     } finally {
       setIsAddingUser(false);
@@ -355,6 +424,332 @@ const UserManagement = () => {
 
     return { total, withViolations, warning, atRisk, highRisk };
   }, [filteredStudents]);
+
+  const exportRows = useMemo(
+    () =>
+      filteredStudents.map((student, index) => ({
+        no: index + 1,
+        schoolId: String(student.schoolId || ""),
+        studentName: String(student.studentName || ""),
+        program: String(student.program || ""),
+        yearSection: String(student.yearSection || ""),
+        status: String(student.status || ""),
+        violationCount: Number(student.violationCount) || 0,
+      })),
+    [filteredStudents],
+  );
+
+  const formatDateForFileName = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const downloadBlob = useCallback((blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const resolveHeaderImage = useCallback(async () => {
+    const response = await fetch(EXPORT_HEADER_IMAGE_PATH);
+    if (!response.ok) {
+      throw new Error(`Required header image not found: ${EXPORT_HEADER_IMAGE_PATH}`);
+    }
+
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    const dimensions = await getDataUrlDimensions(dataUrl);
+
+    return { dataUrl, dimensions };
+  }, []);
+
+  const exportAsExcel = useCallback(async () => {
+    const [{ Workbook }, { dataUrl, dimensions }] = await Promise.all([
+      import("exceljs"),
+      resolveHeaderImage(),
+    ]);
+
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet("User Management", {
+      views: [{ state: "frozen", ySplit: 6 }],
+    });
+
+    sheet.columns = [
+      { key: "no", width: 6 },
+      { key: "schoolId", width: 18 },
+      { key: "studentName", width: 30 },
+      { key: "program", width: 14 },
+      { key: "yearSection", width: 16 },
+      { key: "status", width: 14 },
+      { key: "violationCount", width: 16 },
+    ];
+
+    sheet.mergeCells("A1:G3");
+    sheet.mergeCells("A4:G4");
+    sheet.mergeCells("A5:G5");
+    sheet.getRow(1).height = 26;
+    sheet.getRow(2).height = 26;
+    sheet.getRow(3).height = 26;
+    sheet.getRow(4).height = 28;
+    sheet.getRow(5).height = 18;
+
+    const titleCell = sheet.getCell("A4");
+    titleCell.value = "User Management Report";
+    titleCell.font = { name: "Calibri", size: 18, bold: true };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const subtitleCell = sheet.getCell("A5");
+    subtitleCell.value = `Generated: ${new Date().toLocaleString()}`;
+    subtitleCell.font = { name: "Calibri", size: 11, color: { argb: "FF4B5563" } };
+    subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const headerRegionWidthPx = sheet.columns.reduce(
+      (total, column) => total + (Number(column.width || 10) * 7.5),
+      0,
+    );
+    const headerRegionHeightPx = [1, 2, 3].reduce(
+      (total, rowNumber) => total + (Number(sheet.getRow(rowNumber).height || 15) * 1.333),
+      0,
+    );
+    const imageScale = Math.min(
+      (headerRegionWidthPx - 24) / dimensions.width,
+      (headerRegionHeightPx - 6) / dimensions.height,
+      EXCEL_HEADER_IMAGE_WIDTH_PX / dimensions.width,
+      EXCEL_HEADER_IMAGE_HEIGHT_PX / dimensions.height,
+      1,
+    );
+    const imageWidthPx = Math.max(8, Math.round(dimensions.width * imageScale));
+    const imageHeightPx = Math.max(8, Math.round(dimensions.height * imageScale));
+    const leftOffsetPx = Math.max((headerRegionWidthPx - imageWidthPx) / 2, 0);
+    const topOffsetPx = Math.max((headerRegionHeightPx - imageHeightPx) / 2, 0);
+
+    const toColCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let colIndex = 0; colIndex < sheet.columns.length; colIndex += 1) {
+        const colPx = Number(sheet.columns[colIndex]?.width || 10) * 7.5;
+        if (remaining <= colPx) {
+          return colIndex + remaining / colPx;
+        }
+        remaining -= colPx;
+      }
+      return sheet.columns.length - 1;
+    };
+
+    const toRowCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let rowIndex = 1; rowIndex <= 3; rowIndex += 1) {
+        const rowPx = Number(sheet.getRow(rowIndex).height || 15) * 1.333;
+        if (remaining <= rowPx) {
+          return (rowIndex - 1) + remaining / rowPx;
+        }
+        remaining -= rowPx;
+      }
+      return 2;
+    };
+
+    const imageId = workbook.addImage({ base64: dataUrl, extension: "png" });
+    sheet.addImage(imageId, {
+      tl: {
+        col: toColCoordinate(leftOffsetPx),
+        row: toRowCoordinate(topOffsetPx),
+      },
+      ext: {
+        width: imageWidthPx,
+        height: imageHeightPx,
+      },
+    });
+
+    const headerRowNumber = 6;
+    const headerRow = sheet.getRow(headerRowNumber);
+    headerRow.values = [
+      "No",
+      "School ID",
+      "Student Name",
+      "Program",
+      "Year/Section",
+      "Status",
+      "Violation Count",
+    ];
+    headerRow.height = 24;
+
+    headerRow.eachCell((cell) => {
+      cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0F172A" },
+      };
+      cell.alignment = {
+        horizontal: "left",
+        vertical: "middle",
+        wrapText: true,
+        indent: 1,
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFCBD5E1" } },
+        left: { style: "thin", color: { argb: "FFCBD5E1" } },
+        bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+        right: { style: "thin", color: { argb: "FFCBD5E1" } },
+      };
+    });
+
+    const firstDataRow = headerRowNumber + 1;
+    for (const [index, row] of exportRows.entries()) {
+      const excelRowNumber = firstDataRow + index;
+      const excelRow = sheet.getRow(excelRowNumber);
+      excelRow.values = [
+        row.no,
+        row.schoolId,
+        row.studentName,
+        row.program,
+        row.yearSection,
+        row.status,
+        row.violationCount,
+      ];
+      excelRow.height = 28;
+
+      excelRow.eachCell((cell) => {
+        cell.font = { name: "Calibri", size: 11, color: { argb: "FF1F2937" } };
+        cell.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+          wrapText: true,
+          indent: 1,
+        };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFCBD5E1" } },
+          left: { style: "thin", color: { argb: "FFCBD5E1" } },
+          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+          right: { style: "thin", color: { argb: "FFCBD5E1" } },
+        };
+        if (excelRowNumber % 2 === 0) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" },
+          };
+        }
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const filename = `user_management_${formatDateForFileName()}.xlsx`;
+    downloadBlob(blob, filename);
+  }, [downloadBlob, exportRows, resolveHeaderImage]);
+
+  const exportAsPdf = useCallback(async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const { dataUrl, dimensions } = await resolveHeaderImage();
+    const tableMarginLeft = 10;
+    const tableMarginRight = 10;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const tableWidth = pageWidth - tableMarginLeft - tableMarginRight;
+    const baseColumnWidths = [12, 28, 55, 24, 26, 24, 24];
+    const baseTotalWidth = baseColumnWidths.reduce((sum, width) => sum + width, 0);
+    const widthScale = tableWidth / baseTotalWidth;
+    const tableColumnWidths = baseColumnWidths.map((width) => width * widthScale);
+    const tableCenterX = tableMarginLeft + tableWidth / 2;
+    let startY = 22;
+
+    if (dataUrl) {
+      const headerWidth = tableWidth;
+      const headerHeight = (dimensions.height * headerWidth) / dimensions.width;
+      const headerX = tableMarginLeft;
+      doc.addImage(dataUrl, "PNG", headerX, 8, headerWidth, headerHeight);
+      startY = 8 + headerHeight + 8;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("User Management Report", tableCenterX, startY, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, tableCenterX, startY + 5, {
+      align: "center",
+    });
+
+    autoTable(doc, {
+      startY: startY + 9,
+      head: [["No", "School ID", "Student Name", "Program", "Year/Section", "Status", "Violation Count"]],
+      body: exportRows.map((row) => [
+        row.no,
+        row.schoolId,
+        row.studentName,
+        row.program,
+        row.yearSection,
+        row.status,
+        row.violationCount,
+      ]),
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.4,
+        textColor: [31, 41, 55],
+        halign: "left",
+        valign: "middle",
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        halign: "left",
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      margin: { left: tableMarginLeft, right: tableMarginRight },
+      tableWidth,
+      columnStyles: {
+        0: { cellWidth: tableColumnWidths[0] },
+        1: { cellWidth: tableColumnWidths[1] },
+        2: { cellWidth: tableColumnWidths[2] },
+        3: { cellWidth: tableColumnWidths[3] },
+        4: { cellWidth: tableColumnWidths[4] },
+        5: { cellWidth: tableColumnWidths[5] },
+        6: { cellWidth: tableColumnWidths[6] },
+      },
+    });
+
+    doc.save(`user_management_${formatDateForFileName()}.pdf`);
+  }, [exportRows, resolveHeaderImage]);
+
+  const handleConfirmExport = async () => {
+    if (exportRows.length === 0) {
+      alert("No rows available to export.");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      if (exportFormat === "excel") {
+        await exportAsExcel();
+      } else {
+        await exportAsPdf();
+      }
+
+      setShowExportModal(false);
+    } catch (error) {
+      alert(error?.message || "Unable to export report.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const columns = [
     {
@@ -671,6 +1066,10 @@ const UserManagement = () => {
               variant="secondary"
               size="sm"
               className="gap-2 bg-[#4A5568] hover:bg-[#3d4654] border-0"
+              onClick={() => {
+                setExportFormat("excel");
+                setShowExportModal(true);
+              }}
             >
               <Download className="w-4 h-4" />
               Export
@@ -745,6 +1144,30 @@ const UserManagement = () => {
       </Modal>
 
       <Modal
+        isOpen={showDuplicateSchoolIdModal}
+        onClose={() => setShowDuplicateSchoolIdModal(false)}
+        title={<span className="font-black font-inter">Duplicate School ID</span>}
+        size="sm"
+        showCloseButton
+      >
+        <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-4 py-3 mb-4">
+          <p className="text-sm font-medium text-red-300">
+            School ID already exists. Please use a unique School ID.
+          </p>
+        </div>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => setShowDuplicateSchoolIdModal(false)}
+            className="px-6 py-2.5"
+          >
+            OK
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
         isOpen={showEditSuccessModal}
         onClose={() => setShowEditSuccessModal(false)}
         title={
@@ -769,6 +1192,62 @@ const UserManagement = () => {
             className="px-6 py-2.5"
           >
             OK
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        isOpen={showExportModal}
+        onClose={() => {
+          if (!isExporting) {
+            setShowExportModal(false);
+          }
+        }}
+        title={<span className="font-black font-inter">Export User Management Report</span>}
+        size="md"
+        showCloseButton={!isExporting}
+      >
+        <p className="text-sm text-gray-300 mb-3">
+          Choose a format for exporting the current table view.
+        </p>
+        <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 mb-4">
+          <p className="text-xs text-gray-300">
+            Rows to export: <span className="font-semibold text-white">{exportRows.length}</span>
+          </p>
+        </div>
+
+        <label className="block text-sm font-medium text-white mb-2">Format</label>
+        <div className="relative">
+          <select
+            value={exportFormat}
+            onChange={(event) => setExportFormat(event.target.value)}
+            disabled={isExporting}
+            className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
+          >
+            <option value="excel">Excel (.xlsx)</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
+        </div>
+
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowExportModal(false)}
+            disabled={isExporting}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleConfirmExport}
+            disabled={isExporting}
+            className="px-6 py-2.5"
+          >
+            {isExporting ? "Exporting..." : "Export"}
           </Button>
         </ModalFooter>
       </Modal>
