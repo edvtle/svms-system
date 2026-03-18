@@ -212,7 +212,7 @@ export async function syncAuthDatabase(options = {}) {
       NEW.updated_at = NOW();
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql
+    $$ LANGUAGE plpgsql SET search_path = public
   `);
 
   await dbPool.query(`
@@ -241,7 +241,7 @@ export async function syncAuthDatabase(options = {}) {
       NEW.updated_at = NOW();
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql
+    $$ LANGUAGE plpgsql SET search_path = public
   `);
 
   await dbPool.query(`
@@ -459,7 +459,7 @@ export async function syncStudentsDatabase() {
       NEW.updated_at = NOW();
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql
+    $$ LANGUAGE plpgsql SET search_path = public
   `);
 
   await dbPool.query(`
@@ -566,7 +566,7 @@ export async function syncSystemSettingsDatabase() {
       NEW.updated_at = NOW();
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql
+    $$ LANGUAGE plpgsql SET search_path = public
   `);
 
   await dbPool.query(`
@@ -619,7 +619,7 @@ export async function syncViolationsDatabase() {
       NEW.updated_at = NOW();
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql
+    $$ LANGUAGE plpgsql SET search_path = public
   `);
 
   await dbPool.query(`
@@ -1087,7 +1087,7 @@ export async function syncStudentViolationLogsDatabase() {
       NEW.updated_at = NOW();
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql
+    $$ LANGUAGE plpgsql SET search_path = public
   `);
 
   await dbPool.query(`
