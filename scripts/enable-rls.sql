@@ -399,10 +399,104 @@ CREATE POLICY "Admins can delete notifications" ON public.notifications FOR DELE
 -- Policy: Allow service role (backend) full access
 CREATE POLICY "Service role has full access to notifications" ON public.notifications TO service_role USING (true) WITH CHECK (true);
 -- =============================================================================
+-- 9. STUDENT_VIOLATION_ARCHIVES TABLE - RLS Setup
+-- =============================================================================
+ALTER TABLE public.student_violation_archives ENABLE ROW LEVEL SECURITY;
+-- Policy: Admins can view all archived violations
+CREATE POLICY "Admins can view archived violations" ON public.student_violation_archives FOR
+SELECT TO authenticated USING (
+    (
+      SELECT role
+      FROM users
+      WHERE id = public.get_auth_user_id()
+    ) = 'admin'
+  );
+-- Policy: Admins can insert archived violations
+CREATE POLICY "Admins can insert archived violations" ON public.student_violation_archives FOR
+INSERT TO authenticated WITH CHECK (
+    (
+      SELECT role
+      FROM users
+      WHERE id = public.get_auth_user_id()
+    ) = 'admin'
+  );
+-- Policy: Admins can update archived violations
+CREATE POLICY "Admins can update archived violations" ON public.student_violation_archives FOR
+UPDATE TO authenticated USING (
+    (
+      SELECT role
+      FROM users
+      WHERE id = public.get_auth_user_id()
+    ) = 'admin'
+  ) WITH CHECK (
+    (
+      SELECT role
+      FROM users
+      WHERE id = public.get_auth_user_id()
+    ) = 'admin'
+  );
+-- Policy: Admins can delete archived violations
+CREATE POLICY "Admins can delete archived violations" ON public.student_violation_archives FOR DELETE TO authenticated USING (
+  (
+    SELECT role
+    FROM users
+    WHERE id = public.get_auth_user_id()
+  ) = 'admin'
+);
+-- Policy: Allow service role (backend) full access
+CREATE POLICY "Service role has full access to student_violation_archives" ON public.student_violation_archives TO service_role USING (true) WITH CHECK (true);
+-- =============================================================================
+-- 10. ARCHIVEHISTORY TABLE - RLS Setup
+-- =============================================================================
+ALTER TABLE public."ArchiveHistory" ENABLE ROW LEVEL SECURITY;
+-- Policy: Admins can view archive history
+CREATE POLICY "Admins can view archive history" ON public."ArchiveHistory" FOR
+SELECT TO authenticated USING (
+    (
+      SELECT role
+      FROM users
+      WHERE id = public.get_auth_user_id()
+    ) = 'admin'
+  );
+-- Policy: Admins can insert archive history
+CREATE POLICY "Admins can insert archive history" ON public."ArchiveHistory" FOR
+INSERT TO authenticated WITH CHECK (
+    (
+      SELECT role
+      FROM users
+      WHERE id = public.get_auth_user_id()
+    ) = 'admin'
+  );
+-- Policy: Admins can update archive history
+CREATE POLICY "Admins can update archive history" ON public."ArchiveHistory" FOR
+UPDATE TO authenticated USING (
+    (
+      SELECT role
+      FROM users
+      WHERE id = public.get_auth_user_id()
+    ) = 'admin'
+  ) WITH CHECK (
+    (
+      SELECT role
+      FROM users
+      WHERE id = public.get_auth_user_id()
+    ) = 'admin'
+  );
+-- Policy: Admins can delete archive history
+CREATE POLICY "Admins can delete archive history" ON public."ArchiveHistory" FOR DELETE TO authenticated USING (
+  (
+    SELECT role
+    FROM users
+    WHERE id = public.get_auth_user_id()
+  ) = 'admin'
+);
+-- Policy: Allow service role (backend) full access
+CREATE POLICY "Service role has full access to ArchiveHistory" ON public."ArchiveHistory" TO service_role USING (true) WITH CHECK (true);
+-- =============================================================================
 -- Verification Query
 -- =============================================================================
 -- Run this to verify RLS is enabled on all tables:
 -- SELECT schemaname, tablename, rowsecurity FROM pg_tables 
 -- WHERE schemaname = 'public' 
--- AND tablename IN ('users', 'Students', 'violations', 'student_violation_logs', 'Admins', 'audit_logs', 'SystemSettings', 'notifications')
+-- AND tablename IN ('users', 'Students', 'violations', 'student_violation_logs', 'Admins', 'audit_logs', 'SystemSettings', 'notifications', 'student_violation_archives', 'ArchiveHistory')
 -- ORDER BY tablename;
