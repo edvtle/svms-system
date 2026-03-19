@@ -412,6 +412,8 @@ export async function syncStudentsDatabase() {
       year_section VARCHAR(20) NOT NULL,
       status VARCHAR(20) NOT NULL CHECK (status IN ('Regular', 'Irregular')),
       violation_count INTEGER NOT NULL DEFAULT 0,
+      is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+      archived_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -430,6 +432,16 @@ export async function syncStudentsDatabase() {
   await dbPool.query(`
     ALTER TABLE "Students"
     ADD COLUMN IF NOT EXISTS school_id VARCHAR(50)
+  `);
+
+  await dbPool.query(`
+    ALTER TABLE "Students"
+    ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE
+  `);
+
+  await dbPool.query(`
+    ALTER TABLE "Students"
+    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ
   `);
 
   await dbPool.query(`

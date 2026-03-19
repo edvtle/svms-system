@@ -1112,7 +1112,7 @@ app.put("/api/profile/student", async (req, res) => {
   }
 });
 
-app.get("/api/students", async (_req, res) => {
+app.get("/api/students", async (req, res) => {
   if (!hasDbConfig()) {
     return res.status(500).json({
       status: "error",
@@ -1124,6 +1124,8 @@ app.get("/api/students", async (_req, res) => {
   try {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
+    const archived = req.query.archived === "true"; // Parameter to filter archived users
+    
     const result = await pool.query(`
       SELECT
         s.id,
@@ -1137,11 +1139,14 @@ app.get("/api/students", async (_req, res) => {
         s.program,
         s.year_section,
         s.status,
-        s.violation_count
+        s.violation_count,
+        s.is_archived,
+        s.archived_at
       FROM "Students" s
       LEFT JOIN users u ON u.id = s.user_id
+      WHERE s.is_archived = $1
       ORDER BY s.id ASC
-    `);
+    `, [archived]);
 
     return res.status(200).json({
       status: "ok",
@@ -1368,6 +1373,7 @@ app.put("/api/students/:id", async (req, res) => {
     yearSection,
     status,
     violationCount,
+    isArchived,
   } = req.body ?? {};
 
   if (!hasDbConfig()) {
@@ -1425,9 +1431,11 @@ app.put("/api/students/:id", async (req, res) => {
         program = COALESCE(NULLIF($6, ''), program),
         year_section = COALESCE(NULLIF($7, ''), year_section),
         status = COALESCE(NULLIF($8, ''), status),
-        violation_count = COALESCE(GREATEST($9::int, 0), violation_count)
+        violation_count = COALESCE(GREATEST($9::int, 0), violation_count),
+        is_archived = CASE WHEN $11::boolean IS NOT NULL THEN $11::boolean ELSE is_archived END,
+        archived_at = CASE WHEN $11::boolean IS NOT NULL AND $11::boolean THEN COALESCE(archived_at, NOW()) ELSE archived_at END
       WHERE id = $10
-      RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, status, violation_count
+      RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, status, violation_count, is_archived, archived_at
       `,
       [
         normalizedEmail || null,
@@ -1440,6 +1448,7 @@ app.put("/api/students/:id", async (req, res) => {
         normalizedStatus || null,
         violationCount ?? null,
         id,
+        isArchived ?? null,
       ],
     );
 
@@ -1460,15 +1469,17 @@ app.put("/api/students/:id", async (req, res) => {
       : null;
     updatedStudent.username = userRow?.rows?.[0]?.username || null;
 
+    const actionDetails = isArchived ? `Archived student ${updatedStudent.full_name}.` : `Updated student ${updatedStudent.full_name}.`;
     await logAuditEvent(req, {
-      action: "UPDATE_STUDENT",
+      action: isArchived ? "ARCHIVE_STUDENT" : "UPDATE_STUDENT",
       targetType: "student",
       targetId: updatedStudent.id,
-      details: `Updated student ${updatedStudent.full_name}.`,
+      details: actionDetails,
       metadata: {
         schoolId: updatedStudent.school_id,
         program: updatedStudent.program,
         yearSection: updatedStudent.year_section,
+        isArchived: updatedStudent.is_archived,
       },
     });
 
@@ -1506,85 +1517,6 @@ app.put("/api/students/:id", async (req, res) => {
     return res.status(503).json({
       status: "error",
       message: `Unable to update student (${error.message}).`,
-    });
-  }
-});
-
-app.post("/api/students/promote-all", async (req, res) => {
-  if (!hasDbConfig()) {
-    return res.status(500).json({
-      status: "error",
-      message: "Database environment variables are missing.",
-      missing: getMissingDbVars(),
-    });
-  }
-
-  try {
-    await ensureAuthDatabaseReady();
-    const pool = getDbPool();
-
-    // Get all active REGULAR students (not irregular, not archived)
-    const result = await pool.query(
-      `
-      SELECT id, year_section
-      FROM "Students"
-      WHERE status = 'Regular'
-      ORDER BY id ASC
-      `,
-    );
-
-    const students = result.rows || [];
-    let promotedCount = 0;
-
-    for (const student of students) {
-      const yearSection = String(student.year_section || '').trim();
-      const match = yearSection.match(/^(\d+)\s*([a-zA-Z]+)$/);
-
-      if (!match) {
-        // Skip students with invalid year_section format
-        continue;
-      }
-
-      const year = Number(match[1]);
-      const section = match[2];
-
-      // Only promote if year is less than 4 (prevent overflow)
-      if (year >= 4) {
-        continue;
-      }
-
-      const newYear = year + 1;
-      const newYearSection = `${newYear}${section}`;
-
-      await pool.query(
-        `UPDATE "Students" SET year_section = $1 WHERE id = $2`,
-        [newYearSection, student.id],
-      );
-
-      promotedCount += 1;
-    }
-
-    await logAuditEvent(req, {
-      action: "PROMOTE_STUDENTS",
-      targetType: "student",
-      targetId: null,
-      details: `Promoted ${promotedCount} students to next year level.`,
-      metadata: {
-        promotedCount,
-        totalStudents: students.length,
-      },
-    });
-
-    return res.status(200).json({
-      status: "ok",
-      message: `Promoted ${promotedCount} student(s) to the next year level.`,
-      promotedCount,
-      totalStudents: students.length,
-    });
-  } catch (error) {
-    return res.status(503).json({
-      status: "error",
-      message: `Unable to promote students (${error.message}).`,
     });
   }
 });

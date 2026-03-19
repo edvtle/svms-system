@@ -7,8 +7,8 @@ import {
   Edit,
   Trash2,
   Eye,
-  Gift,
   CheckCircle,
+  Minus,
 } from "lucide-react";
 import Button from "../../components/ui/Button";
 import SearchBar from "../../components/ui/SearchBar";
@@ -68,13 +68,18 @@ const UserManagement = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState("excel");
   const [isExporting, setIsExporting] = useState(false);
-  const [showPromoteConfirmModal, setShowPromoteConfirmModal] = useState(false);
-  const [isPromoting, setIsPromoting] = useState(false);
-  const [promoteResult, setPromoteResult] = useState(null);
-  const [showPromoteResultModal, setShowPromoteResultModal] = useState(false);
 
   const [studentData, setStudentData] = useState([]);
+  const [showArchiveSchoolYearModal, setShowArchiveSchoolYearModal] = useState(false);
+  const [newSchoolYear, setNewSchoolYear] = useState("S.Y. 2026-2027");
+  const [isArchivingSchoolYear, setIsArchivingSchoolYear] = useState(false);
+  const [currentSchoolYear, setCurrentSchoolYear] = useState("S.Y. 2025-2026");
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Archive users state
+  const [selectedUserIds, setSelectedUserIds] = useState(new Set());
+  const [showArchiveUsersModal, setShowArchiveUsersModal] = useState(false);
+  const [isArchivingUsers, setIsArchivingUsers] = useState(false);
 
   const fetchStudents = async () => {
     setIsLoading(true);
@@ -134,6 +139,8 @@ const UserManagement = () => {
             yearSection: student.year_section,
             status: student.status,
             violationCount: Number(student.violation_count) || 0,
+            isArchived: Boolean(student.is_archived),
+            archivedAt: student.archived_at,
             maxViolationDegreeRank: maxDegreeRank,
             maxViolationDegree: degreeName,
           };
@@ -166,6 +173,8 @@ const UserManagement = () => {
     yearSection: student.year_section,
     status: student.status,
     violationCount: Number(student.violation_count) || 0,
+    isArchived: Boolean(student.is_archived),
+    archivedAt: student.archived_at,
     maxViolationDegreeRank: existing?.maxViolationDegreeRank ?? 0,
     maxViolationDegree: existing?.maxViolationDegree ?? "",
   });
@@ -321,33 +330,125 @@ const UserManagement = () => {
     }
   };
 
-  const handlePromoteAll = async () => {
-    setIsPromoting(true);
-    try {
-      const response = await fetch("/api/students/promote-all", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuditHeaders(),
-        },
-      });
+  // Archive handlers
+  const handleArchiveSchoolYear = async () => {
+    if (!newSchoolYear.trim()) {
+      alert("Please enter the new school year.");
+      return;
+    }
 
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(result?.message || "Failed to promote students.");
+    setIsArchivingSchoolYear(true);
+    try {
+      // Archive all students from current school year
+      // Increment year level by +1 for all except 4th year students
+      const studentsToUpdate = studentData.filter((s) => !s.isArchived);
+
+      for (const student of studentsToUpdate) {
+        // Parse year from year_section (e.g., "1 A" -> 1)
+        const yearMatch = String(student.yearSection || "").match(/^(\d+)/);
+        const currentYear = yearMatch ? parseInt(yearMatch[1]) : 0;
+
+        if (currentYear === 4) {
+          // Archive 4th year students
+          await fetch(`/api/students/${student.id}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuditHeaders(),
+            },
+            body: JSON.stringify({
+              isArchived: true,
+              archivedAt: new Date().toISOString(),
+            }),
+          });
+        } else if (currentYear < 4) {
+          // Increment year level for freshman/sophomore/junior
+          const newYear = currentYear + 1;
+          const newYearSection = student.yearSection.replace(/^\d+/, String(newYear));
+
+          await fetch(`/api/students/${student.id}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuditHeaders(),
+            },
+            body: JSON.stringify({
+              yearSection: newYearSection,
+            }),
+          });
+        }
       }
 
-      setPromoteResult(result);
-      setShowPromoteResultModal(true);
-      setShowPromoteConfirmModal(false);
+      // Update school year
+      setCurrentSchoolYear(newSchoolYear);
+      setNewSchoolYear("");
+      setShowArchiveSchoolYearModal(false);
 
-      // Refresh student data
+      // Refresh data
       await fetchStudents();
+      alert(`School year archived successfully!\n\n${studentsToUpdate.filter(s => String(s.yearSection || "").match(/^4/)).length} 4th-year students have been archived.\n${studentsToUpdate.filter(s => !String(s.yearSection || "").match(/^4/)).length} students have been promoted to the next year level.`);
     } catch (error) {
-      alert(error.message || "Unable to promote students.");
-      setShowPromoteConfirmModal(false);
+      alert(error.message || "Unable to archive school year.");
     } finally {
-      setIsPromoting(false);
+      setIsArchivingSchoolYear(false);
+    }
+  };
+
+  // Checkbox handlers
+  const handleToggleCheckbox = (studentId) => {
+    setSelectedUserIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(studentId)) {
+        newSet.delete(studentId);
+      } else {
+        newSet.add(studentId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedUserIds.size === filteredStudents.length) {
+      setSelectedUserIds(new Set());
+    } else {
+      setSelectedUserIds(new Set(filteredStudents.map((s) => s.id)));
+    }
+  };
+
+  const handleArchiveUsers = async () => {
+    if (selectedUserIds.size === 0) {
+      alert("Please select at least one user to archive.");
+      return;
+    }
+
+    setIsArchivingUsers(true);
+    try {
+      for (const userId of selectedUserIds) {
+        await fetch(`/api/students/${userId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuditHeaders(),
+          },
+          body: JSON.stringify({
+            isArchived: true,
+          }),
+        });
+      }
+
+      // Clear selection and refresh data
+      setSelectedUserIds(new Set());
+      setShowArchiveUsersModal(false);
+
+      // Refresh data
+      await fetchStudents();
+      alert(
+        `Successfully archived ${selectedUserIds.size} student(s).\n\nArchived students have been moved to the archive folder.`,
+      );
+    } catch (error) {
+      alert(error.message || "Unable to archive selected users.");
+    } finally {
+      setIsArchivingUsers(false);
     }
   };
 
@@ -797,6 +898,28 @@ const UserManagement = () => {
 
   const columns = [
     {
+      key: "select",
+      label: (
+        <input
+          type="checkbox"
+          checked={selectedUserIds.size === filteredStudents.length && filteredStudents.length > 0}
+          onChange={handleSelectAll}
+          className="w-4 h-4 cursor-pointer"
+        />
+      ),
+      width: "w-12",
+      render: (value, row) => {
+        return (
+          <input
+            type="checkbox"
+            checked={selectedUserIds.has(row.id)}
+            onChange={() => handleToggleCheckbox(row.id)}
+            className="w-4 h-4 cursor-pointer"
+          />
+        );
+      },
+    },
+    {
       key: "no",
       label: "No",
       width: "w-12",
@@ -917,7 +1040,7 @@ const UserManagement = () => {
       </AnimatedContent>
 
       <AnimatedContent distance={40} delay={0.1}>
-        <p className="text-white font-semibold mb-4">S.Y. 2025-2026</p>
+        <p className="text-white font-semibold mb-4">{currentSchoolYear}</p>
       </AnimatedContent>
 
       <AnimatedContent distance={40} delay={0.2}>
@@ -1100,22 +1223,31 @@ const UserManagement = () => {
             </span>
           </div>
           <div className="flex gap-3">
+            {selectedUserIds.size > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="gap-2 bg-gray-600 hover:bg-gray-700 border-0"
+                onClick={() => setSelectedUserIds(new Set())}
+              >
+                <Minus className="w-4 h-4" />
+                Clear All
+              </Button>
+            )}
             <Button
               variant="secondary"
               size="sm"
-              className="gap-2 bg-[#4A9B9B] hover:bg-[#3d8585] border-0"
-              onClick={() => setShowPromoteConfirmModal(true)}
-            >
-              <Gift className="w-4 h-4" />
-              Promote
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="gap-2 bg-[#4A5568] hover:bg-[#3d4654] border-0"
+              className="gap-2 bg-blue-600 hover:bg-blue-700 border-0"
+              onClick={() => {
+                if (selectedUserIds.size === 0) {
+                  alert("Please select at least one user to archive.");
+                  return;
+                }
+                setShowArchiveUsersModal(true);
+              }}
             >
               <Archive className="w-4 h-4" />
-              Archive
+              Archive {selectedUserIds.size > 0 && `(${selectedUserIds.size})`}
             </Button>
             <Button
               variant="secondary"
@@ -1336,74 +1468,138 @@ const UserManagement = () => {
         </ModalFooter>
       </Modal>
 
-      {/* Promote Confirmation Modal */}
+      {/* Archive School Year Modal */}
       <Modal
-        isOpen={showPromoteConfirmModal}
-        onClose={() => !isPromoting && setShowPromoteConfirmModal(false)}
-        title="Confirm Year Level Promotion"
-        size="sm"
-        showCloseButton
+        isOpen={showArchiveSchoolYearModal}
+        onClose={() => {
+          if (!isArchivingSchoolYear) {
+            setShowArchiveSchoolYearModal(false);
+            setNewSchoolYear("S.Y. 2026-2027");
+          }
+        }}
+        title={<span className="font-black font-inter">Archive School Year</span>}
+        size="md"
+        showCloseButton={!isArchivingSchoolYear}
       >
-        <div className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-4 py-3 mb-4">
-          <p className="text-sm font-medium text-blue-300">
-            This will promote all active Regular students to the next year level (1st → 2nd, etc.). 
-            Students at 4th year will not be promoted to prevent overflow.
-          </p>
+        <div className="space-y-4">
+          <div className="rounded-lg border border-orange-400/25 bg-orange-500/10 px-4 py-3">
+            <p className="text-sm text-orange-200 font-medium mb-2">⚠️ Important Notice</p>
+            <p className="text-xs text-orange-100 leading-relaxed">
+              Archiving the school year will automatically increase all students' year level by +1 (except for 4th-year students, who will be archived directly).
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-white mb-2">Current School Year (Folder Name)</label>
+            <input
+              type="text"
+              value={currentSchoolYear}
+              disabled
+              className="w-full backdrop-blur-md border border-white/20 rounded-lg px-4 py-3 text-sm text-gray-400 bg-white/5 cursor-not-allowed"
+            />
+            <p className="text-xs text-gray-400 mt-1">This will be used as the archive folder name</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-white mb-2">New School Year</label>
+            <input
+              type="text"
+              value={newSchoolYear}
+              onChange={(e) => setNewSchoolYear(e.target.value)}
+              placeholder="S.Y. 2026-2027"
+              disabled={isArchivingSchoolYear}
+              className="w-full backdrop-blur-md border border-white/20 rounded-lg px-4 py-3 text-sm text-white bg-white/5 focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all disabled:opacity-50"
+            />
+          </div>
+
+          <div className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-4 py-3">
+            <p className="text-xs text-blue-200">
+              <span className="font-semibold">Summary:</span> {studentData.filter(s => !String(s.yearSection || "").match(/^4/)).length} students will be promoted to next level. {studentData.filter(s => String(s.yearSection || "").match(/^4/)).length} 4th-year students will be archived.
+            </p>
+          </div>
         </div>
+
         <ModalFooter>
           <Button
             type="button"
             variant="outline"
-            onClick={() => setShowPromoteConfirmModal(false)}
-            disabled={isPromoting}
+            onClick={() => {
+              setShowArchiveSchoolYearModal(false);
+              setNewSchoolYear("S.Y. 2026-2027");
+            }}
+            disabled={isArchivingSchoolYear}
             className="px-6 py-2.5"
           >
             Cancel
           </Button>
           <Button
             type="button"
-            variant="primary"
-            onClick={handlePromoteAll}
-            disabled={isPromoting}
+            variant="danger"
+            onClick={handleArchiveSchoolYear}
+            disabled={isArchivingSchoolYear || !newSchoolYear.trim()}
             className="px-6 py-2.5"
           >
-            {isPromoting ? "Promoting..." : "Confirm Promotion"}
+            {isArchivingSchoolYear ? "Archiving..." : "Archive School Year"}
           </Button>
         </ModalFooter>
       </Modal>
 
-      {/* Promote Result Modal */}
+      {/* Archive Selected Users Modal */}
       <Modal
-        isOpen={showPromoteResultModal}
-        onClose={() => setShowPromoteResultModal(false)}
-        title={
-          <span className="font-black font-inter flex items-center gap-2">
-            <CheckCircle className="w-5 h-5 text-green-400" />
-            Promotion Complete
-          </span>
-        }
-        size="sm"
-        showCloseButton
+        isOpen={showArchiveUsersModal}
+        onClose={() => {
+          if (!isArchivingUsers) {
+            setShowArchiveUsersModal(false);
+          }
+        }}
+        title={<span className="font-black font-inter">Archive Selected Users</span>}
+        size="md"
+        showCloseButton={!isArchivingUsers}
       >
-        <div className="rounded-lg border border-green-400/25 bg-green-500/10 px-4 py-3 mb-4">
-          <p className="text-sm font-medium text-green-300">
-            {promoteResult?.message}
+        <div className="rounded-lg border border-orange-400/25 bg-orange-500/10 px-4 py-3 mb-4">
+          <p className="text-sm text-orange-200 font-medium mb-2">⚠️ Archive Action</p>
+          <p className="text-xs text-orange-100 leading-relaxed">
+            {selectedUserIds.size} student(s) will be moved to the archive folder. They will no longer appear in the regular student list but can be viewed in the archive tab.
           </p>
-          {promoteResult && (
-            <div className="mt-3 space-y-1 text-xs text-green-200">
-              <p>Students promoted: <span className="font-bold">{promoteResult.promotedCount}</span></p>
-              <p>Total students: <span className="font-bold">{promoteResult.totalStudents}</span></p>
-            </div>
-          )}
         </div>
+
+        <div className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-4 py-3 mb-4">
+          <p className="text-xs text-blue-200">
+            <span className="font-semibold">Note:</span> Archived users' data remains in the database and can be restored if needed.
+          </p>
+        </div>
+
+        <div className="mb-4">
+          <p className="text-sm text-gray-300 font-semibold mb-3">Selected Students:</p>
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-white/20 bg-white/5 px-3 py-2">
+            {filteredStudents
+              .filter((s) => selectedUserIds.has(s.id))
+              .map((student) => (
+                <div key={student.id} className="py-1 text-xs text-gray-300 border-b border-white/10 last:border-0">
+                  {student.studentName} ({student.schoolId})
+                </div>
+              ))}
+          </div>
+        </div>
+
         <ModalFooter>
           <Button
             type="button"
-            variant="primary"
-            onClick={() => setShowPromoteResultModal(false)}
+            variant="outline"
+            onClick={() => setShowArchiveUsersModal(false)}
+            disabled={isArchivingUsers}
             className="px-6 py-2.5"
           >
-            OK
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={handleArchiveUsers}
+            disabled={isArchivingUsers || selectedUserIds.size === 0}
+            className="px-6 py-2.5"
+          >
+            {isArchivingUsers ? "Archiving..." : "Archive Selected Users"}
           </Button>
         </ModalFooter>
       </Modal>
