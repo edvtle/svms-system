@@ -1125,8 +1125,9 @@ app.get("/api/students", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
     const archived = req.query.archived === "true"; // Parameter to filter archived users
-    
-    const result = await pool.query(`
+
+    const result = await pool.query(
+      `
       SELECT
         s.id,
         s.user_id,
@@ -1146,7 +1147,9 @@ app.get("/api/students", async (req, res) => {
       LEFT JOIN users u ON u.id = s.user_id
       WHERE s.is_archived = $1
       ORDER BY s.id ASC
-    `, [archived]);
+    `,
+      [archived],
+    );
 
     return res.status(200).json({
       status: "ok",
@@ -1469,7 +1472,9 @@ app.put("/api/students/:id", async (req, res) => {
       : null;
     updatedStudent.username = userRow?.rows?.[0]?.username || null;
 
-    const actionDetails = isArchived ? `Archived student ${updatedStudent.full_name}.` : `Updated student ${updatedStudent.full_name}.`;
+    const actionDetails = isArchived
+      ? `Archived student ${updatedStudent.full_name}.`
+      : `Updated student ${updatedStudent.full_name}.`;
     await logAuditEvent(req, {
       action: isArchived ? "ARCHIVE_STUDENT" : "UPDATE_STUDENT",
       targetType: "student",
@@ -1665,7 +1670,7 @@ app.get("/api/student-violations", async (_req, res) => {
       WHERE svl.cleared_at IS NULL
       ORDER BY svl.created_at DESC, svl.id DESC
       `,
-      []
+      [],
     );
 
     return res.status(200).json({
@@ -3315,7 +3320,9 @@ app.post("/api/archive/violations", async (req, res) => {
     );
 
     const violations = violationsToArchive.rows || [];
-    console.log(`Found ${violations.length} violations to archive for ${semester} S.Y. ${schoolYear}`);
+    console.log(
+      `Found ${violations.length} violations to archive for ${semester} S.Y. ${schoolYear}`,
+    );
 
     // STEP 2: Move violations to archive table
     if (violations.length > 0) {
@@ -3363,7 +3370,7 @@ app.post("/api/archive/violations", async (req, res) => {
       // Get unique student IDs from the violations we just archived
       const affectedStudentIds = violations.map((v) => v.student_id);
       const uniqueStudentIds = [...new Set(affectedStudentIds)];
-      
+
       if (uniqueStudentIds.length > 0) {
         // Update violation_count for each affected student based on remaining violations
         await pool.query(
@@ -3376,7 +3383,9 @@ app.post("/api/archive/violations", async (req, res) => {
            WHERE s.id = ANY($1)`,
           [uniqueStudentIds],
         );
-        console.log(`Refreshed violation counts for ${uniqueStudentIds.length} students`);
+        console.log(
+          `Refreshed violation counts for ${uniqueStudentIds.length} students`,
+        );
       }
     }
 
@@ -3449,7 +3458,9 @@ app.post("/api/archive/violations", async (req, res) => {
       },
     });
 
-    console.log(`Archive complete: ${archivedCount} violations archived, ${promotedCount} students promoted`);
+    console.log(
+      `Archive complete: ${archivedCount} violations archived, ${promotedCount} students promoted`,
+    );
 
     return res.status(200).json({
       status: "ok",
@@ -3525,9 +3536,9 @@ app.get("/api/archive/school-years", async (req, res) => {
        ORDER BY school_year DESC`,
     );
 
-    const schoolYears = (result.rows || []).map((row) => row.school_year).filter((sy) => sy);
-
-    console.log("Archive school years:", schoolYears);
+    const schoolYears = (result.rows || [])
+      .map((row) => row.school_year)
+      .filter((sy) => sy);
 
     return res.status(200).json({
       status: "ok",
@@ -3541,8 +3552,6 @@ app.get("/api/archive/school-years", async (req, res) => {
     });
   }
 });
-
-
 
 // GET archived violations by school year and semester
 app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
@@ -3597,7 +3606,6 @@ app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
     );
 
     const violations = result.rows || [];
-    console.log(`Fetched ${violations.length} archived violations for ${semester} S.Y. ${schoolYear}`);
 
     return res.status(200).json({
       status: "ok",
@@ -3631,9 +3639,10 @@ app.put("/api/archive/users/:id", async (req, res) => {
     // Only create fullName if both firstName and lastName are provided and non-empty
     const cleanedFirstName = String(firstName || "").trim();
     const cleanedLastName = String(lastName || "").trim();
-    const fullName = (cleanedFirstName && cleanedLastName) 
-      ? `${cleanedFirstName} ${cleanedLastName}` 
-      : null;
+    const fullName =
+      cleanedFirstName && cleanedLastName
+        ? `${cleanedFirstName} ${cleanedLastName}`
+        : null;
 
     const result = await pool.query(
       `UPDATE "Students"
@@ -3653,7 +3662,7 @@ app.put("/api/archive/users/:id", async (req, res) => {
         String(program || "").trim() || null,
         String(yearSection || "").trim() || null,
         String(status || "").trim() || null,
-        id
+        id,
       ],
     );
 
@@ -3716,7 +3725,7 @@ app.put("/api/archive/violations/:id", async (req, res) => {
       [
         String(remarks || "").trim() || null,
         String(reportedBy || "").trim() || null,
-        id
+        id,
       ],
     );
 
