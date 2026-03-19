@@ -409,16 +409,57 @@ const StudentViolation = () => {
   }, [records, searchTerm, selectedStatus, selectedYear, selectedDate, sortOrder]);
 
   const metrics = useMemo(() => {
+    const degreeRank = {
+      "First Degree": 1,
+      "Second Degree": 2,
+      "Third Degree": 3,
+      "Fourth Degree": 4,
+      "Fifth Degree": 5,
+      "Sixth Degree": 6,
+      "Seventh Degree": 7,
+    };
+
     const pending = records.filter((row) => !row.cleared_at).length;
     const cleared = records.filter((row) => row.cleared_at).length;
-    const atRisk = new Set(
-      records.filter((row) => !row.cleared_at).map((row) => row.student_id),
-    ).size;
+
+    // Calculate violation data per student (active violations only)
+    const activeRecords = records.filter((row) => !row.cleared_at);
+    const studentData = activeRecords.reduce((acc, rec) => {
+      const studentId = Number(rec.student_id);
+      if (!studentId) return acc;
+
+      if (!acc[studentId]) {
+        acc[studentId] = { count: 0, maxDegree: 0 };
+      }
+
+      acc[studentId].count += 1;
+      const rank = degreeRank[String(rec.violation_degree)] || 0;
+      acc[studentId].maxDegree = Math.max(acc[studentId].maxDegree, rank);
+      return acc;
+    }, {});
+
+    // Count students by highest severity category
+    let warning = 0;
+    let atRisk = 0;
+    let highRisk = 0;
+
+    Object.values(studentData).forEach((data) => {
+      // Categorize by highest severity
+      if (data.count >= 5 || (data.maxDegree >= 5 && data.maxDegree <= 7)) {
+        highRisk += 1;
+      } else if ((data.count >= 3 && data.count <= 4) || (data.maxDegree >= 3 && data.maxDegree <= 4)) {
+        atRisk += 1;
+      } else if (data.count === 2 || data.maxDegree === 2) {
+        warning += 1;
+      }
+    });
 
     return {
       pending,
       cleared,
+      warning,
       atRisk,
+      highRisk,
       total: records.length,
     };
   }, [records]);
@@ -1019,7 +1060,7 @@ const StudentViolation = () => {
 
       <div className="grid grid-cols-2 gap-4 mt-6 mb-6 w-full h-full">
         <AnimatedContent delay={0.05}>
-          <Card className="h-full min-h-[110px] col-span-3 flex flex-col justify-between items-start px-6 py-5 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02]">
+          <Card className="h-full min-h-[110px] col-span-4 flex flex-col justify-between items-start px-6 py-5 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02]">
             <div className="flex w-full justify-between items-center mb-2">
               <span className="text-lg font-black font-inter">Student Analytics</span>
               <span className="text-green-400 font-bold text-sm">+0%</span>
@@ -1030,23 +1071,41 @@ const StudentViolation = () => {
           </Card>
         </AnimatedContent>
 
-        <div className="grid grid-cols-2 gap-4 w-full h-full">
+        <div className="grid grid-cols-4 gap-4 w-full h-full">
           <AnimatedContent delay={0.1}>
+            <StatCard
+              title="Warning Students"
+              value={metrics.warning}
+              percentage={0}
+              icon={<TrendingUp />}
+              className="col-span-1 min-w-[200px] h-full w-full"
+            />
+          </AnimatedContent>
+          <AnimatedContent delay={0.15}>
             <StatCard
               title="At-Risk Students"
               value={metrics.atRisk}
               percentage={0}
               icon={<TrendingUp />}
-              className="col-span-1 min-w-[220px] h-full w-full"
+              className="col-span-1 min-w-[200px] h-full w-full"
             />
           </AnimatedContent>
           <AnimatedContent delay={0.2}>
             <StatCard
-              title="Violations"
+              title="High-Risk Students"
+              value={metrics.highRisk}
+              percentage={0}
+              icon={<TrendingDown />}
+              className="col-span-1 min-w-[200px] h-full w-full"
+            />
+          </AnimatedContent>
+          <AnimatedContent delay={0.25}>
+            <StatCard
+              title="Total Violations"
               value={metrics.total}
               percentage={0}
               icon={<TrendingDown />}
-              className="col-span-1 min-w-[220px] h-full w-full"
+              className="col-span-1 min-w-[200px] h-full w-full"
             />
           </AnimatedContent>
         </div>

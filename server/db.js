@@ -23,10 +23,11 @@ function getSqlOptions() {
   const useSsl = process.env.PGSSL !== "false";
 
   return {
-    max: 30,
+    max: 50,
     connect_timeout: 10,
-    idle_timeout: 30,
-    max_lifetime: 60 * 60,
+    idle_timeout: 60,
+    max_lifetime: 60 * 60 * 24,
+    query_timeout: 30 * 1000, // 30 seconds query timeout
     ssl: useSsl ? { rejectUnauthorized: false } : undefined,
   };
 }

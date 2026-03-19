@@ -45,6 +45,7 @@ const Dashboard = () => {
   const [activityModalOpen, setActivityModalOpen] = useState(false);
   const [violationMetrics, setViolationMetrics] = useState({
     activeViolations: 0,
+    warningStudents: 0,
     atRiskStudents: 0,
     highRiskStudents: 0,
   });
@@ -83,14 +84,23 @@ const Dashboard = () => {
       setIsLoadingMetrics(true);
 
       try {
-        const response = await fetch("/api/student-violations");
-        const result = await response.json().catch(() => ({}));
+        const [studentsRes, violationsRes] = await Promise.all([
+          fetch("/api/students"),
+          fetch("/api/student-violations"),
+        ]);
 
-        if (!response.ok || !Array.isArray(result?.records)) {
-          throw new Error("Failed to load violation metrics.");
+        const studentsResult = await studentsRes.json().catch(() => ({}));
+        const violationsResult = await violationsRes.json().catch(() => ({}));
+
+        if (!studentsRes.ok || !Array.isArray(studentsResult?.students)) {
+          throw new Error("Failed to load students.");
         }
 
-        const activeRecords = result.records.filter((rec) => !rec.cleared_at);
+        if (!violationsRes.ok || !Array.isArray(violationsResult?.records)) {
+          throw new Error("Failed to load violations.");
+        }
+
+        const activeRecords = violationsResult.records.filter((rec) => !rec.cleared_at);
 
         const studentMaxDegree = activeRecords.reduce((acc, rec) => {
           const studentId = Number(rec.student_id);
@@ -101,17 +111,34 @@ const Dashboard = () => {
           return acc;
         }, {});
 
-        const atRiskStudents = Object.values(studentMaxDegree).filter(
-          (rank) => rank >= 3 && rank < 5,
-        ).length;
+        // Create map of violation counts from students
+        const violationCountMap = {};
+        (studentsResult.students || []).forEach((student) => {
+          violationCountMap[student.id] = Number(student.violation_count) || 0;
+        });
 
-        const highRiskStudents = Object.values(studentMaxDegree).filter(
-          (rank) => rank >= 5,
-        ).length;
+        // Categorize students (each in one category based on highest severity)
+        let warningStudents = 0;
+        let atRiskStudents = 0;
+        let highRiskStudents = 0;
+
+        Object.entries(studentMaxDegree).forEach(([studentId, degree]) => {
+          const count = violationCountMap[studentId] || 0;
+          
+          // Categorize by highest severity
+          if (count >= 5 || (degree >= 5 && degree <= 7)) {
+            highRiskStudents += 1;
+          } else if ((count >= 3 && count <= 4) || (degree >= 3 && degree <= 4)) {
+            atRiskStudents += 1;
+          } else if (count === 2 || degree === 2) {
+            warningStudents += 1;
+          }
+        });
 
         if (isMounted) {
           setViolationMetrics({
             activeViolations: activeRecords.length,
+            warningStudents,
             atRiskStudents,
             highRiskStudents,
           });
@@ -120,6 +147,7 @@ const Dashboard = () => {
         if (isMounted) {
           setViolationMetrics({
             activeViolations: 0,
+            warningStudents: 0,
             atRiskStudents: 0,
             highRiskStudents: 0,
           });
@@ -152,10 +180,11 @@ const Dashboard = () => {
     };
 
     const getRiskColor = (rank) => {
-      if (rank >= 5) return "bg-red-500";
-      if (rank >= 3) return "bg-orange-500";
+      if (rank >= 5 && rank <= 7) return "bg-red-500";
+      if (rank >= 3 && rank <= 4) return "bg-orange-500";
       if (rank === 2) return "bg-yellow-500";
-      return "bg-cyan-500";
+      if (rank === 1) return "bg-green-500";
+      return "bg-gray-500";
     };
 
     const fetchRankingData = async () => {
@@ -404,14 +433,25 @@ const Dashboard = () => {
               className="flex-1"
             />
             <AdminStatCard
+              title="Warning Students"
+              value={
+                isLoadingMetrics ? "-" : violationMetrics.warningStudents.toString()
+              }
+              percentage={0}
+              comparisonLabel="vs last semester"
+              icon={<AlertTriangle className="w-5 h-5 text-yellow-400" />}
+              iconBgColor="bg-yellow-500/20"
+              className="flex-1"
+            />
+            <AdminStatCard
               title="At-Risk Students"
               value={
                 isLoadingMetrics ? "-" : violationMetrics.atRiskStudents.toString()
               }
               percentage={0}
               comparisonLabel="vs last semester"
-              icon={<Users className="w-5 h-5 text-cyan-400" />}
-              iconBgColor="bg-cyan-500/20"
+              icon={<Users className="w-5 h-5 text-orange-400" />}
+              iconBgColor="bg-orange-500/20"
               className="flex-1"
             />
             <AdminStatCard

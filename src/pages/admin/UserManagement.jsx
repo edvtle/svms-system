@@ -443,18 +443,28 @@ const UserManagement = () => {
     const withViolations = filteredStudents.filter(
       (s) => s.violationCount > 0,
     ).length;
-    const warning = filteredStudents.filter((s) => s.maxViolationDegreeRank === 2).length;
+    
+    // Count students by highest severity category
+    const warning = filteredStudents.filter((s) => {
+      if (s.violationCount >= 5 || (s.maxViolationDegreeRank >= 5 && s.maxViolationDegreeRank <= 7)) {
+        return false; // high-risk
+      }
+      if ((s.violationCount >= 3 && s.violationCount <= 4) || (s.maxViolationDegreeRank >= 3 && s.maxViolationDegreeRank <= 4)) {
+        return false; // at-risk
+      }
+      return s.violationCount === 2 || s.maxViolationDegreeRank === 2;
+    }).length;
 
-    // At-risk based on Degrees of Offenses table:
-    // 3rd Degree = Last Warning, 4th Degree = 3 Days Suspension.
-    const atRisk = filteredStudents.filter(
-      (s) => s.maxViolationDegreeRank >= 3 && s.maxViolationDegreeRank < 5,
-    ).length;
+    const atRisk = filteredStudents.filter((s) => {
+      if (s.violationCount >= 5 || (s.maxViolationDegreeRank >= 5 && s.maxViolationDegreeRank <= 7)) {
+        return false; // high-risk
+      }
+      return (s.violationCount >= 3 && s.violationCount <= 4) || (s.maxViolationDegreeRank >= 3 && s.maxViolationDegreeRank <= 4);
+    }).length;
 
-    // High-risk when reaching 5th degree or more (1 week+ suspension).
-    const highRisk = filteredStudents.filter(
-      (s) => s.maxViolationDegreeRank >= 5,
-    ).length;
+    const highRisk = filteredStudents.filter((s) => {
+      return s.violationCount >= 5 || (s.maxViolationDegreeRank >= 5 && s.maxViolationDegreeRank <= 7);
+    }).length;
 
     return { total, withViolations, warning, atRisk, highRisk };
   }, [filteredStudents]);
@@ -808,22 +818,32 @@ const UserManagement = () => {
       key: "violationCount",
       label: "Violation Count",
       render: (value, row) => {
-        const degreeRank = row.maxViolationDegreeRank || 0;
         let bgColor = "bg-green-500";
 
-        if (degreeRank >= 5) {
-          bgColor = "bg-red-500";
-        } else if (degreeRank >= 3) {
-          bgColor = "bg-orange-500";
-        } else if (degreeRank === 2) {
-          bgColor = "bg-yellow-500";
-        } else if (value >= 5) {
-          bgColor = "bg-red-500";
-        } else if (value >= 3) {
-          bgColor = "bg-orange-500";
+        // Get color based on count
+        let countColor = "bg-green-500";
+        if (value >= 5) {
+          countColor = "bg-red-500";
+        } else if (value >= 3 && value <= 4) {
+          countColor = "bg-orange-500";
         } else if (value === 2) {
-          bgColor = "bg-yellow-500";
+          countColor = "bg-yellow-500";
         }
+
+        // Get color based on degree rank (if available)
+        const degreeRank = row.maxViolationDegreeRank || 0;
+        let degreeColor = "bg-green-500";
+        if (degreeRank >= 5 && degreeRank <= 7) {
+          degreeColor = "bg-red-500";
+        } else if (degreeRank >= 3 && degreeRank <= 4) {
+          degreeColor = "bg-orange-500";
+        } else if (degreeRank === 2) {
+          degreeColor = "bg-yellow-500";
+        }
+
+        // Use the more severe color (degree takes priority if higher severity)
+        const degreeOrder = { "bg-green-500": 0, "bg-yellow-500": 1, "bg-orange-500": 2, "bg-red-500": 3 };
+        bgColor = degreeOrder[degreeColor] >= degreeOrder[countColor] ? degreeColor : countColor;
 
         return (
           <span
