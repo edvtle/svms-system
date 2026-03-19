@@ -15,6 +15,7 @@ import {
   Edit,
   CheckCircle,
   PenTool,
+  Archive,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -26,6 +27,7 @@ import SearchBar from "@/components/ui/SearchBar";
 import LogNewViolationModal from "@/components/modals/LogNewViolationModal";
 import SignaturePadModal from "@/components/modals/SignaturePadModal";
 import EditViolationModal from "@/components/modals/EditViolationModal";
+import ArchiveViolationModal from "@/components/modals/ArchiveViolationModal";
 import Modal, { ModalFooter } from "@/components/ui/Modal";
 import { getAuditHeaders } from "@/lib/auditHeaders";
 
@@ -76,6 +78,10 @@ const StudentViolation = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState("excel");
   const [isExporting, setIsExporting] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [currentSemester, setCurrentSemester] = useState("");
+  const [currentSchoolYear, setCurrentSchoolYear] = useState("");
+  const [archiveSuccessMessage, setArchiveSuccessMessage] = useState("");
 
   const [searchTerm, setSearchTerm] = useState("");
   const [sortOrder, setSortOrder] = useState("A-Z");
@@ -91,6 +97,23 @@ const StudentViolation = () => {
       setShowLogModal(true);
     }
   }, [location]);
+
+  // Load current semester and school year
+  useEffect(() => {
+    const loadCurrentSettings = async () => {
+      try {
+        const response = await fetch("/api/archive/current-settings");
+        const data = await response.json();
+        if (response.ok && data.status === "ok") {
+          setCurrentSemester(data.currentSemester || "1ST SEM");
+          setCurrentSchoolYear(data.currentSchoolYear || "2025-2026");
+        }
+      } catch (error) {
+        console.warn("Failed to load current semester settings:", error);
+      }
+    };
+    loadCurrentSettings();
+  }, []);
 
   const fetchStudentViolations = async ({ silent = false } = {}) => {
     if (!silent) setIsLoading(true);
@@ -197,6 +220,22 @@ const StudentViolation = () => {
     } catch (error) {
       alert(error.message || "Unable to unclear record.");
     }
+  };
+
+  const handleArchiveComplete = (archiveData) => {
+    setCurrentSemester(archiveData.nextSemester);
+    setCurrentSchoolYear(archiveData.nextSchoolYear);
+    
+    let message = `Archive completed!`;
+    if (archiveData.studentPromotedCount > 0) {
+      message += ` Students have been promoted (+${archiveData.studentPromotedCount} year level).`;
+    }
+    setArchiveSuccessMessage(message);
+    
+    // Clear message after 5 seconds
+    setTimeout(() => {
+      setArchiveSuccessMessage("");
+    }, 5000);
   };
 
   const handleEditUnclear = async () => {
@@ -1043,8 +1082,24 @@ const StudentViolation = () => {
     <div className="text-white">
       <AnimatedContent>
         <div className="flex justify-between items-center mb-2">
-          <h2 className="text-xl font-semibold tracking-wide">STUDENT VIOLATION</h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl font-semibold tracking-wide">STUDENT VIOLATION</h2>
+            {currentSemester && currentSchoolYear && (
+              <div className="px-3 py-1 bg-blue-500/20 border border-blue-500/40 rounded-full text-sm font-medium text-blue-300">
+                {currentSemester} S.Y. {currentSchoolYear}
+              </div>
+            )}
+          </div>
           <div className="flex gap-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="gap-2 bg-amber-600/30 hover:bg-amber-600/50 border-amber-600/50 border"
+              onClick={() => setShowArchiveModal(true)}
+            >
+              <Archive className="w-4 h-4" />
+              Archive
+            </Button>
             <Button
               variant="secondary"
               size="sm"
@@ -1380,6 +1435,18 @@ const StudentViolation = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      <ArchiveViolationModal
+        isOpen={showArchiveModal}
+        onClose={() => setShowArchiveModal(false)}
+        onArchive={handleArchiveComplete}
+      />
+
+      {archiveSuccessMessage && (
+        <div className="fixed bottom-4 right-4 bg-green-500/10 border border-green-500/40 rounded-lg px-4 py-3 text-green-300 text-sm font-medium max-w-sm z-50 animate-in fade-in">
+          {archiveSuccessMessage}
+        </div>
+      )}
     </div>
   );
 };

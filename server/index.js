@@ -3127,6 +3127,186 @@ app.put("/api/notifications/:id/mark-read", async (req, res) => {
   }
 });
 
+// ==================== ARCHIVE API ====================
+
+// GET current semester and school year settings
+app.get("/api/archive/current-settings", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+    const result = await pool.query(
+      `SELECT current_semester, current_school_year
+       FROM "SystemSettings"
+       WHERE setting_key = 'system_config'
+       LIMIT 1`,
+    );
+
+    if (!result.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Settings not found.",
+      });
+    }
+
+    const settings = result.rows[0];
+    return res.status(200).json({
+      status: "ok",
+      currentSemester: settings.current_semester || "1ST SEM",
+      currentSchoolYear: settings.current_school_year || "2025-2026",
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to fetch current settings (${error.message}).`,
+    });
+  }
+});
+
+// POST archive violations for a semester
+app.post("/api/archive/violations", async (req, res) => {
+  const { semester, schoolYear } = req.body ?? {};
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  if (!semester || !schoolYear) {
+    return res.status(400).json({
+      status: "error",
+      message: "Semester and school year are required.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Get current semester from settings
+    const settingsResult = await pool.query(
+      `SELECT current_semester, current_school_year
+       FROM "SystemSettings"
+       WHERE setting_key = 'system_config'
+       LIMIT 1`,
+    );
+
+    const currentSettings = settingsResult.rows[0] || {};
+    const currentSemester = currentSettings.current_semester || "1ST SEM";
+
+    // Determine next semester and school year
+    let nextSemester = "2ND SEM";
+    let nextSchoolYear = schoolYear;
+
+    if (semester === "2ND SEM") {
+      const [startYear, endYear] = schoolYear.split("-").map(Number);
+      nextSemester = "1ST SEM";
+      nextSchoolYear = `${endYear}-${endYear + 1}`;
+    }
+
+    // Get all students (active and archived)
+    const studentsResult = await pool.query(
+      `SELECT id, year_level FROM "Students"`,
+    );
+
+    const students = studentsResult.rows || [];
+    let promotedCount = 0;
+
+    // If archiving 2nd semester, promote students
+    if (semester === "2ND SEM") {
+      for (const student of students) {
+        // If student is not 4th year, increment year level
+        if (student.year_level < 4) {
+          await pool.query(
+            `UPDATE "Students"
+             SET year_level = year_level + 1,
+                 current_semester = $1,
+                 current_school_year = $2
+             WHERE id = $3`,
+            [nextSemester, nextSchoolYear, student.id],
+          );
+          promotedCount++;
+        } else {
+          // 4th year students: just update semester/school year
+          await pool.query(
+            `UPDATE "Students"
+             SET current_semester = $1,
+                 current_school_year = $2
+             WHERE id = $3`,
+            [nextSemester, nextSchoolYear, student.id],
+          );
+        }
+      }
+    } else {
+      // If archiving 1st semester, just update semester
+      for (const student of students) {
+        await pool.query(
+          `UPDATE "Students"
+           SET current_semester = $1,
+               current_school_year = $2
+           WHERE id = $3`,
+          [nextSemester, nextSchoolYear, student.id],
+        );
+      }
+    }
+
+    // Update system settings to reflect new semester/school year
+    await pool.query(
+      `UPDATE "SystemSettings"
+       SET current_semester = $1,
+           current_school_year = $2
+       WHERE setting_key = 'system_config'`,
+      [nextSemester, nextSchoolYear],
+    );
+
+    // Log archive action
+    await pool.query(
+      `INSERT INTO "ArchiveHistory" (semester, school_year, total_students_archived, students_promoted)
+       VALUES ($1, $2, $3, $4)`,
+      [semester, schoolYear, students.length, promotedCount],
+    );
+
+    // Log audit event
+    await logAuditEvent(req, {
+      action: "ARCHIVE_VIOLATIONS",
+      targetType: "Violations",
+      targetId: null,
+      details: `Archived violations for ${semester} S.Y. ${schoolYear}`,
+      metadata: {
+        semester,
+        schoolYear,
+        nextSemester,
+        nextSchoolYear,
+        totalStudents: students.length,
+        studentPromotedCount: promotedCount,
+      },
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      message: `Archive completed. ${promotedCount || 0} students promoted.`,
+      nextSemester,
+      nextSchoolYear,
+      studentPromotedCount: promotedCount,
+      totalStudentsAffected: students.length,
+    });
+  } catch (error) {
+    console.error("Archive error:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to archive violations (${error.message}).`,
+    });
+  }
+});
+
 // In production, serve the built frontend from the same Express app.
 app.use("/uploads", express.static(uploadsDir));
 app.use(express.static(distPath));

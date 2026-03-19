@@ -40,47 +40,119 @@ const Archives = () => {
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
+  const [editType, setEditType] = useState("user"); // "user" or "violation"
 
-  const handleSaveEdit = (id, updatedRecord) => {
-    setData((prev) =>
-      prev.map((record) => (record.id === id ? updatedRecord : record)),
-    );
+  // Load school years and archived users on mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        setError("");
+
+        // Fetch school years
+        const yearsResponse = await fetch("/api/archive/school-years", {
+          headers: { ...getAuditHeaders() },
+        });
+        const yearsData = await yearsResponse.json();
+
+        if (yearsResponse.ok && yearsData.status === "ok") {
+          setSchoolYears(yearsData.schoolYears || []);
+          // Set first school year as default
+          if (yearsData.schoolYears && yearsData.schoolYears.length > 0) {
+            setActiveFolder(yearsData.schoolYears[0]);
+          }
+        }
+
+        // Fetch archived users
+        const usersResponse = await fetch("/api/archive/users", {
+          headers: { ...getAuditHeaders() },
+        });
+        const usersData = await usersResponse.json();
+
+        if (usersResponse.ok && usersData.status === "ok") {
+          setArchivedUsers(usersData.archivedUsers || []);
+        }
+      } catch (err) {
+        setError("Failed to load archive data: " + err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  // Load violations when folder or semester changes
+  useEffect(() => {
+    const loadViolations = async () => {
+      if (activeFolder === "users") return;
+
+      try {
+        setIsLoading(true);
+        setError("");
+
+        const semesterParam =
+          activeSemester === "1ST SEM" ? "1st" : "2nd";
+        const response = await fetch(
+          `/api/archive/violations/${activeFolder}/${semesterParam}`,
+          { headers: { ...getAuditHeaders() } },
+        );
+        const data = await response.json();
+
+        if (response.ok && data.status === "ok") {
+          setArchiveViolations(data.violations || []);
+        } else {
+          setError(data.message || "Failed to load violations");
+        }
+      } catch (err) {
+        setError("Failed to load violations: " + err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadViolations();
+  }, [activeFolder, activeSemester]);
+
+  const handleSaveEdit = async (id, updatedRecord) => {
+    try {
+      if (editType === "user") {
+        // Update archived user
+        const response = await fetch(`/api/archive/users/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuditHeaders(),
+          },
+          body: JSON.stringify(updatedRecord),
+        });
+
+        if (response.ok) {
+          setArchivedUsers((prev) =>
+            prev.map((u) => (u.id === id ? updatedRecord : u)),
+          );
+        }
+      } else if (editType === "violation") {
+        // Update archived violation
+        const response = await fetch(`/api/archive/violations/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuditHeaders(),
+          },
+          body: JSON.stringify(updatedRecord),
+        });
+
+        if (response.ok) {
+          setArchiveViolations((prev) =>
+            prev.map((v) => (v.id === id ? updatedRecord : v)),
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Error saving edit:", err);
+    }
   };
-
-  const formatDateTime = (date, time) => {
-    return (
-      <span>
-        <b>{date}</b>
-        <br />
-        <span className="text-xs text-gray-500">{time}</span>
-      </span>
-    );
-  };
-
-  const dataSample = Array.from({ length: 20 }).map((_, i) => ({
-    id: i + 1,
-    date: formatDateTime("02/02/26", "11:00 AM"),
-    studentName: (
-      <span>
-        <b>Arman Jeresano</b>
-        <br />
-        <span className="text-xs text-gray-500">23-00000</span>
-      </span>
-    ),
-    yearSection: "BSIT - 3B",
-    violation:
-      i % 3 === 0 ? "Academic" : i % 3 === 1 ? "Behavioral" : "Uniform",
-    reportedBy: i % 2 === 0 ? "Jenny Hernandez" : "Edrianne Lumbas",
-    remarks:
-      i % 4 === 0
-        ? "Warning issued"
-        : i % 4 === 1
-          ? "Parent notified"
-          : "Lorem Ipsum",
-    signature: i % 2 === 0 ? "Signed" : "Attach",
-  }));
-
-  const [data, setData] = useState(dataSample);
 
   // Filter function
   const filteredData = useMemo(() => {

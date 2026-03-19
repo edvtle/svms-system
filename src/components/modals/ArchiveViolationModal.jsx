@@ -1,0 +1,254 @@
+import React, { useState, useEffect } from 'react';
+import Modal, { ModalFooter } from '../ui/Modal';
+import Button from '../ui/Button';
+import { AlertCircle, CheckCircle } from 'lucide-react';
+
+const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
+  const [selectedSemester, setSelectedSemester] = useState('');
+  const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
+  const [currentSemester, setCurrentSemester] = useState('');
+  const [currentSchoolYear, setCurrentSchoolYear] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [archiveResult, setArchiveResult] = useState(null);
+  const [error, setError] = useState('');
+
+  // Load current semester/school year on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        setIsLoading(true);
+        setError('');
+        const response = await fetch('/api/archive/current-settings');
+        const data = await response.json();
+
+        if (response.ok && data.status === 'ok') {
+          setCurrentSemester(data.currentSemester);
+          setCurrentSchoolYear(data.currentSchoolYear);
+
+          // If current semester is 2nd, default to 2nd (for archiving), then next year
+          if (data.currentSemester === '2ND SEM') {
+            setSelectedSemester('2ND SEM');
+            setSelectedSchoolYear(data.currentSchoolYear);
+          } else {
+            // Default to 1st semester
+            setSelectedSemester('1ST SEM');
+            setSelectedSchoolYear(data.currentSchoolYear);
+          }
+        } else {
+          setError(data.message || 'Unable to load current settings.');
+        }
+      } catch (err) {
+        setError('Failed to load settings: ' + err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (isOpen) {
+      loadSettings();
+    }
+  }, [isOpen]);
+
+  const handleArchive = async () => {
+    if (!selectedSemester || !selectedSchoolYear) {
+      setError('Please select both semester and school year.');
+      return;
+    }
+
+    try {
+      setIsArchiving(true);
+      setError('');
+      setArchiveResult(null);
+
+      const response = await fetch('/api/archive/violations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Actor-User-Id': localStorage.getItem('userId') || '',
+          'X-Actor-Name': localStorage.getItem('userName') || 'Admin',
+          'X-Actor-Role': 'admin',
+        },
+        body: JSON.stringify({
+          semester: selectedSemester,
+          schoolYear: selectedSchoolYear,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.status === 'ok') {
+        setArchiveResult({
+          success: true,
+          message: data.message,
+          nextSemester: data.nextSemester,
+          nextSchoolYear: data.nextSchoolYear,
+          studentPromotedCount: data.studentPromotedCount,
+        });
+
+        // Update current display
+        setCurrentSemester(data.nextSemester);
+        setCurrentSchoolYear(data.nextSchoolYear);
+
+        // Trigger parent callback
+        if (onArchive) {
+          onArchive({
+            semester: selectedSemester,
+            schoolYear: selectedSchoolYear,
+            nextSemester: data.nextSemester,
+            nextSchoolYear: data.nextSchoolYear,
+            studentPromotedCount: data.studentPromotedCount,
+          });
+        }
+      } else {
+        setError(data.message || 'Failed to archive violations.');
+      }
+    } catch (err) {
+      setError('Archive failed: ' + err.message);
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  const handleClose = () => {
+    setArchiveResult(null);
+    setError('');
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  // Show success state
+  if (archiveResult?.success) {
+    return (
+      <Modal isOpen={true} onClose={handleClose} title="Archive Completed">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+            <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-green-400 font-medium">Archive Successful</p>
+              <p className="text-sm text-green-300/80 mt-1">{archiveResult.message}</p>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/50 rounded-lg p-4 space-y-2">
+            <div className="flex justify-between">
+              <span className="text-slate-300">Previous Semester:</span>
+              <span className="font-medium">{selectedSemester} S.Y. {selectedSchoolYear}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-300">New Semester:</span>
+              <span className="font-medium">{archiveResult.nextSemester} S.Y. {archiveResult.nextSchoolYear}</span>
+            </div>
+            {archiveResult.studentPromotedCount > 0 && (
+              <div className="flex justify-between pt-2 border-t border-slate-700">
+                <span className="text-slate-300">Students Promoted:</span>
+                <span className="font-medium text-blue-400">{archiveResult.studentPromotedCount}</span>
+              </div>
+            )}
+          </div>
+        </div>
+        <ModalFooter>
+          <Button onClick={handleClose} variant="primary">
+            Close
+          </Button>
+        </ModalFooter>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Archive Student Violations">
+      <div className="space-y-4 max-w-md">
+        {/* Current Semester Display */}
+        <div className="bg-slate-800/50 p-3 rounded-lg">
+          <p className="text-xs text-slate-400 mb-1">Current Semester</p>
+          <p className="text-lg font-semibold text-blue-400">
+            {currentSemester} S.Y. {currentSchoolYear}
+          </p>
+        </div>
+
+        {/* Archive Options */}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Archive Which Semester?
+            </label>
+            <select
+              value={selectedSemester}
+              onChange={(e) => setSelectedSemester(e.target.value)}
+              disabled={isLoading || isArchiving}
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select Semester...</option>
+              <option value="1ST SEM">1ST SEM</option>
+              <option value="2ND SEM">2ND SEM</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              School Year
+            </label>
+            <input
+              type="text"
+              value={selectedSchoolYear}
+              onChange={(e) => setSelectedSchoolYear(e.target.value)}
+              placeholder="e.g., 2025-2026"
+              disabled={isLoading || isArchiving}
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              {selectedSemester === '2ND SEM' && selectedSchoolYear
+                ? `Next School Year will be: ${Number(selectedSchoolYear.split('-')[1]) + 1}`
+                : 'Enter the school year (e.g., 2025-2026)'}
+            </p>
+          </div>
+        </div>
+
+        {/* Info Message */}
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+          <div className="flex gap-2">
+            <AlertCircle className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-blue-300">
+              {selectedSemester === '2ND SEM'
+                ? 'Students will be promoted to the next year level (4th year students will not be promoted).'
+                : 'Students will continue in the same year level.'}
+            </div>
+          </div>
+        </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-300">
+            {error}
+          </div>
+        )}
+      </div>
+
+      <ModalFooter>
+        <Button
+          onClick={handleClose}
+          variant="secondary"
+          disabled={isLoading || isArchiving}
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={handleArchive}
+          variant="primary"
+          disabled={
+            isLoading ||
+            isArchiving ||
+            !selectedSemester ||
+            !selectedSchoolYear
+          }
+        >
+          {isArchiving ? 'Archiving...' : 'Archive'}
+        </Button>
+      </ModalFooter>
+    </Modal>
+  );
+};
+
+export default ArchiveViolationModal;
