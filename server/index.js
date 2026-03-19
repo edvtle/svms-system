@@ -415,29 +415,27 @@ app.post("/api/auth/login", async (req, res) => {
     let user = null;
 
     if (String(username).includes("@")) {
-      const adminLookup = await pool.query(
-        `
-        SELECT
-          u.id,
-          a.email,
-          u.username,
-          u.password_hash,
-          u.role,
-          a.first_name,
-          a.last_name,
-          u.is_active
-        FROM users u
-        INNER JOIN "Admins" a ON a.user_id = u.id
-        WHERE a.email = $1
-        LIMIT 1
-        `,
-        [username],
-      );
-
-      user = adminLookup.rows?.[0] || null;
-
-      if (!user) {
-        const studentLookup = await pool.query(
+      // Parallelize admin and student email lookups instead of sequential
+      const [adminResult, studentResult] = await Promise.all([
+        pool.query(
+          `
+          SELECT
+            u.id,
+            a.email,
+            u.username,
+            u.password_hash,
+            u.role,
+            a.first_name,
+            a.last_name,
+            u.is_active
+          FROM users u
+          INNER JOIN "Admins" a ON a.user_id = u.id
+          WHERE a.email = $1
+          LIMIT 1
+          `,
+          [username],
+        ),
+        pool.query(
           `
           SELECT
             u.id,
@@ -457,51 +455,36 @@ app.post("/api/auth/login", async (req, res) => {
           LIMIT 1
           `,
           [username],
-        );
+        ),
+      ]);
 
-        user = studentLookup.rows?.[0] || null;
-      }
+      user = adminResult.rows?.[0] || studentResult.rows?.[0] || null;
     } else {
-      const usernameLookup = await pool.query(
+      // Single query to find user and their role-specific data in parallel
+      const userResult = await pool.query(
         `
-        SELECT id, username, password_hash, role, first_name, last_name, is_active
-        FROM users
-        WHERE username = $1
+        SELECT
+          u.id,
+          u.username,
+          u.password_hash,
+          u.role,
+          u.is_active,
+          COALESCE(a.email, s.email) as email,
+          COALESCE(a.first_name, s.first_name, u.first_name) as first_name,
+          COALESCE(a.last_name, s.last_name, u.last_name) as last_name,
+          s.school_id,
+          s.program,
+          s.year_section
+        FROM users u
+        LEFT JOIN "Admins" a ON a.user_id = u.id AND u.role = 'admin'
+        LEFT JOIN "Students" s ON s.user_id = u.id AND u.role = 'student'
+        WHERE u.username = $1
         LIMIT 1
         `,
         [username],
       );
 
-      user = usernameLookup.rows?.[0] || null;
-
-      if (user?.role === "admin") {
-        const adminData = await pool.query(
-          `SELECT email, first_name, last_name FROM "Admins" WHERE user_id = $1 LIMIT 1`,
-          [user.id],
-        );
-        const adminRow = adminData.rows?.[0] || {};
-        user = {
-          ...user,
-          email: adminRow.email || "",
-          first_name: adminRow.first_name || user.first_name,
-          last_name: adminRow.last_name || user.last_name,
-        };
-      } else if (user?.role === "student") {
-        const studentData = await pool.query(
-          `SELECT email, first_name, last_name, school_id, program, year_section FROM "Students" WHERE user_id = $1 LIMIT 1`,
-          [user.id],
-        );
-        const studentRow = studentData.rows?.[0] || {};
-        user = {
-          ...user,
-          email: studentRow.email || "",
-          first_name: studentRow.first_name || user.first_name,
-          last_name: studentRow.last_name || user.last_name,
-          school_id: studentRow.school_id || "",
-          program: studentRow.program || "",
-          year_section: studentRow.year_section || "",
-        };
-      }
+      user = userResult.rows?.[0] || null;
     }
 
     if (!user || !user.is_active) {
