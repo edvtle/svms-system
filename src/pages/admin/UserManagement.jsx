@@ -24,7 +24,9 @@ import {
 import Modal, { ModalFooter } from "../../components/ui/Modal";
 import EditUserModal from "@/components/modals/EditUserModal";
 import AddUserModal from "@/components/modals/AddUserModal";
+import EditSemesterYearModal from "@/components/modals/EditSemesterYearModal";
 import { getAuditHeaders } from "@/lib/auditHeaders";
+import { fetchMultiple } from "@/lib/fetchHelper";
 
 const EXPORT_HEADER_IMAGE_PATH = "/plpasig_header.png";
 const EXCEL_HEADER_IMAGE_WIDTH_PX = 560;
@@ -73,7 +75,9 @@ const UserManagement = () => {
   const [showArchiveSchoolYearModal, setShowArchiveSchoolYearModal] = useState(false);
   const [newSchoolYear, setNewSchoolYear] = useState("S.Y. 2026-2027");
   const [isArchivingSchoolYear, setIsArchivingSchoolYear] = useState(false);
-  const [currentSchoolYear, setCurrentSchoolYear] = useState("S.Y. 2025-2026");
+  const [currentSchoolYear, setCurrentSchoolYear] = useState("2025-2026");
+  const [currentSemester, setCurrentSemester] = useState("1ST SEM");
+  const [showEditSemesterModal, setShowEditSemesterModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   
   // Archive users state
@@ -95,20 +99,21 @@ const UserManagement = () => {
     };
 
     try {
-      const [studentsRes, violationsRes] = await Promise.all([
-        fetch("/api/students"),
-        fetch("/api/student-violations"),
+      const results = await fetchMultiple([
+        { url: "/api/students", key: "students" },
+        { url: "/api/student-violations", key: "violations" },
       ]);
 
-      const studentsResult = await studentsRes.json().catch(() => ({}));
-      const violationsResult = await violationsRes.json().catch(() => ({}));
+      const studentsResult = results.students.data || {};
+      const violationsResult = results.violations.data || {};
 
-      if (!studentsRes.ok) {
-        throw new Error(studentsResult?.message || "Failed to load students.");
+      // Check for fetch errors
+      if (results.students.status !== 'ok') {
+        throw new Error(results.students.error || "Failed to load students.");
       }
 
-      if (!violationsRes.ok) {
-        throw new Error(violationsResult?.message || "Failed to load violations.");
+      if (results.violations.status !== 'ok') {
+        throw new Error(results.violations.error || "Failed to load violations.");
       }
 
       const violations = Array.isArray(violationsResult.records) ? violationsResult.records : [];
@@ -156,6 +161,23 @@ const UserManagement = () => {
 
   useEffect(() => {
     fetchStudents();
+  }, []);
+
+  // Load current semester and school year
+  useEffect(() => {
+    const loadCurrentSettings = async () => {
+      try {
+        const response = await fetch("/api/archive/current-settings");
+        const data = await response.json();
+        if (response.ok && data.status === "ok") {
+          setCurrentSemester(data.currentSemester || "1ST SEM");
+          setCurrentSchoolYear(data.currentSchoolYear || "2025-2026");
+        }
+      } catch (error) {
+        console.warn("Failed to load current semester settings:", error);
+      }
+    };
+    loadCurrentSettings();
   }, []);
 
   // Maps a raw student object from the API to the shape used in state.
@@ -300,6 +322,33 @@ const UserManagement = () => {
       return false;
     } finally {
       setIsAddingUser(false);
+    }
+  };
+
+  const handleSaveSemesterYear = async (semester, schoolYear) => {
+    try {
+      const response = await fetch("/api/archive/current-settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+        body: JSON.stringify({
+          currentSemester: semester,
+          currentSchoolYear: schoolYear,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.message || "Failed to update semester and school year");
+      }
+
+      setCurrentSemester(data.currentSemester || semester);
+      setCurrentSchoolYear(data.currentSchoolYear || schoolYear);
+    } catch (error) {
+      alert(error.message || "Unable to save changes");
+      throw error;
     }
   };
 
@@ -1040,7 +1089,18 @@ const UserManagement = () => {
       </AnimatedContent>
 
       <AnimatedContent distance={40} delay={0.1}>
-        <p className="text-white font-semibold mb-4">{currentSchoolYear}</p>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <p className="text-white font-semibold">{currentSemester} S.Y. {currentSchoolYear}</p>
+            <button
+              onClick={() => setShowEditSemesterModal(true)}
+              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+              title="Edit Semester and School Year"
+            >
+              <Edit className="w-4 h-4 text-gray-400 hover:text-white" />
+            </button>
+          </div>
+        </div>
       </AnimatedContent>
 
       <AnimatedContent distance={40} delay={0.2}>
@@ -1237,7 +1297,7 @@ const UserManagement = () => {
             <Button
               variant="secondary"
               size="sm"
-              className="gap-2 bg-blue-600 hover:bg-blue-700 border-0"
+              className="gap-2 bg-amber-600/30 hover:bg-amber-600/50 border-amber-600/50 border"
               onClick={() => {
                 if (selectedUserIds.size === 0) {
                   alert("Please select at least one user to archive.");
@@ -1287,6 +1347,14 @@ const UserManagement = () => {
         onClose={() => setIsEditOpen(false)}
         user={selectedUser}
         onSave={handleSaveEdit}
+      />
+
+      <EditSemesterYearModal
+        isOpen={showEditSemesterModal}
+        onClose={() => setShowEditSemesterModal(false)}
+        currentSemester={currentSemester}
+        currentSchoolYear={currentSchoolYear}
+        onSave={handleSaveSemesterYear}
       />
 
       <Modal

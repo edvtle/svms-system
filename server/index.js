@@ -1662,8 +1662,10 @@ app.get("/api/student-violations", async (_req, res) => {
       FROM student_violation_logs svl
       INNER JOIN "Students" s ON s.id = svl.student_id
       LEFT JOIN violations v ON v.id = svl.violation_catalog_id
+      WHERE svl.cleared_at IS NULL
       ORDER BY svl.created_at DESC, svl.id DESC
       `,
+      []
     );
 
     return res.status(200).json({
@@ -1781,6 +1783,17 @@ app.post("/api/student-violations", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
 
+    // Get current semester and school year from system settings
+    const settingsResult = await pool.query(
+      `SELECT current_semester, current_school_year
+       FROM "SystemSettings"
+       WHERE setting_key = 'system_config'
+       LIMIT 1`,
+    );
+    const settings = settingsResult.rows?.[0] || {};
+    const currentSemester = settings.current_semester || "1ST SEM";
+    const currentSchoolYear = settings.current_school_year || "2025-2026";
+
     const studentLookup = await pool.query(
       `SELECT id, user_id FROM "Students" WHERE id = $1 LIMIT 1`,
       [parsedStudentId],
@@ -1796,7 +1809,7 @@ app.post("/api/student-violations", async (req, res) => {
     const insertResult = await pool.query(
       `
       INSERT INTO student_violation_logs
-        (student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image, signature_updated_at)
+        (student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image, signature_updated_at, semester, school_year)
       VALUES (
         $1,
         $2,
@@ -1804,10 +1817,12 @@ app.post("/api/student-violations", async (req, res) => {
         $4,
         $5,
         $6::text,
-        CASE WHEN $6::text IS NULL OR $6::text = '' THEN NULL ELSE NOW() END
+        CASE WHEN $6::text IS NULL OR $6::text = '' THEN NULL ELSE NOW() END,
+        $7,
+        $8
       )
       RETURNING id, student_id, violation_catalog_id, violation_label, reported_by, remarks, signature_image,
-                signature_updated_at, cleared_at, cleared_by_user_id, cleared_by_name, created_at, updated_at
+                signature_updated_at, cleared_at, cleared_by_user_id, cleared_by_name, created_at, updated_at, semester, school_year
       `,
       [
         parsedStudentId,
@@ -1816,6 +1831,8 @@ app.post("/api/student-violations", async (req, res) => {
         String(reportedBy || "").trim() || null,
         String(remarks || "").trim() || null,
         String(signatureImage || "").trim() || null,
+        currentSemester || "1ST SEM",
+        currentSchoolYear || "2025-2026",
       ],
     );
 
@@ -3169,6 +3186,73 @@ app.get("/api/archive/current-settings", async (req, res) => {
   }
 });
 
+// PUT update current semester and school year
+app.put("/api/archive/current-settings", async (req, res) => {
+  const { currentSemester, currentSchoolYear } = req.body ?? {};
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  if (!currentSemester || !currentSchoolYear) {
+    return res.status(400).json({
+      status: "error",
+      message: "currentSemester and currentSchoolYear are required.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const normalizedSemester = String(currentSemester).trim().toUpperCase();
+    const normalizedSchoolYear = String(currentSchoolYear).trim();
+
+    const result = await pool.query(
+      `UPDATE "SystemSettings"
+       SET current_semester = $1,
+           current_school_year = $2
+       WHERE setting_key = 'system_config'
+       RETURNING current_semester, current_school_year`,
+      [normalizedSemester, normalizedSchoolYear],
+    );
+
+    if (!result.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "System settings not found.",
+      });
+    }
+
+    const settings = result.rows[0];
+
+    await logAuditEvent(req, {
+      action: "UPDATE_ARCHIVE_SETTINGS",
+      targetType: "system_settings",
+      targetId: null,
+      details: `Updated current semester and school year to ${normalizedSemester} S.Y. ${normalizedSchoolYear}`,
+      metadata: {
+        currentSemester: normalizedSemester,
+        currentSchoolYear: normalizedSchoolYear,
+      },
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      currentSemester: settings.current_semester || "1ST SEM",
+      currentSchoolYear: settings.current_school_year || "2025-2026",
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to update archive settings (${error.message}).`,
+    });
+  }
+});
+
 // POST archive violations for a semester
 app.post("/api/archive/violations", async (req, res) => {
   const { semester, schoolYear } = req.body ?? {};
@@ -3200,7 +3284,6 @@ app.post("/api/archive/violations", async (req, res) => {
     );
 
     const currentSettings = settingsResult.rows[0] || {};
-    const currentSemester = currentSettings.current_semester || "1ST SEM";
 
     // Determine next semester and school year
     let nextSemester = "2ND SEM";
@@ -3219,11 +3302,87 @@ app.post("/api/archive/violations", async (req, res) => {
 
     const students = studentsResult.rows || [];
     let promotedCount = 0;
+    let archivedCount = 0;
 
-    // If archiving 2nd semester, promote students
+    // STEP 1: Get all violations for the given semester that need to be archived
+    // Filter by violation's semester and school_year, not student's current semester/year
+    const violationsToArchive = await pool.query(
+      `SELECT svl.* FROM student_violation_logs svl
+       WHERE svl.semester = $1 
+       AND svl.school_year = $2 
+       AND svl.cleared_at IS NULL`,
+      [semester, schoolYear],
+    );
+
+    const violations = violationsToArchive.rows || [];
+    console.log(`Found ${violations.length} violations to archive for ${semester} S.Y. ${schoolYear}`);
+
+    // STEP 2: Move violations to archive table
+    if (violations.length > 0) {
+      const archiveInsertPromises = violations.map((violation) =>
+        pool.query(
+          `INSERT INTO student_violation_archives 
+           (student_id, violation_catalog_id, violation_label, reported_by, remarks, 
+            signature_image, signature_updated_at, semester, school_year, 
+            archived_by_user_id, archived_by_name, original_created_at, original_updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [
+            violation.student_id,
+            violation.violation_catalog_id,
+            violation.violation_label,
+            violation.reported_by,
+            violation.remarks,
+            violation.signature_image,
+            violation.signature_updated_at,
+            semester,
+            schoolYear,
+            req.user?.id || null,
+            req.user?.full_name || "System",
+            violation.created_at,
+            violation.updated_at,
+          ],
+        ),
+      );
+
+      await Promise.all(archiveInsertPromises);
+      archivedCount = violations.length;
+      console.log(`Inserted ${archivedCount} violations into archive table`);
+
+      // STEP 3: Delete violations from active table
+      // Delete the same violations we just inserted into the archive table
+      await pool.query(
+        `DELETE FROM student_violation_logs 
+         WHERE semester = $1 
+         AND school_year = $2 
+         AND cleared_at IS NULL`,
+        [semester, schoolYear],
+      );
+      console.log(`Deleted ${archivedCount} violations from active table`);
+
+      // STEP 3B: Refresh violation counts for all affected students
+      // Get unique student IDs from the violations we just archived
+      const affectedStudentIds = violations.map((v) => v.student_id);
+      const uniqueStudentIds = [...new Set(affectedStudentIds)];
+      
+      if (uniqueStudentIds.length > 0) {
+        // Update violation_count for each affected student based on remaining violations
+        await pool.query(
+          `UPDATE "Students" s
+           SET violation_count = (
+             SELECT COUNT(*)::int
+             FROM student_violation_logs svl
+             WHERE svl.student_id = s.id AND svl.cleared_at IS NULL
+           )
+           WHERE s.id = ANY($1)`,
+          [uniqueStudentIds],
+        );
+        console.log(`Refreshed violation counts for ${uniqueStudentIds.length} students`);
+      }
+    }
+
+    // STEP 4: If archiving 2nd semester, promote students
     if (semester === "2ND SEM") {
       for (const student of students) {
-        // If student is not 4th year, increment year level
         if (student.year_level < 4) {
           await pool.query(
             `UPDATE "Students"
@@ -3235,7 +3394,6 @@ app.post("/api/archive/violations", async (req, res) => {
           );
           promotedCount++;
         } else {
-          // 4th year students: just update semester/school year
           await pool.query(
             `UPDATE "Students"
              SET current_semester = $1,
@@ -3258,7 +3416,7 @@ app.post("/api/archive/violations", async (req, res) => {
       }
     }
 
-    // Update system settings to reflect new semester/school year
+    // STEP 5: Update system settings to reflect new semester/school year
     await pool.query(
       `UPDATE "SystemSettings"
        SET current_semester = $1,
@@ -3267,22 +3425,23 @@ app.post("/api/archive/violations", async (req, res) => {
       [nextSemester, nextSchoolYear],
     );
 
-    // Log archive action
+    // STEP 6: Log archive action
     await pool.query(
       `INSERT INTO "ArchiveHistory" (semester, school_year, total_students_archived, students_promoted)
        VALUES ($1, $2, $3, $4)`,
       [semester, schoolYear, students.length, promotedCount],
     );
 
-    // Log audit event
+    // STEP 7: Log audit event
     await logAuditEvent(req, {
       action: "ARCHIVE_VIOLATIONS",
       targetType: "Violations",
       targetId: null,
-      details: `Archived violations for ${semester} S.Y. ${schoolYear}`,
+      details: `Archived ${archivedCount} violations for ${semester} S.Y. ${schoolYear}`,
       metadata: {
         semester,
         schoolYear,
+        archivedCount,
         nextSemester,
         nextSchoolYear,
         totalStudents: students.length,
@@ -3290,9 +3449,12 @@ app.post("/api/archive/violations", async (req, res) => {
       },
     });
 
+    console.log(`Archive complete: ${archivedCount} violations archived, ${promotedCount} students promoted`);
+
     return res.status(200).json({
       status: "ok",
-      message: `Archive completed. ${promotedCount || 0} students promoted.`,
+      message: `Archive completed. ${archivedCount} violations moved to archive. ${promotedCount || 0} students promoted.`,
+      archivedCount,
       nextSemester,
       nextSchoolYear,
       studentPromotedCount: promotedCount,
@@ -3303,6 +3465,287 @@ app.post("/api/archive/violations", async (req, res) => {
     return res.status(503).json({
       status: "error",
       message: `Unable to archive violations (${error.message}).`,
+    });
+  }
+});
+
+// GET archived users
+app.get("/api/archive/users", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `SELECT id, user_id, email, school_id, full_name, first_name, last_name, 
+              program, year_section, status, violation_count, is_archived, archived_at
+       FROM "Students"
+       WHERE is_archived = true
+       ORDER BY archived_at DESC NULLS LAST`,
+    );
+
+    return res.status(200).json({
+      status: "ok",
+      archivedUsers: result.rows || [],
+    });
+  } catch (error) {
+    console.error("Error fetching archived users:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to fetch archived users (${error.message}).`,
+    });
+  }
+});
+
+// GET school years with archived violations
+app.get("/api/archive/school-years", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Get distinct school years from the archive table
+    // Only return years that have actual archived data
+    const result = await pool.query(
+      `SELECT DISTINCT school_year
+       FROM student_violation_archives
+       WHERE school_year IS NOT NULL
+       ORDER BY school_year DESC`,
+    );
+
+    const schoolYears = (result.rows || []).map((row) => row.school_year).filter((sy) => sy);
+
+    console.log("Archive school years:", schoolYears);
+
+    return res.status(200).json({
+      status: "ok",
+      schoolYears,
+    });
+  } catch (error) {
+    console.error("Error fetching school years:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to fetch school years (${error.message}).`,
+    });
+  }
+});
+
+
+
+// GET archived violations by school year and semester
+app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
+  const { schoolYear, semester } = req.params;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  if (!schoolYear || !semester) {
+    return res.status(400).json({
+      status: "error",
+      message: "School year and semester are required.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Query archived violations from the archive table for this semester/year
+    const result = await pool.query(
+      `SELECT 
+        sva.id,
+        sva.student_id,
+        sva.violation_catalog_id,
+        sva.violation_label,
+        sva.reported_by,
+        sva.remarks,
+        sva.signature_image,
+        sva.signature_updated_at,
+        sva.semester,
+        sva.school_year,
+        sva.archived_at,
+        sva.archived_by_name,
+        sva.original_created_at,
+        sva.original_updated_at,
+        s.full_name as student_name,
+        s.school_id,
+        s.year_section,
+        v.category as violation_category,
+        v.degree as violation_degree
+       FROM student_violation_archives sva
+       LEFT JOIN "Students" s ON sva.student_id = s.id
+       LEFT JOIN violations v ON sva.violation_catalog_id = v.id
+       WHERE sva.school_year = $1 AND sva.semester = $2
+       ORDER BY sva.archived_at DESC, sva.id DESC`,
+      [schoolYear, semester],
+    );
+
+    const violations = result.rows || [];
+    console.log(`Fetched ${violations.length} archived violations for ${semester} S.Y. ${schoolYear}`);
+
+    return res.status(200).json({
+      status: "ok",
+      violations,
+    });
+  } catch (error) {
+    console.error("Error fetching archived violations:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to fetch archived violations (${error.message}).`,
+    });
+  }
+});
+
+// PUT update archived user
+app.put("/api/archive/users/:id", async (req, res) => {
+  const { id } = req.params;
+  const { firstName, lastName, program, yearSection, status } = req.body ?? {};
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Only create fullName if both firstName and lastName are provided and non-empty
+    const cleanedFirstName = String(firstName || "").trim();
+    const cleanedLastName = String(lastName || "").trim();
+    const fullName = (cleanedFirstName && cleanedLastName) 
+      ? `${cleanedFirstName} ${cleanedLastName}` 
+      : null;
+
+    const result = await pool.query(
+      `UPDATE "Students"
+       SET first_name = COALESCE(NULLIF($1, ''), first_name),
+           last_name = COALESCE(NULLIF($2, ''), last_name),
+           full_name = COALESCE(NULLIF($3, ''), full_name),
+           program = COALESCE(NULLIF($4, ''), program),
+           year_section = COALESCE(NULLIF($5, ''), year_section),
+           status = COALESCE(NULLIF($6, ''), status)
+       WHERE id = $7 AND is_archived = true
+       RETURNING id, user_id, email, school_id, full_name, first_name, last_name, 
+                 program, year_section, status, violation_count, is_archived, archived_at`,
+      [
+        cleanedFirstName || null,
+        cleanedLastName || null,
+        fullName,
+        String(program || "").trim() || null,
+        String(yearSection || "").trim() || null,
+        String(status || "").trim() || null,
+        id
+      ],
+    );
+
+    if (!result.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Archived user not found.",
+      });
+    }
+
+    const updatedUser = result.rows[0];
+
+    // Log audit event
+    await logAuditEvent(req, {
+      action: "UPDATE_ARCHIVED_USER",
+      targetType: "Student",
+      targetId: id,
+      details: `Updated archived student ${updatedUser.full_name}.`,
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Error updating archived user:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to update archived user (${error.message}).`,
+    });
+  }
+});
+
+// PUT update archived violation
+app.put("/api/archive/violations/:id", async (req, res) => {
+  const { id } = req.params;
+  const { remarks, reportedBy } = req.body ?? {};
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Update archived violation in the archive table
+    const result = await pool.query(
+      `UPDATE student_violation_archives
+       SET remarks = COALESCE(NULLIF($1, ''), remarks),
+           reported_by = COALESCE(NULLIF($2, ''), reported_by),
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING id, student_id, violation_label, reported_by, remarks, 
+                 signature_image, signature_updated_at, archived_at, 
+                 semester, school_year, original_created_at, original_updated_at`,
+      [
+        String(remarks || "").trim() || null,
+        String(reportedBy || "").trim() || null,
+        id
+      ],
+    );
+
+    if (!result.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Archived violation not found.",
+      });
+    }
+
+    const updatedViolation = result.rows[0];
+
+    // Log audit event
+    await logAuditEvent(req, {
+      action: "UPDATE_ARCHIVED_VIOLATION",
+      targetType: "StudentViolation",
+      targetId: id,
+      details: `Updated archived violation record.`,
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      violation: updatedViolation,
+    });
+  } catch (error) {
+    console.error("Error updating archived violation:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to update archived violation (${error.message}).`,
     });
   }
 });

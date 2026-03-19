@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Modal, { ModalFooter } from '../ui/Modal';
 import Button from '../ui/Button';
 import { AlertCircle, CheckCircle } from 'lucide-react';
+import { getAuditHeaders } from '@/lib/auditHeaders';
 
 const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
   const [selectedSemester, setSelectedSemester] = useState('');
@@ -19,7 +20,9 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
       try {
         setIsLoading(true);
         setError('');
-        const response = await fetch('/api/archive/current-settings');
+        const response = await fetch('/api/archive/current-settings', {
+          headers: { ...getAuditHeaders() },
+        });
         const data = await response.json();
 
         if (response.ok && data.status === 'ok') {
@@ -65,9 +68,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Actor-User-Id': localStorage.getItem('userId') || '',
-          'X-Actor-Name': localStorage.getItem('userName') || 'Admin',
-          'X-Actor-Role': 'admin',
+          ...getAuditHeaders(),
         },
         body: JSON.stringify({
           semester: selectedSemester,
@@ -84,6 +85,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
           nextSemester: data.nextSemester,
           nextSchoolYear: data.nextSchoolYear,
           studentPromotedCount: data.studentPromotedCount,
+          archivedCount: data.archivedCount,
         });
 
         // Update current display
@@ -98,6 +100,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
             nextSemester: data.nextSemester,
             nextSchoolYear: data.nextSchoolYear,
             studentPromotedCount: data.studentPromotedCount,
+            archivedCount: data.archivedCount,
           });
         }
       } else {
@@ -116,6 +119,16 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
     onClose();
   };
 
+  // Auto-close success modal after 3 seconds
+  useEffect(() => {
+    if (archiveResult?.success) {
+      const timer = setTimeout(() => {
+        handleClose();
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [archiveResult?.success]);
+
   if (!isOpen) return null;
 
   // Show success state
@@ -132,6 +145,10 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
           </div>
 
           <div className="bg-slate-800/50 rounded-lg p-4 space-y-2">
+            <div className="flex justify-between pt-2 border-t border-slate-700">
+              <span className="text-slate-300">Violations Archived:</span>
+              <span className="font-medium text-blue-400">{archiveResult.archivedCount || 0}</span>
+            </div>
             <div className="flex justify-between">
               <span className="text-slate-300">Previous Semester:</span>
               <span className="font-medium">{selectedSemester} S.Y. {selectedSchoolYear}</span>

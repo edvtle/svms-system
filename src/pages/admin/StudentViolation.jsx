@@ -27,6 +27,7 @@ import SearchBar from "@/components/ui/SearchBar";
 import LogNewViolationModal from "@/components/modals/LogNewViolationModal";
 import SignaturePadModal from "@/components/modals/SignaturePadModal";
 import EditViolationModal from "@/components/modals/EditViolationModal";
+import EditSemesterYearModal from "@/components/modals/EditSemesterYearModal";
 import ArchiveViolationModal from "@/components/modals/ArchiveViolationModal";
 import Modal, { ModalFooter } from "@/components/ui/Modal";
 import { getAuditHeaders } from "@/lib/auditHeaders";
@@ -82,6 +83,7 @@ const StudentViolation = () => {
   const [currentSemester, setCurrentSemester] = useState("");
   const [currentSchoolYear, setCurrentSchoolYear] = useState("");
   const [archiveSuccessMessage, setArchiveSuccessMessage] = useState("");
+  const [showEditSemesterModal, setShowEditSemesterModal] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [sortOrder, setSortOrder] = useState("A-Z");
@@ -102,7 +104,9 @@ const StudentViolation = () => {
   useEffect(() => {
     const loadCurrentSettings = async () => {
       try {
-        const response = await fetch("/api/archive/current-settings");
+        const response = await fetch("/api/archive/current-settings", {
+          headers: { ...getAuditHeaders() },
+        });
         const data = await response.json();
         if (response.ok && data.status === "ok") {
           setCurrentSemester(data.currentSemester || "1ST SEM");
@@ -118,7 +122,9 @@ const StudentViolation = () => {
   const fetchStudentViolations = async ({ silent = false } = {}) => {
     if (!silent) setIsLoading(true);
     try {
-      const response = await fetch("/api/student-violations");
+      const response = await fetch("/api/student-violations", {
+        headers: { ...getAuditHeaders() },
+      });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.message || "Unable to load records.");
@@ -226,16 +232,58 @@ const StudentViolation = () => {
     setCurrentSemester(archiveData.nextSemester);
     setCurrentSchoolYear(archiveData.nextSchoolYear);
     
-    let message = `Archive completed!`;
+    let message = `Archive completed! ${archiveData.archivedCount || 0} violations moved to archive.`;
     if (archiveData.studentPromotedCount > 0) {
-      message += ` Students have been promoted (+${archiveData.studentPromotedCount} year level).`;
+      message += ` Students promoted: +${archiveData.studentPromotedCount} year level.`;
     }
     setArchiveSuccessMessage(message);
+    console.log("Archive completed:", archiveData);
+    
+    // CRITICAL: Clear the data immediately from UI (optimistic update)
+    setRecords([]);
+    
+    // Trigger events to notify Archives tab
+    window.localStorage.setItem("archiveRefresh", Date.now().toString());
+    window.dispatchEvent(new CustomEvent("archiveCompleted", { detail: archiveData }));
+    
+    // Small delay to ensure database is fully updated, then refetch to confirm clearance
+    setTimeout(() => {
+      fetchStudentViolations({ silent: true }).catch(err => {
+        console.error("Error refetching violations:", err);
+      });
+    }, 1000);
     
     // Clear message after 5 seconds
     setTimeout(() => {
       setArchiveSuccessMessage("");
     }, 5000);
+  };
+
+  const handleSaveSemesterYear = async (semester, schoolYear) => {
+    try {
+      const response = await fetch("/api/archive/current-settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+        body: JSON.stringify({
+          currentSemester: semester,
+          currentSchoolYear: schoolYear,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.message || "Failed to update semester and school year");
+      }
+
+      setCurrentSemester(data.currentSemester || semester);
+      setCurrentSchoolYear(data.currentSchoolYear || schoolYear);
+    } catch (error) {
+      alert(error.message || "Unable to save changes");
+      throw error;
+    }
   };
 
   const handleEditUnclear = async () => {
@@ -1085,8 +1133,17 @@ const StudentViolation = () => {
           <div className="flex items-center gap-4">
             <h2 className="text-xl font-semibold tracking-wide">STUDENT VIOLATION</h2>
             {currentSemester && currentSchoolYear && (
-              <div className="px-3 py-1 bg-blue-500/20 border border-blue-500/40 rounded-full text-sm font-medium text-blue-300">
-                {currentSemester} S.Y. {currentSchoolYear}
+              <div className="flex items-center gap-2">
+                <div className="px-3 py-1 bg-blue-500/20 border border-blue-500/40 rounded-full text-sm font-medium text-blue-300">
+                  {currentSemester} S.Y. {currentSchoolYear}
+                </div>
+                <button
+                  onClick={() => setShowEditSemesterModal(true)}
+                  className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                  title="Edit Semester and School Year"
+                >
+                  <Edit className="w-4 h-4 text-gray-400 hover:text-white" />
+                </button>
               </div>
             )}
           </div>
@@ -1435,6 +1492,14 @@ const StudentViolation = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      <EditSemesterYearModal
+        isOpen={showEditSemesterModal}
+        onClose={() => setShowEditSemesterModal(false)}
+        currentSemester={currentSemester}
+        currentSchoolYear={currentSchoolYear}
+        onSave={handleSaveSemesterYear}
+      />
 
       <ArchiveViolationModal
         isOpen={showArchiveModal}
