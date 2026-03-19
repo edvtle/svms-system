@@ -9,6 +9,7 @@ import {
   Eye,
   CheckCircle,
   Minus,
+  AlertCircle,
 } from "lucide-react";
 import Button from "../../components/ui/Button";
 import SearchBar from "../../components/ui/SearchBar";
@@ -84,6 +85,21 @@ const UserManagement = () => {
   const [selectedUserIds, setSelectedUserIds] = useState(new Set());
   const [showArchiveUsersModal, setShowArchiveUsersModal] = useState(false);
   const [isArchivingUsers, setIsArchivingUsers] = useState(false);
+  const [archiveAlertModal, setArchiveAlertModal] = useState({
+    isOpen: false,
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showArchiveAlert = useCallback((type, title, message) => {
+    setArchiveAlertModal({
+      isOpen: true,
+      type,
+      title,
+      message,
+    });
+  }, []);
 
   const fetchStudents = async () => {
     setIsLoading(true);
@@ -382,7 +398,11 @@ const UserManagement = () => {
   // Archive handlers
   const handleArchiveSchoolYear = async () => {
     if (!newSchoolYear.trim()) {
-      alert("Please enter the new school year.");
+      showArchiveAlert(
+        "warning",
+        "Missing School Year",
+        "Please enter the new school year.",
+      );
       return;
     }
 
@@ -435,9 +455,17 @@ const UserManagement = () => {
 
       // Refresh data
       await fetchStudents();
-      alert(`School year archived successfully!\n\n${studentsToUpdate.filter(s => String(s.yearSection || "").match(/^4/)).length} 4th-year students have been archived.\n${studentsToUpdate.filter(s => !String(s.yearSection || "").match(/^4/)).length} students have been promoted to the next year level.`);
+      showArchiveAlert(
+        "success",
+        "School Year Archived",
+        `${studentsToUpdate.filter((s) => String(s.yearSection || "").match(/^4/)).length} 4th-year students have been archived. ${studentsToUpdate.filter((s) => !String(s.yearSection || "").match(/^4/)).length} students have been promoted to the next year level.`,
+      );
     } catch (error) {
-      alert(error.message || "Unable to archive school year.");
+      showArchiveAlert(
+        "error",
+        "Archive Failed",
+        error.message || "Unable to archive school year.",
+      );
     } finally {
       setIsArchivingSchoolYear(false);
     }
@@ -466,7 +494,11 @@ const UserManagement = () => {
 
   const handleArchiveUsers = async () => {
     if (selectedUserIds.size === 0) {
-      alert("Please select at least one user to archive.");
+      showArchiveAlert(
+        "warning",
+        "No Users Selected",
+        "Please select at least one user to archive.",
+      );
       return;
     }
 
@@ -491,11 +523,17 @@ const UserManagement = () => {
 
       // Refresh data
       await fetchStudents();
-      alert(
-        `Successfully archived ${selectedUserIds.size} student(s).\n\nArchived students have been moved to the archive folder.`,
+      showArchiveAlert(
+        "success",
+        "Users Archived",
+        `Successfully archived ${selectedUserIds.size} student(s). Archived students have been moved to the archive folder.`,
       );
     } catch (error) {
-      alert(error.message || "Unable to archive selected users.");
+      showArchiveAlert(
+        "error",
+        "Archive Failed",
+        error.message || "Unable to archive selected users.",
+      );
     } finally {
       setIsArchivingUsers(false);
     }
@@ -1300,7 +1338,11 @@ const UserManagement = () => {
               className="gap-2 bg-amber-600/30 hover:bg-amber-600/50 border-amber-600/50 border"
               onClick={() => {
                 if (selectedUserIds.size === 0) {
-                  alert("Please select at least one user to archive.");
+                  showArchiveAlert(
+                    "warning",
+                    "No Users Selected",
+                    "Please select at least one user to archive.",
+                  );
                   return;
                 }
                 setShowArchiveUsersModal(true);
@@ -1668,6 +1710,71 @@ const UserManagement = () => {
             className="px-6 py-2.5"
           >
             {isArchivingUsers ? "Archiving..." : "Archive Selected Users"}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        isOpen={archiveAlertModal.isOpen}
+        onClose={() =>
+          setArchiveAlertModal((prev) => ({
+            ...prev,
+            isOpen: false,
+          }))
+        }
+        title={
+          <span className="font-black font-inter flex items-center gap-2">
+            {archiveAlertModal.type === "success" ? (
+              <CheckCircle className="w-5 h-5 text-green-400" />
+            ) : (
+              <AlertCircle
+                className={`w-5 h-5 ${
+                  archiveAlertModal.type === "error"
+                    ? "text-red-400"
+                    : "text-amber-300"
+                }`}
+              />
+            )}
+            {archiveAlertModal.title || "Archive"}
+          </span>
+        }
+        size="sm"
+        showCloseButton
+      >
+        <div
+          className={`rounded-lg px-4 py-3 mb-4 border ${
+            archiveAlertModal.type === "success"
+              ? "border-green-400/25 bg-green-500/10"
+              : archiveAlertModal.type === "error"
+                ? "border-red-400/25 bg-red-500/10"
+                : "border-amber-400/25 bg-amber-500/10"
+          }`}
+        >
+          <p
+            className={`text-sm font-medium ${
+              archiveAlertModal.type === "success"
+                ? "text-green-300"
+                : archiveAlertModal.type === "error"
+                  ? "text-red-300"
+                  : "text-amber-200"
+            }`}
+          >
+            {archiveAlertModal.message}
+          </p>
+        </div>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() =>
+              setArchiveAlertModal((prev) => ({
+                ...prev,
+                isOpen: false,
+              }))
+            }
+            className="px-6 py-2.5"
+          >
+            OK
           </Button>
         </ModalFooter>
       </Modal>
