@@ -44,7 +44,6 @@ const Archives = () => {
   const [activeSemester, setActiveSemester] = useState("1ST SEM");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("");
-  const [filterSignature, setFilterSignature] = useState("");
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -369,10 +368,6 @@ const Archives = () => {
         return false;
       }
 
-      if (filterSignature && item.signature !== filterSignature) {
-        return false;
-      }
-
       return true;
     });
 
@@ -381,7 +376,7 @@ const Archives = () => {
       ...item,
       no: index + 1,
     }));
-  }, [displayData, searchQuery, filterType, filterSignature]);
+  }, [displayData, searchQuery, filterType]);
 
   // Define columns based on active folder
   const columns =
@@ -551,7 +546,6 @@ const Archives = () => {
   const clearFilters = () => {
     setSearchQuery("");
     setFilterType("");
-    setFilterSignature("");
   };
 
   return (
@@ -662,42 +656,11 @@ const Archives = () => {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-
-                  {/* Signature Status Filter */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className={`gap-2 ${
-                          filterSignature
-                            ? "bg-[#4A9B9B] hover:bg-[#5aabab]"
-                            : "bg-[#A3AED0] hover:bg-[#b3bde0]"
-                        } text-[#23262B] border-0 transition-colors`}
-                      >
-                        <Filter className="w-4 h-4" />
-                        {filterSignature || "Signature Status"}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent>
-                      <DropdownMenuItem onClick={() => setFilterSignature("")}>
-                        All
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterSignature("Signed")}>
-                        Signed
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterSignature("No Signature")}
-                      >
-                        No Signature
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                 </>
               )}
 
               {/* Clear Filters Button */}
-              {(filterType || filterSignature || searchQuery) && (
+              {(filterType || searchQuery) && (
                 <Button
                   variant="secondary"
                   size="sm"
