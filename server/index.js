@@ -3679,6 +3679,75 @@ app.put("/api/archive/users/:id", async (req, res) => {
   }
 });
 
+// PUT restore archived user (move back to active users)
+app.put("/api/archive/users/:id/restore", async (req, res) => {
+  const { id } = req.params;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Get the archived student to get user_id and name
+    const studentResult = await pool.query(
+      `SELECT id, user_id, full_name FROM "Students"
+       WHERE id = $1 AND is_archived = true
+       LIMIT 1`,
+      [id],
+    );
+
+    if (!studentResult.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Archived user not found.",
+      });
+    }
+
+    const { user_id, full_name } = studentResult.rows[0];
+
+    // Mark student as not archived
+    await pool.query(
+      `UPDATE "Students"
+       SET is_archived = false, archived_at = NULL
+       WHERE id = $1`,
+      [id],
+    );
+
+    // Reactivate user account
+    await pool.query(
+      `UPDATE users
+       SET is_active = true, updated_at = NOW()
+       WHERE id = $1`,
+      [user_id],
+    );
+
+    // Log audit event
+    await logAuditEvent(req, {
+      action: "RESTORE_USER",
+      targetType: "Student",
+      targetId: id,
+      details: `Restored archived user ${full_name} to active users.`,
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      message: `User ${full_name} has been successfully restored.`,
+    });
+  } catch (error) {
+    console.error("Error restoring archived user:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to restore user (${error.message}).`,
+    });
+  }
+});
+
 // PUT update archived violation
 app.put("/api/archive/violations/:id", async (req, res) => {
   const { id } = req.params;

@@ -4,7 +4,7 @@ import SearchBar from "../../components/ui/SearchBar";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
 import TableTabs from "../../components/ui/TableTabs";
-import { Folder, Filter, Download, X, AlertCircle } from "lucide-react";
+import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -54,6 +54,8 @@ const Archives = () => {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
   const [editType, setEditType] = useState("user"); // "user" or "violation"
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [userToRestore, setUserToRestore] = useState(null);
 
   // Load archived users on mount
   useEffect(() => {
@@ -294,6 +296,40 @@ const Archives = () => {
     }
   };
 
+  const handleRestoreConfirm = async () => {
+    if (!userToRestore) return;
+
+    try {
+      const response = await fetch(`/api/archive/users/${userToRestore.id}/restore`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Remove the user from archived list
+        setArchivedUsers((prev) => prev.filter((u) => u.id !== userToRestore.id));
+        setIsRestoreModalOpen(false);
+        setUserToRestore(null);
+        // Show success message
+        setError("");
+      } else {
+        const data = await response.json();
+        setError(data.message || "Failed to restore user");
+      }
+    } catch (err) {
+      setError("Error restoring user: " + err.message);
+    }
+  };
+
+  const handleRestoreClick = (user) => {
+    setUserToRestore(user);
+    setIsRestoreModalOpen(true);
+  };
+
   // Get all folders (USERS + School Years)
   const folders = [
     { key: "users", label: "USERS" },
@@ -309,6 +345,7 @@ const Archives = () => {
       return archivedUsers.map((user) => ({
         id: user.id,
         no: "",
+        full_name: user.full_name,
         name: (
           <div>
             <div className="font-semibold">{user.full_name}</div>
@@ -422,28 +459,23 @@ const Archives = () => {
             label: "",
             align: "center",
             render: (_value, row) => (
-              <Button
-                size="sm"
-                variant="secondary"
-                className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
-                onClick={() => handleEdit(row, "user")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
-                  />
-                </svg>
-                Edit
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
+                    <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                  <DropdownMenuItem onClick={() => handleEdit(row, "user")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
+                    <Edit className="w-4 h-4" />
+                    <span>Edit</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Restore</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ),
           },
         ]
@@ -712,6 +744,43 @@ const Archives = () => {
           editType={editType}
           onSave={handleSaveEdit}
         />
+      )}
+
+      {/* Restore Confirmation Modal */}
+      {isRestoreModalOpen && userToRestore && (
+        <Modal isOpen={isRestoreModalOpen} onClose={() => { setIsRestoreModalOpen(false); setUserToRestore(null); }} showCloseButton={true}>
+          <div className="bg-transparent">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-yellow-400" />
+              <h3 className="text-lg font-bold text-white">Confirm Restore</h3>
+            </div>
+            <p className="text-gray-300 mb-6">
+              Are you sure you want to restore{" "}
+              <span className="font-semibold text-[#A3AED0]">
+                {userToRestore.full_name || userToRestore.name}
+              </span>
+              ? This user will be moved back to the user management and become active again.
+            </p>
+            <ModalFooter>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setIsRestoreModalOpen(false);
+                  setUserToRestore(null);
+                }}
+                className="bg-[#3D4654] hover:bg-[#4d5664] border-0"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleRestoreConfirm}
+                className="bg-green-700 hover:bg-green-800 border-0 text-white"
+              >
+                Restore User
+              </Button>
+            </ModalFooter>
+          </div>
+        </Modal>
       )}
     </div>
   );
