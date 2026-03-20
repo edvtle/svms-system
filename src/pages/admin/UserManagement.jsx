@@ -85,6 +85,7 @@ const UserManagement = () => {
   const [selectedUserIds, setSelectedUserIds] = useState(new Set());
   const [showArchiveUsersModal, setShowArchiveUsersModal] = useState(false);
   const [isArchivingUsers, setIsArchivingUsers] = useState(false);
+  const [archiveReason, setArchiveReason] = useState("");
   const [archiveAlertModal, setArchiveAlertModal] = useState({
     isOpen: false,
     type: "info",
@@ -527,8 +528,8 @@ const UserManagement = () => {
           body: JSON.stringify({
             isArchived: true,
             archivedAt: new Date().toISOString(),
-            status: currentYear === 4 ? "Graduated" : userRow.status,
             yearLevel: currentYear ? Number(currentYear) : userRow.yearLevel,
+            archivedReason: archiveReason.trim() || null,
           }),
         });
 
@@ -538,6 +539,7 @@ const UserManagement = () => {
       // Clear selection and refresh data
       setSelectedUserIds(new Set());
       setShowArchiveUsersModal(false);
+      setArchiveReason("");
 
       // Refresh data
       await fetchStudents();
@@ -573,6 +575,9 @@ const UserManagement = () => {
 
     return studentData.filter((student) => {
       const parsedYearSection = parseYearSection(student.yearSection);
+
+      // Filter out archived students
+      if (student.isArchived) return false;
 
       // Tab filter
       if (activeTab === "regular" && student.status !== "Regular") return false;
@@ -1709,6 +1714,23 @@ const UserManagement = () => {
                 </div>
               ))}
           </div>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-sm text-gray-300 font-semibold mb-2">
+            Archive Reason (Optional)
+          </label>
+          <input
+            type="text"
+            value={archiveReason}
+            onChange={(e) => setArchiveReason(e.target.value)}
+            placeholder="e.g., LOA (Leave of Absence), Transferred, etc."
+            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            disabled={isArchivingUsers}
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            If specified, this will be shown as the student's status in the archive.
+          </p>
         </div>
 
         <ModalFooter>

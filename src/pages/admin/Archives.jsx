@@ -356,7 +356,10 @@ const Archives = () => {
         program: user.program,
         yearSection: user.year_section,
         status: user.status,
-        statusDisplay: user.status === "Graduated" ? (
+        archivedReason: user.archived_reason,
+        statusDisplay: user.archived_reason ? (
+          <span className="text-red-500 font-medium">{user.archived_reason}</span>
+        ) : user.status === "Graduated" ? (
           <span className="text-green-700 font-medium">Graduated</span>
         ) : (
           user.status

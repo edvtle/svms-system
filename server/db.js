@@ -441,12 +441,12 @@ export async function syncStudentsDatabase() {
 
   await dbPool.query(`
     ALTER TABLE "Students"
-    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ
+    ADD COLUMN IF NOT EXISTS archived_reason VARCHAR(100)
   `);
 
   await dbPool.query(`
     ALTER TABLE "Students"
-    ADD COLUMN IF NOT EXISTS year_level INTEGER DEFAULT 1
+    ADD COLUMN IF NOT EXISTS original_status VARCHAR(20)
   `);
 
   await dbPool.query(`

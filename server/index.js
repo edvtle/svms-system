@@ -1125,7 +1125,9 @@ app.get("/api/students", async (req, res) => {
         s.status,
         s.violation_count,
         s.is_archived,
-        s.archived_at
+        s.archived_at,
+        s.archived_reason,
+        s.original_status
       FROM "Students" s
       LEFT JOIN users u ON u.id = s.user_id
       WHERE s.is_archived = $1
@@ -1371,6 +1373,7 @@ app.put("/api/students/:id", async (req, res) => {
     status,
     violationCount,
     isArchived,
+    archivedReason,
   } = req.body ?? {};
 
   if (!hasDbConfig()) {
@@ -1399,7 +1402,7 @@ app.put("/api/students/:id", async (req, res) => {
     const fullName = `${cleanedFirst} ${cleanedLast}`.trim();
 
     const studentData = await pool.query(
-      `SELECT year_level, year_section FROM "Students" WHERE id = $1 LIMIT 1`,
+      `SELECT year_level, year_section, status FROM "Students" WHERE id = $1 LIMIT 1`,
       [id],
     );
     const student = studentData.rows?.[0];
@@ -1420,9 +1423,20 @@ app.put("/api/students/:id", async (req, res) => {
       }
     }
 
-    // If archiving a 4th year student, automatically set status to "Graduated"
-    if (isArchived === true && existingYearLevel === 4) {
+    // If archiving a 4th year student, automatically set status to "Graduated" (only if no specific reason provided)
+    if (isArchived === true && existingYearLevel === 4 && !archivedReason?.trim()) {
       normalizedStatus = "Graduated";
+    }
+
+    // Handle archiving with reason
+    let normalizedArchivedReason = null;
+    let normalizedOriginalStatus = null;
+    if (isArchived === true && archivedReason && archivedReason.trim()) {
+      normalizedArchivedReason = archivedReason.trim();
+      // Store the current status as original status before archiving
+      normalizedOriginalStatus = student?.status || normalizedStatus || "Regular";
+      // Keep the status unchanged - store reason separately
+      // The reason will be used for display in Archives page
     }
 
     // If yearSection is provided, keep year_level in sync based on section prefix
@@ -1441,16 +1455,6 @@ app.put("/api/students/:id", async (req, res) => {
       const parsedYearLevel = Number(yearLevel);
       if (Number.isFinite(parsedYearLevel) && parsedYearLevel > 0) {
         normalizedYearLevel = Math.floor(parsedYearLevel);
-      }
-    }
-
-    // If archiving and student is 4th year, set status to Graduated.
-    if (isArchived === true) {
-      const targetYearLevel =
-        normalizedYearLevel != null ? normalizedYearLevel : existingYearLevel;
-      if (targetYearLevel === 4) {
-        normalizedStatus = "Graduated";
-        normalizedYearLevel = 4;
       }
     }
 
@@ -1496,9 +1500,11 @@ app.put("/api/students/:id", async (req, res) => {
         status = COALESCE(NULLIF($8, ''), status),
         violation_count = COALESCE(GREATEST($9::int, 0), violation_count),
         is_archived = CASE WHEN $12::boolean IS NOT NULL THEN $12::boolean ELSE is_archived END,
-        archived_at = CASE WHEN $12::boolean IS NOT NULL AND $12::boolean THEN COALESCE(archived_at, NOW()) ELSE archived_at END
+        archived_at = CASE WHEN $12::boolean IS NOT NULL AND $12::boolean THEN COALESCE(archived_at, NOW()) ELSE archived_at END,
+        archived_reason = CASE WHEN $12::boolean IS NOT NULL AND $12::boolean THEN COALESCE(NULLIF($13, ''), archived_reason) ELSE archived_reason END,
+        original_status = CASE WHEN $12::boolean IS NOT NULL AND $12::boolean THEN COALESCE(NULLIF($14, ''), original_status) ELSE original_status END
       WHERE id = $11
-      RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, year_level, status, violation_count, is_archived, archived_at
+      RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, year_level, status, violation_count, is_archived, archived_at, archived_reason, original_status
       `,
       [
         normalizedEmail || null,
@@ -1513,6 +1519,8 @@ app.put("/api/students/:id", async (req, res) => {
         normalizedYearLevel ?? null,
         id,
         isArchived ?? null,
+        normalizedArchivedReason || null,
+        normalizedOriginalStatus || null,
       ],
     );
 
@@ -3598,7 +3606,7 @@ app.get("/api/archive/users", async (req, res) => {
 
     const result = await pool.query(
       `SELECT id, user_id, email, school_id, full_name, first_name, last_name, 
-              program, year_section, status, violation_count, is_archived, archived_at
+              program, year_section, status, violation_count, is_archived, archived_at, archived_reason, original_status
        FROM "Students"
        WHERE is_archived = true
        ORDER BY archived_at DESC NULLS LAST`,
@@ -3814,9 +3822,9 @@ app.put("/api/archive/users/:id/restore", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
 
-    // Get the archived student to get user_id and name
+    // Get the archived student to get user_id, name, and original status
     const studentResult = await pool.query(
-      `SELECT id, user_id, full_name FROM "Students"
+      `SELECT id, user_id, full_name, original_status FROM "Students"
        WHERE id = $1 AND is_archived = true
        LIMIT 1`,
       [id],
@@ -3829,14 +3837,17 @@ app.put("/api/archive/users/:id/restore", async (req, res) => {
       });
     }
 
-    const { user_id, full_name } = studentResult.rows[0];
+    const { user_id, full_name, original_status } = studentResult.rows[0];
 
-    // Mark student as not archived
+    // Mark student as not archived and restore original status if it exists
     await pool.query(
       `UPDATE "Students"
-       SET is_archived = false, archived_at = NULL
+       SET is_archived = false, 
+           archived_at = NULL,
+           archived_reason = NULL,
+           status = COALESCE(NULLIF($2, ''), status)
        WHERE id = $1`,
-      [id],
+      [id, original_status || null],
     );
 
     // Reactivate user account
