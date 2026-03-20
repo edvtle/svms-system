@@ -428,9 +428,11 @@ const UserManagement = () => {
             body: JSON.stringify({
               isArchived: true,
               archivedAt: new Date().toISOString(),
+              status: "Graduated",
+              yearLevel: 4,
             }),
           });
-        } else if (currentYear < 4) {
+        } else if (currentYear > 0 && currentYear < 4) {
           // Increment year level for freshman/sophomore/junior
           const newYear = currentYear + 1;
           const newYearSection = student.yearSection.replace(/^\d+/, String(newYear));
@@ -443,6 +445,7 @@ const UserManagement = () => {
             },
             body: JSON.stringify({
               yearSection: newYearSection,
+              yearLevel: newYear,
             }),
           });
         }
@@ -504,7 +507,17 @@ const UserManagement = () => {
 
     setIsArchivingUsers(true);
     try {
+      let archivedCount = 0;
+
       for (const userId of selectedUserIds) {
+        const userRow = studentData.find((s) => s.id === userId);
+        if (!userRow) {
+          continue;
+        }
+
+        const yearMatch = String(userRow.yearSection || "").match(/^(\d+)/);
+        const currentYear = yearMatch ? Number(yearMatch[1]) : null;
+
         await fetch(`/api/students/${userId}`, {
           method: "PUT",
           headers: {
@@ -513,8 +526,13 @@ const UserManagement = () => {
           },
           body: JSON.stringify({
             isArchived: true,
+            archivedAt: new Date().toISOString(),
+            status: currentYear === 4 ? "Graduated" : userRow.status,
+            yearLevel: currentYear ? Number(currentYear) : userRow.yearLevel,
           }),
         });
+
+        archivedCount += 1;
       }
 
       // Clear selection and refresh data
@@ -523,10 +541,11 @@ const UserManagement = () => {
 
       // Refresh data
       await fetchStudents();
+
       showArchiveAlert(
         "success",
         "Users Archived",
-        `Successfully archived ${selectedUserIds.size} student(s). Archived students have been moved to the archive folder.`,
+        `Successfully archived ${archivedCount} student(s).`,
       );
     } catch (error) {
       showArchiveAlert(

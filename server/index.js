@@ -1235,12 +1235,21 @@ app.post("/api/students", async (req, res) => {
     const userId = userInsert.rows?.[0]?.id;
     createdUserId = userId;
 
+    let initialYearLevel = 1;
+    const yearSectionMatch = normalizedYearSection.match(/^(\d+)/);
+    if (yearSectionMatch) {
+      const parsedLevel = Number(yearSectionMatch[1]);
+      if (Number.isFinite(parsedLevel) && parsedLevel >= 1) {
+        initialYearLevel = Math.floor(parsedLevel);
+      }
+    }
+
     const result = await pool.query(
       `
       INSERT INTO "Students"
-        (user_id, email, school_id, first_name, last_name, full_name, program, year_section, status, violation_count)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0)
-      RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, status, violation_count
+        (user_id, email, school_id, first_name, last_name, full_name, program, year_section, year_level, status, violation_count)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0)
+      RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, year_level, status, violation_count
       `,
       [
         userId,
@@ -1251,6 +1260,7 @@ app.post("/api/students", async (req, res) => {
         fullName,
         normalizedProgram,
         normalizedYearSection,
+        initialYearLevel,
         normalizedStatus,
       ],
     );
@@ -1357,6 +1367,7 @@ app.put("/api/students/:id", async (req, res) => {
     lastName,
     program,
     yearSection,
+    yearLevel,
     status,
     violationCount,
     isArchived,
@@ -1383,8 +1394,73 @@ app.put("/api/students/:id", async (req, res) => {
       .toLowerCase();
     const normalizedProgram = String(program || "").trim();
     const normalizedYearSection = String(yearSection || "").trim();
-    const normalizedStatus = String(status || "").trim();
+    let normalizedStatus = String(status || "").trim();
+    let normalizedYearLevel = null;
     const fullName = `${cleanedFirst} ${cleanedLast}`.trim();
+
+    const studentData = await pool.query(
+      `SELECT year_level, year_section FROM "Students" WHERE id = $1 LIMIT 1`,
+      [id],
+    );
+    const student = studentData.rows?.[0];
+
+    // Determine existing student year level from year_level column or year_section prefix
+    let existingYearLevel = null;
+    if (student?.year_level != null) {
+      existingYearLevel = Number(student.year_level);
+      if (!Number.isFinite(existingYearLevel)) {
+        existingYearLevel = null;
+      }
+    }
+
+    if (existingYearLevel == null && student?.year_section) {
+      const sectionYearMatch = String(student.year_section || "").trim().match(/^\s*(\d+)/);
+      if (sectionYearMatch) {
+        existingYearLevel = Number(sectionYearMatch[1]);
+      }
+    }
+
+    // If archiving a 4th year student, automatically set status to "Graduated"
+    if (isArchived === true && existingYearLevel === 4) {
+      normalizedStatus = "Graduated";
+    }
+
+    // If yearSection is provided, keep year_level in sync based on section prefix
+    if (normalizedYearSection) {
+      const sectionYearMatch = normalizedYearSection.match(/^(\d+)/);
+      if (sectionYearMatch) {
+        const parsedYearSectionLevel = Number(sectionYearMatch[1]);
+        if (Number.isFinite(parsedYearSectionLevel)) {
+          normalizedYearLevel = parsedYearSectionLevel;
+        }
+      }
+    }
+
+    // Direct year_level update from request payload (highest priority)
+    if (yearLevel != null) {
+      const parsedYearLevel = Number(yearLevel);
+      if (Number.isFinite(parsedYearLevel) && parsedYearLevel > 0) {
+        normalizedYearLevel = Math.floor(parsedYearLevel);
+      }
+    }
+
+    // If archiving and student is 4th year, set status to Graduated.
+    if (isArchived === true) {
+      const targetYearLevel =
+        normalizedYearLevel != null ? normalizedYearLevel : existingYearLevel;
+      if (targetYearLevel === 4) {
+        normalizedStatus = "Graduated";
+        normalizedYearLevel = 4;
+      }
+    }
+
+    // Direct year_level update from request payload (highest priority)
+    if (yearLevel != null) {
+      const parsedYearLevel = Number(yearLevel);
+      if (Number.isFinite(parsedYearLevel) && parsedYearLevel > 0) {
+        normalizedYearLevel = Math.floor(parsedYearLevel);
+      }
+    }
 
     if (username != null) {
       const existingStudent = await pool.query(
@@ -1416,12 +1492,13 @@ app.put("/api/students/:id", async (req, res) => {
         full_name = COALESCE(NULLIF($5, ''), full_name),
         program = COALESCE(NULLIF($6, ''), program),
         year_section = COALESCE(NULLIF($7, ''), year_section),
+        year_level = COALESCE($10::int, year_level),
         status = COALESCE(NULLIF($8, ''), status),
         violation_count = COALESCE(GREATEST($9::int, 0), violation_count),
-        is_archived = CASE WHEN $11::boolean IS NOT NULL THEN $11::boolean ELSE is_archived END,
-        archived_at = CASE WHEN $11::boolean IS NOT NULL AND $11::boolean THEN COALESCE(archived_at, NOW()) ELSE archived_at END
-      WHERE id = $10
-      RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, status, violation_count, is_archived, archived_at
+        is_archived = CASE WHEN $12::boolean IS NOT NULL THEN $12::boolean ELSE is_archived END,
+        archived_at = CASE WHEN $12::boolean IS NOT NULL AND $12::boolean THEN COALESCE(archived_at, NOW()) ELSE archived_at END
+      WHERE id = $11
+      RETURNING id, user_id, email, school_id, full_name, first_name, last_name, program, year_section, year_level, status, violation_count, is_archived, archived_at
       `,
       [
         normalizedEmail || null,
@@ -1433,6 +1510,7 @@ app.put("/api/students/:id", async (req, res) => {
         normalizedYearSection || null,
         normalizedStatus || null,
         violationCount ?? null,
+        normalizedYearLevel ?? null,
         id,
         isArchived ?? null,
       ],
@@ -3283,9 +3361,9 @@ app.post("/api/archive/violations", async (req, res) => {
       nextSchoolYear = `${endYear}-${endYear + 1}`;
     }
 
-    // Get all students (active and archived)
+    // Get all active students (not archived)
     const studentsResult = await pool.query(
-      `SELECT id, year_level FROM "Students"`,
+      `SELECT id, year_level, year_section FROM "Students" WHERE is_archived = false`,
     );
 
     const students = studentsResult.rows || [];
@@ -3372,20 +3450,61 @@ app.post("/api/archive/violations", async (req, res) => {
       }
     }
 
-    // STEP 4: If archiving 2nd semester, promote students
+    // STEP 4: If archiving 2nd semester, promote students and archive 4th year students
+    let archivedStudentCount = 0;
     if (semester === "2ND SEM") {
       for (const student of students) {
-        if (student.year_level < 4) {
+        // Prefer year_section (actual visible year) as the source of truth.
+        // Fall back to stored year_level only if year_section is not parseable.
+        let parsedYearSection = null;
+        if (student.year_section) {
+          const match = String(student.year_section).trim().match(/^(\d+)/);
+          if (match) {
+            parsedYearSection = Number(match[1]);
+          }
+        }
+
+        let yearLevel = Number.isFinite(parsedYearSection)
+          ? parsedYearSection
+          : Number(student.year_level);
+
+        if (!Number.isFinite(yearLevel)) {
+          yearLevel = null;
+        }
+
+        if (yearLevel === 4) {
+          // Archive 4th year students with "Graduated" status
           await pool.query(
             `UPDATE "Students"
-             SET year_level = year_level + 1,
+             SET is_archived = true,
+                 archived_at = NOW(),
+                 status = 'Graduated',
+                 year_level = 4,
                  current_semester = $1,
                  current_school_year = $2
              WHERE id = $3`,
             [nextSemester, nextSchoolYear, student.id],
           );
+          archivedStudentCount++;
+        } else if (yearLevel >= 1 && yearLevel < 4) {
+          // Promote 1st, 2nd, 3rd year students
+          const nextYear = yearLevel + 1;
+          const nextYearSection = student.year_section
+            ? student.year_section.replace(/^\d+/, String(nextYear))
+            : null;
+
+          await pool.query(
+            `UPDATE "Students"
+             SET year_level = $1,
+                 year_section = COALESCE($2, year_section),
+                 current_semester = $3,
+                 current_school_year = $4
+             WHERE id = $5`,
+            [nextYear, nextYearSection, nextSemester, nextSchoolYear, student.id],
+          );
           promotedCount++;
         } else {
+          // Do not archive students without a valid year level value.
           await pool.query(
             `UPDATE "Students"
              SET current_semester = $1,
@@ -3395,6 +3514,7 @@ app.post("/api/archive/violations", async (req, res) => {
           );
         }
       }
+      console.log(`Archived ${archivedStudentCount} 4th year students with Graduated status`);
     } else {
       // If archiving 1st semester, just update semester
       for (const student of students) {
@@ -3744,6 +3864,70 @@ app.put("/api/archive/users/:id/restore", async (req, res) => {
     return res.status(503).json({
       status: "error",
       message: `Unable to restore user (${error.message}).`,
+    });
+  }
+});
+
+// PUT bulk restore all archived users
+app.put("/api/archive/users/restore/all", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Get all archived students
+    const archivedStudents = await pool.query(
+      `SELECT id, user_id, full_name FROM "Students" WHERE is_archived = true`,
+    );
+
+    const students = archivedStudents.rows || [];
+    let restoredCount = 0;
+
+    // Restore all archived students
+    for (const student of students) {
+      await pool.query(
+        `UPDATE "Students"
+         SET is_archived = false, archived_at = NULL
+         WHERE id = $1`,
+        [student.id],
+      );
+
+      if (student.user_id) {
+        await pool.query(
+          `UPDATE users
+           SET is_active = true, updated_at = NOW()
+           WHERE id = $1`,
+          [student.user_id],
+        );
+      }
+
+      restoredCount++;
+    }
+
+    // Log audit event
+    await logAuditEvent(req, {
+      action: "BULK_RESTORE_USERS",
+      targetType: "Students",
+      targetId: null,
+      details: `Bulk restored ${restoredCount} archived users to active status.`,
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      message: `Successfully restored ${restoredCount} archived user(s) to active status.`,
+      restoredCount,
+    });
+  } catch (error) {
+    console.error("Error bulk restoring archived users:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to restore archived users (${error.message}).`,
     });
   }
 });

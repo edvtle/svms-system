@@ -356,6 +356,11 @@ const Archives = () => {
         program: user.program,
         yearSection: user.year_section,
         status: user.status,
+        statusDisplay: user.status === "Graduated" ? (
+          <span className="text-green-700 font-medium">Graduated</span>
+        ) : (
+          user.status
+        ),
         violationCount: user.violation_count,
         archivedDate: formatDate(user.archived_at),
       }));
@@ -445,6 +450,7 @@ const Archives = () => {
           {
             key: "status",
             label: "Status",
+            render: (value, row) => row.statusDisplay || value,
           },
           {
             key: "violationCount",
@@ -470,10 +476,12 @@ const Archives = () => {
                     <Edit className="w-4 h-4" />
                     <span>Edit</span>
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
-                    <RotateCcw className="w-4 h-4" />
-                    <span>Restore</span>
-                  </DropdownMenuItem>
+                  {row.status !== "Graduated" && (
+                    <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Restore</span>
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             ),

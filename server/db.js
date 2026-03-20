@@ -410,7 +410,7 @@ export async function syncStudentsDatabase() {
       full_name VARCHAR(255) NOT NULL,
       program VARCHAR(50) NOT NULL,
       year_section VARCHAR(20) NOT NULL,
-      status VARCHAR(20) NOT NULL CHECK (status IN ('Regular', 'Irregular')),
+      status VARCHAR(20) NOT NULL CHECK (status IN ('Regular', 'Irregular', 'Graduated')),
       violation_count INTEGER NOT NULL DEFAULT 0,
       is_archived BOOLEAN NOT NULL DEFAULT FALSE,
       archived_at TIMESTAMPTZ,
@@ -478,6 +478,17 @@ export async function syncStudentsDatabase() {
   await dbPool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS students_school_id_unique_idx
     ON "Students" (school_id)
+  `);
+
+  // Drop the old CHECK constraint and add the new one with 'Graduated' status
+  await dbPool.query(`
+    ALTER TABLE "Students"
+    DROP CONSTRAINT IF EXISTS "Students_status_check"
+  `);
+
+  await dbPool.query(`
+    ALTER TABLE "Students"
+    ADD CONSTRAINT "Students_status_check" CHECK (status IN ('Regular', 'Irregular', 'Graduated'))
   `);
 
   await dbPool.query(`
