@@ -13,6 +13,8 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
   const [isArchiving, setIsArchiving] = useState(false);
   const [archiveResult, setArchiveResult] = useState(null);
   const [error, setError] = useState('');
+  const [signatureCheck, setSignatureCheck] = useState({ checked: false, hasAllSignatures: false, violationsWithoutSignature: 0 });
+  const [showSignatureWarningModal, setShowSignatureWarningModal] = useState(false);
 
   // Load current semester/school year on mount
   useEffect(() => {
@@ -53,9 +55,46 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
     }
   }, [isOpen]);
 
+  // Check signatures when semester/year changes
+  useEffect(() => {
+    const checkSignatures = async () => {
+      if (!selectedSemester || !selectedSchoolYear) {
+        setSignatureCheck({ checked: false, hasAllSignatures: false, violationsWithoutSignature: 0 });
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/archive/check-signatures?semester=${encodeURIComponent(selectedSemester)}&schoolYear=${encodeURIComponent(selectedSchoolYear)}`, {
+          headers: { ...getAuditHeaders() },
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === 'ok') {
+          setSignatureCheck({
+            checked: true,
+            hasAllSignatures: data.hasAllSignatures,
+            violationsWithoutSignature: data.violationsWithoutSignature,
+          });
+        } else {
+          setSignatureCheck({ checked: false, hasAllSignatures: false, violationsWithoutSignature: 0 });
+        }
+      } catch (err) {
+        console.error('Failed to check signatures:', err);
+        setSignatureCheck({ checked: false, hasAllSignatures: false, violationsWithoutSignature: 0 });
+      }
+    };
+
+    checkSignatures();
+  }, [selectedSemester, selectedSchoolYear]);
+
   const handleArchive = async () => {
     if (!selectedSemester || !selectedSchoolYear) {
       setError('Please select both semester and school year.');
+      return;
+    }
+
+    if (signatureCheck.checked && !signatureCheck.hasAllSignatures) {
+      setShowSignatureWarningModal(true);
       return;
     }
 
@@ -116,6 +155,8 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
   const handleClose = () => {
     setArchiveResult(null);
     setError('');
+    setSignatureCheck({ checked: false, hasAllSignatures: false, violationsWithoutSignature: 0 });
+    setShowSignatureWarningModal(false);
     onClose();
   };
 
@@ -175,10 +216,11 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title="Archive Student Violations">
-      <div className="space-y-4 max-w-md">
-        {/* Current Semester Display */}
-        <div className="bg-slate-800/50 p-3 rounded-lg">
+    <>
+      <Modal isOpen={isOpen} onClose={handleClose} title="Archive Student Violations">
+        <div className="space-y-4 max-w-md">
+          {/* Current Semester Display */}
+          <div className="bg-slate-800/50 p-3 rounded-lg">
           <p className="text-xs text-slate-400 mb-1">Current Semester</p>
           <p className="text-lg font-semibold text-blue-400">
             {currentSemester} S.Y. {currentSchoolYear}
@@ -235,6 +277,26 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
           </div>
         </div>
 
+        {/* Signature Check */}
+        {signatureCheck.checked && (
+          <div className={`border rounded-lg p-3 ${signatureCheck.hasAllSignatures ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+            <div className="flex gap-2">
+              {signatureCheck.hasAllSignatures ? (
+                <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+              )}
+              <div className={`text-sm ${signatureCheck.hasAllSignatures ? 'text-green-300' : 'text-red-300'}`}>
+                {signatureCheck.hasAllSignatures ? (
+                  'All violations have signatures attached.'
+                ) : (
+                  `${signatureCheck.violationsWithoutSignature} violation(s) are missing signatures. Please attach signatures before archiving.`
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Error Display */}
         {error && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-300">
@@ -265,7 +327,29 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
         </Button>
       </ModalFooter>
     </Modal>
-  );
+
+    {showSignatureWarningModal && (
+      <Modal
+        isOpen={true}
+        onClose={() => setShowSignatureWarningModal(false)}
+        title="Missing Signatures"
+      >
+        <div className="p-4 text-sm text-red-200">
+          {signatureCheck.violationsWithoutSignature} violation(s) are missing signatures.
+          Please attach signatures before archiving.
+        </div>
+        <ModalFooter>
+          <Button
+            onClick={() => setShowSignatureWarningModal(false)}
+            variant="primary"
+          >
+            OK
+          </Button>
+        </ModalFooter>
+      </Modal>
+    )}
+  </>);
+
 };
 
 export default ArchiveViolationModal;

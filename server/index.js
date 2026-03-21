@@ -3327,6 +3327,55 @@ app.put("/api/archive/current-settings", async (req, res) => {
   }
 });
 
+// GET check if all violations have signatures for archiving
+app.get("/api/archive/check-signatures", async (req, res) => {
+  const { semester, schoolYear } = req.query;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  if (!semester || !schoolYear) {
+    return res.status(400).json({
+      status: "error",
+      message: "Semester and school year are required.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Get all violations for the given semester that need to be archived
+    const violationsResult = await pool.query(
+      `SELECT id, signature_image FROM student_violation_logs
+       WHERE semester = $1
+       AND school_year = $2
+       AND cleared_at IS NULL`,
+      [semester, schoolYear],
+    );
+
+    const violations = violationsResult.rows || [];
+    const violationsWithoutSignature = violations.filter(v => !v.signature_image || v.signature_image.trim() === '');
+
+    return res.status(200).json({
+      status: "ok",
+      hasAllSignatures: violationsWithoutSignature.length === 0,
+      violationsWithoutSignature: violationsWithoutSignature.length,
+      totalViolations: violations.length,
+    });
+  } catch (error) {
+    console.error("Check signatures error:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to check signatures (${error.message}).`,
+    });
+  }
+});
+
 // POST archive violations for a semester
 app.post("/api/archive/violations", async (req, res) => {
   const { semester, schoolYear } = req.body ?? {};
@@ -3392,6 +3441,15 @@ app.post("/api/archive/violations", async (req, res) => {
     console.log(
       `Found ${violations.length} violations to archive for ${semester} S.Y. ${schoolYear}`,
     );
+
+    // Check if all violations have signatures
+    const violationsWithoutSignature = violations.filter(v => !v.signature_image || v.signature_image.trim() === '');
+    if (violationsWithoutSignature.length > 0) {
+      return res.status(400).json({
+        status: "error",
+        message: `Cannot archive violations. ${violationsWithoutSignature.length} violation(s) are missing signatures. Please attach signatures to all violations before archiving.`,
+      });
+    }
 
     // STEP 2: Move violations to archive table
     if (violations.length > 0) {
