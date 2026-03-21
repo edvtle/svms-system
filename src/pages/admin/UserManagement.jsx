@@ -1007,6 +1007,10 @@ const UserManagement = () => {
     }
   };
 
+  const handleRowSelect = (row) => {
+    handleToggleCheckbox(row.id);
+  };
+
   const columns = [
     {
       key: "select",
@@ -1025,6 +1029,7 @@ const UserManagement = () => {
             type="checkbox"
             checked={selectedUserIds.has(row.id)}
             onChange={() => handleToggleCheckbox(row.id)}
+            onClick={(e) => e.stopPropagation()}
             className="w-4 h-4 cursor-pointer"
           />
         );
@@ -1396,6 +1401,7 @@ const UserManagement = () => {
           columns={columns}
           data={isLoading ? [] : filteredStudents}
           actions={actions}
+          onRowClick={handleRowSelect}
         />
       </AnimatedContent>
 
