@@ -1,7 +1,6 @@
-import { Search, UserPen } from 'lucide-react'
+import { UserPen } from 'lucide-react'
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import SearchBar from '../ui/SearchBar'
 import EditProfileModal from '../modals/EditProfileModal'
 import {
   DropdownMenu,
@@ -218,9 +217,6 @@ const Navbar = () => {
 
         {/* Right Side */}
         <div className="flex items-center gap-5">
-          {/* Search Bar */}
-          <SearchBar placeholder="Search" className="w-80" />
-
           {/* Notification Bell */}
           {currentUser?.role === 'student' ? (
             <DropdownMenu>

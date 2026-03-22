@@ -2,12 +2,6 @@ import React, { useState, useEffect, useRef } from 'react'
 import AnimatedContent from '../../components/ui/AnimatedContent'
 import Button from '../../components/ui/Button'
 import { useSettings } from '../../context/SettingsContext'
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '../../components/ui/dropdown-menu'
 
 const Settings = () => {
   const { settings, uploadLogo, removeLogo, updateSettings } = useSettings()
@@ -178,7 +172,7 @@ const Settings = () => {
           <div className="mb-8">
             <h3 className="text-2xl font-bold mb-2">Change Logo</h3>
             <p className="text-gray-400 text-base mb-6">
-              Customize the system's logo, display name and color theme.
+              Customize the system's logo and display name.
             </p>
             <div className="flex items-center gap-8 mb-6">
               <div className="w-28 h-28 rounded-full bg-[#1a1a1a] flex items-center justify-center overflow-hidden">
@@ -225,8 +219,8 @@ const Settings = () => {
               </div>
             </div>
             <div className="border-t border-white/10 my-8" />
-            <div className="grid grid-cols-2 gap-10 items-end">
-              <div>
+            <div className="grid grid-cols-1 gap-10 items-end">
+              <div className="max-w-xl">
                 <label className="block text-base font-medium mb-3">
                   System Display Name
                 </label>
@@ -238,65 +232,7 @@ const Settings = () => {
                   placeholder="This name will appear on the dashboard header."
                 />
               </div>
-              <div>
-                <label className="block text-base font-medium mb-3">
-                  System Color Theme
-                </label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="secondary"
-                      size="lg"
-                      className="w-full flex justify-between bg-[#1a1a1a] border border-white/10 px-4 py-3"
-                    >
-                      {theme === 'light' ? 'Light Mode' : theme === 'dark' ? 'Dark Mode' : 'Custom'}
-                      <svg
-                        className="ml-2 w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 9l-7 7-7-7"
-                        />
-                      </svg>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuItem onClick={() => setTheme('light')}>
-                      Light Mode
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setTheme('dark')}>
-                      Dark Mode
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setTheme('custom')}>
-                      Custom
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
             </div>
-
-            {/* Custom color picker */}
-            {theme === 'custom' && (
-              <div className="mt-6">
-                <label className="block text-base font-medium mb-3">
-                  Choose Custom Color
-                </label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="color"
-                    value={customColor}
-                    onChange={e => setCustomColor(e.target.value)}
-                    className="w-16 h-16 cursor-pointer rounded-lg"
-                  />
-                  <span className="text-gray-400">{customColor}</span>
-                </div>
-              </div>
-            )}
           </div>
         </div>
         <div className="flex justify-end mt-6">
