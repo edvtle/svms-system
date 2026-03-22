@@ -15,6 +15,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
   const [error, setError] = useState('');
   const [signatureCheck, setSignatureCheck] = useState({ checked: false, hasAllSignatures: false, violationsWithoutSignature: 0 });
   const [showSignatureWarningModal, setShowSignatureWarningModal] = useState(false);
+  const [archiveExists, setArchiveExists] = useState(false);
 
   // Load current semester/school year on mount
   useEffect(() => {
@@ -52,6 +53,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
 
     if (isOpen) {
       loadSettings();
+      setArchiveExists(false);
     }
   }, [isOpen]);
 
@@ -60,6 +62,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
     const checkSignatures = async () => {
       if (!selectedSemester || !selectedSchoolYear) {
         setSignatureCheck({ checked: false, hasAllSignatures: false, violationsWithoutSignature: 0 });
+        setArchiveExists(false);
         return;
       }
 
@@ -84,7 +87,31 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
       }
     };
 
+    const checkExistingArchive = async () => {
+      if (!selectedSemester || !selectedSchoolYear) {
+        setArchiveExists(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/archive/check-exists?semester=${encodeURIComponent(selectedSemester)}&schoolYear=${encodeURIComponent(selectedSchoolYear)}`, {
+          headers: { ...getAuditHeaders() },
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === 'ok') {
+          setArchiveExists(data.exists);
+        } else {
+          setArchiveExists(false);
+        }
+      } catch (err) {
+        console.error('Failed to check existing archive:', err);
+        setArchiveExists(false);
+      }
+    };
+
     checkSignatures();
+    checkExistingArchive();
   }, [selectedSemester, selectedSchoolYear]);
 
   const handleArchive = async () => {
@@ -156,6 +183,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
     setArchiveResult(null);
     setError('');
     setSignatureCheck({ checked: false, hasAllSignatures: false, violationsWithoutSignature: 0 });
+    setArchiveExists(false);
     setShowSignatureWarningModal(false);
     onClose();
   };
@@ -265,17 +293,18 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
           </div>
         </div>
 
-        {/* Info Message */}
-        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-          <div className="flex gap-2">
-            <AlertCircle className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-blue-300">
-              {selectedSemester === '2ND SEM'
-                ? 'Students will be promoted to the next year level (4th year students will not be promoted).'
-                : 'Students will continue in the same year level.'}
+        {/* Archive Exists Warning */}
+        {archiveExists && (
+          <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+            <div className="flex gap-2">
+              <AlertCircle className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-orange-300">
+                This school year ({selectedSchoolYear}) and semester ({selectedSemester}) already exist in the archive.
+                Please choose a different semester/year combination.
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Signature Check */}
         {signatureCheck.checked && (
@@ -320,7 +349,8 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
             isLoading ||
             isArchiving ||
             !selectedSemester ||
-            !selectedSchoolYear
+            !selectedSchoolYear ||
+            archiveExists
           }
         >
           {isArchiving ? 'Archiving...' : 'Archive'}

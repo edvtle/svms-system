@@ -3376,6 +3376,50 @@ app.get("/api/archive/check-signatures", async (req, res) => {
   }
 });
 
+// Check if archive already exists for semester/year
+app.get("/api/archive/check-exists", async (req, res) => {
+  const { semester, schoolYear } = req.query;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  if (!semester || !schoolYear) {
+    return res.status(400).json({
+      status: "error",
+      message: "Semester and school year are required.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Check if this semester/year combination already exists in archive
+    const existingArchiveCheck = await pool.query(
+      `SELECT COUNT(*) as count FROM student_violation_archives 
+       WHERE semester = $1 AND school_year = $2`,
+      [semester, schoolYear],
+    );
+
+    const exists = existingArchiveCheck.rows[0].count > 0;
+
+    return res.status(200).json({
+      status: "ok",
+      exists,
+    });
+  } catch (error) {
+    console.error("Check archive exists error:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to check archive status (${error.message}).`,
+    });
+  }
+});
+
 // POST archive violations for a semester
 app.post("/api/archive/violations", async (req, res) => {
   const { semester, schoolYear } = req.body ?? {};
@@ -3397,6 +3441,20 @@ app.post("/api/archive/violations", async (req, res) => {
   try {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
+
+    // Check if this semester/year combination already exists in archive
+    const existingArchiveCheck = await pool.query(
+      `SELECT COUNT(*) as count FROM student_violation_archives 
+       WHERE semester = $1 AND school_year = $2`,
+      [semester, schoolYear],
+    );
+
+    if (existingArchiveCheck.rows[0].count > 0) {
+      return res.status(400).json({
+        status: "error",
+        message: `This school year (${schoolYear}) and semester (${semester}) already exist in the archive. Please choose a different semester/year combination.`,
+      });
+    }
 
     // Get current semester from settings
     const settingsResult = await pool.query(
