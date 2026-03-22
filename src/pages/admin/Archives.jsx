@@ -44,11 +44,13 @@ const Archives = () => {
   const [activeSemester, setActiveSemester] = useState("1ST SEM");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("");
+  const [isGlobalSearch, setIsGlobalSearch] = useState(false); // Default to current folder search
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [archivedUsers, setArchivedUsers] = useState([]);
   const [archivedViolations, setArchivedViolations] = useState([]);
+  const [allArchivedViolations, setAllArchivedViolations] = useState([]); // For global search
   const [schoolYears, setSchoolYears] = useState([]);
 
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -143,7 +145,7 @@ const Archives = () => {
         if (data.status === "ok" && Array.isArray(data.schoolYears)) {
           const years = data.schoolYears || [];
           setSchoolYears(years);
-          // Don't auto-select folder - let user choose deliberately
+          // Don't auto-select folder - keep users as default
         } else {
           setSchoolYears([]);
         }
@@ -210,6 +212,58 @@ const Archives = () => {
 
     loadViolations();
   }, [activeFolder, activeSemester]);
+
+  // Load all violations for global search
+  useEffect(() => {
+    const loadAllViolations = async () => {
+      if (!isGlobalSearch || allArchivedViolations.length > 0) return;
+
+      try {
+        setIsLoading(true);
+        console.log("Loading all violations for global search...");
+
+        const allViolations = [];
+        for (const year of schoolYears) {
+          try {
+            const response1st = await fetch(`/api/archive/violations/${year}/1ST SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const response2nd = await fetch(`/api/archive/violations/${year}/2ND SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+
+            if (response1st.ok) {
+              const data1st = await response1st.json();
+              if (data1st.status === "ok" && Array.isArray(data1st.violations)) {
+                allViolations.push(...(data1st.violations || []));
+              }
+            }
+
+            if (response2nd.ok) {
+              const data2nd = await response2nd.json();
+              if (data2nd.status === "ok" && Array.isArray(data2nd.violations)) {
+                allViolations.push(...(data2nd.violations || []));
+              }
+            }
+          } catch (err) {
+            console.warn(`Error loading violations for ${year}:`, err);
+          }
+        }
+
+        setAllArchivedViolations(allViolations);
+        console.log(`✓ Loaded ${allViolations.length} total archived violations for global search`);
+      } catch (err) {
+        console.error("Error loading all violations:", err);
+        setAllArchivedViolations([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (isGlobalSearch && schoolYears.length > 0) {
+      loadAllViolations();
+    }
+  }, [isGlobalSearch, schoolYears, allArchivedViolations.length]);
 
   // Load archived users when users folder is clicked
   useEffect(() => {
@@ -309,7 +363,7 @@ const Archives = () => {
       });
 
       if (response.ok) {
-        const data = await response.json();
+        await response.json();
         // Remove the user from archived list
         setArchivedUsers((prev) => prev.filter((u) => u.id !== userToRestore.id));
         setIsRestoreModalOpen(false);
@@ -331,254 +385,541 @@ const Archives = () => {
   };
 
   // Get all folders (USERS + School Years)
-  const folders = [
-    { key: "users", label: "USERS" },
-    ...schoolYears.map((year) => ({
-      key: year,
-      label: `S.Y. ${year}`,
-    })),
-  ];
+  const folders = useMemo(
+    () => [
+      { key: "users", label: "USERS" },
+      ...schoolYears.map((year) => ({
+        key: year,
+        label: `S.Y. ${year}`,
+      })),
+    ],
+    [schoolYears],
+  );
 
-  // Prepare data based on active folder
+// Prepare data based on active folder or global search
   const displayData = useMemo(() => {
-    if (activeFolder === "users") {
-      return archivedUsers.map((user) => ({
-        id: user.id,
-        no: "",
-        full_name: user.full_name,
-        name: (
-          <div>
-            <div className="font-semibold">{user.full_name}</div>
-            <div className="text-xs text-gray-400">{user.school_id}</div>
-          </div>
-        ),
-        email: user.email,
-        program: user.program,
-        yearSection: user.year_section,
-        status: user.status,
-        archivedReason: user.archived_reason,
-        statusDisplay: user.archived_reason ? (
-          <span className="text-red-500 font-medium">{user.archived_reason}</span>
-        ) : user.status === "Graduated" ? (
-          <span className="text-green-700 font-medium">Graduated</span>
-        ) : (
-          user.status
-        ),
-        violationCount: user.violation_count,
-        archivedDate: formatDate(user.archived_at),
-      }));
+    if (!isGlobalSearch) {
+      // Current folder-only search
+      if (activeFolder === "users") {
+        return archivedUsers.map((user) => ({
+          id: user.id,
+          no: "",
+          full_name: user.full_name,
+          name: (
+            <div>
+              <div className="font-semibold">{user.full_name}</div>
+              <div className="text-xs text-gray-400">{user.school_id}</div>
+            </div>
+          ),
+          email: user.email,
+          program: user.program,
+          yearSection: user.year_section,
+          status: user.status,
+          archivedReason: user.archived_reason,
+          statusDisplay: user.archived_reason ? (
+            <span className="text-red-500 font-medium">{user.archived_reason}</span>
+          ) : user.status === "Graduated" ? (
+            <span className="text-green-700 font-medium">Graduated</span>
+          ) : (
+            user.status
+          ),
+          violationCount: user.violation_count,
+          archivedDate: formatDate(user.archived_at),
+          folder: "USERS",
+          folderKey: "users",
+          recordType: "user",
+          searchableText: `${user.full_name || ""} ${user.school_id || ""} ${user.email || ""} ${user.program || ""} ${user.year_section || ""} ${user.status || ""} ${user.archived_reason || ""}`.toLowerCase(),
+        }));
+      } else {
+        return archivedViolations.map((violation) => ({
+          id: violation.id,
+          no: "",
+          studentName: (
+            <div>
+              <div className="font-semibold">{violation.student_name}</div>
+              <div className="text-xs text-gray-400">{violation.school_id}</div>
+            </div>
+          ),
+          yearSection: violation.year_section,
+          violation: violation.violation_label,
+          type:
+            violation.violation_category && violation.violation_degree
+              ? `${violation.violation_category} - ${violation.violation_degree}`
+              : "-",
+          reportedBy: violation.reported_by || "-",
+          remarks: violation.remarks || "-",
+          signature: violation.signature_image ? "Signed" : "No Signature",
+          signatureImage: violation.signature_image,
+          date: formatDate(violation.archived_at),
+          archivedAt: violation.archived_at,
+          violationId: violation.id,
+          folder: `S.Y. ${activeFolder}`,
+          folderKey: activeFolder,
+          recordType: "violation",
+          searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+        }));
+      }
     } else {
-      return archivedViolations.map((violation) => ({
-        id: violation.id,
-        no: "",
-        studentName: (
-          <div>
-            <div className="font-semibold">{violation.student_name}</div>
-            <div className="text-xs text-gray-400">{violation.school_id}</div>
-          </div>
-        ),
-        yearSection: violation.year_section,
-        violation: violation.violation_label,
-        type:
-          violation.violation_category && violation.violation_degree
-            ? `${violation.violation_category} - ${violation.violation_degree}`
-            : "-",
-        reportedBy: violation.reported_by || "-",
-        remarks: violation.remarks || "-",
-        signature: violation.signature_image ? "Signed" : "No Signature",
-        signatureImage: violation.signature_image,
-        date: formatDate(violation.archived_at),
-        archivedAt: violation.archived_at,
-        violationId: violation.id,
-      }));
+      // Global search - combine all data only if loaded
+      const allData = [];
+
+      // Add users from USERS folder, only real entries
+      archivedUsers.forEach((user) => {
+        const hasUser =
+          (user.full_name && user.full_name.trim()) ||
+          (user.school_id && user.school_id.trim()) ||
+          (user.email && user.email.trim());
+        if (!hasUser) return;
+
+        allData.push({
+          id: user.id,
+          no: "",
+          full_name: user.full_name,
+          name: (
+            <div>
+              <div className="font-semibold">{user.full_name}</div>
+              <div className="text-xs text-gray-400">{user.school_id}</div>
+            </div>
+          ),
+          email: user.email,
+          program: user.program,
+          yearSection: user.year_section,
+          status: user.status,
+          archivedReason: user.archived_reason,
+          statusDisplay: user.archived_reason ? (
+            <span className="text-red-500 font-medium">{user.archived_reason}</span>
+          ) : user.status === "Graduated" ? (
+            <span className="text-green-700 font-medium">Graduated</span>
+          ) : (
+            user.status
+          ),
+          violationCount: user.violation_count,
+          archivedDate: formatDate(user.archived_at),
+          folder: "USERS",
+          folderKey: "users",
+          recordType: "user",
+          // Add searchable text for global search
+          searchableText: `${user.full_name || ""} ${user.school_id || ""} ${user.email || ""} ${user.program || ""} ${user.year_section || ""} ${user.status || ""} ${user.archived_reason || ""}`.toLowerCase(),
+        });
+      });
+
+      // Add violations from all school years only if data is loaded
+      if (allArchivedViolations.length > 0) {
+        allArchivedViolations.forEach((violation) => {
+          const hasViolation =
+            (violation.student_name && violation.student_name.trim()) ||
+            (violation.school_id && violation.school_id.trim());
+          if (!hasViolation) return;
+
+          allData.push({
+            id: violation.id,
+            no: "",
+            studentName: (
+              <div>
+                <div className="font-semibold">{violation.student_name}</div>
+                <div className="text-xs text-gray-400">{violation.school_id}</div>
+              </div>
+            ),
+            yearSection: violation.year_section,
+            violation: violation.violation_label,
+            type:
+              violation.violation_category && violation.violation_degree
+                ? `${violation.violation_category} - ${violation.violation_degree}`
+                : "-",
+            reportedBy: violation.reported_by || "-",
+            remarks: violation.remarks || "-",
+            signature: violation.signature_image ? "Signed" : "No Signature",
+            signatureImage: violation.signature_image,
+            date: formatDate(violation.archived_at),
+            archivedAt: violation.archived_at,
+            violationId: violation.id,
+            folder: `S.Y. ${violation.school_year}`,
+            folderKey: violation.school_year,
+            recordType: "violation",
+            // Add searchable text for global search
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+          });
+        });
+      }
+
+      return allData;
     }
-  }, [activeFolder, archivedUsers, archivedViolations]);
+  }, [activeFolder, archivedUsers, archivedViolations, allArchivedViolations, isGlobalSearch]);
 
   // Filter function
   const filteredData = useMemo(() => {
-    const filtered = displayData.filter((item) => {
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const fullText = JSON.stringify(item).toLowerCase();
+    if (isGlobalSearch) {
+      if (!searchQuery.trim()) {
+        return [];
+      }
+    }
+
+    if (!searchQuery) {
+      return displayData.map((item, index) => ({
+        ...item,
+        no: index + 1,
+      }));
+    }
+
+    const query = searchQuery.toLowerCase();
+
+    if (!isGlobalSearch) {
+      // Current folder-only search
+      const filtered = displayData.filter((item) => {
+        const fullText = (item.searchableText || "").toLowerCase();
         if (!fullText.includes(query)) {
           return false;
         }
+
+        if (
+          filterType &&
+          item.type &&
+          !item.type.toLowerCase().includes(filterType.toLowerCase())
+        ) {
+          return false;
+        }
+
+        return true;
+      });
+
+      return filtered.map((item, index) => ({
+        ...item,
+        no: index + 1,
+      }));
+    } else {
+      // Global search - only proceed if we have data
+      if (displayData.length === 0) {
+        return [];
       }
 
-      if (
-        filterType &&
-        item.type &&
-        !item.type.toLowerCase().includes(filterType.toLowerCase())
-      ) {
-        return false;
-      }
+      // Global search - search across folders and records
+      const matchingFolders = new Set();
+      const matchingRecords = [];
 
-      return true;
-    });
+      // Check folder names
+      folders.forEach((folder) => {
+        if (folder.label.toLowerCase().includes(query)) {
+          matchingFolders.add(folder.key);
+        }
+      });
 
-    // Add index/no to each filtered item
-    return filtered.map((item, index) => ({
-      ...item,
-      no: index + 1,
-    }));
-  }, [displayData, searchQuery, filterType]);
+      // Check records
+      displayData.forEach((item) => {
+        if (item.searchableText && item.searchableText.includes(query)) {
+          matchingRecords.push(item);
+          matchingFolders.add(item.folderKey);
+        }
+      });
 
-  // Define columns based on active folder
-  const columns =
-    activeFolder === "users"
-      ? [
-          {
-            key: "no",
-            label: "No",
-            width: "w-10",
-            render: (value) => <span>{value}</span>,
-          },
-          {
-            key: "name",
-            label: "Full Name",
-            render: (value) => value,
-          },
-          {
-            key: "email",
-            label: "Email",
-          },
-          {
-            key: "program",
-            label: "Program",
-          },
-          {
-            key: "yearSection",
-            label: "Year/Section",
-          },
-          {
-            key: "status",
-            label: "Status",
-            render: (value, row) => row.statusDisplay || value,
-          },
-          {
-            key: "violationCount",
-            label: "Violation Count",
-          },
-          {
-            key: "archivedDate",
-            label: "Archived Date",
-          },
-          {
-            key: "actions",
-            label: "",
-            align: "center",
-            render: (_value, row) => (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
-                    <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
-                  <DropdownMenuItem onClick={() => handleEdit(row, "user")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
-                    <Edit className="w-4 h-4" />
-                    <span>Edit</span>
-                  </DropdownMenuItem>
-                  {row.status !== "Graduated" && (
-                    <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
-                      <RotateCcw className="w-4 h-4" />
-                      <span>Restore</span>
-                    </DropdownMenuItem>
+      // Combine results: folders with their records
+      const results = [];
+
+      // First, add folders that match the search
+      folders.forEach((folder) => {
+        if (matchingFolders.has(folder.key)) {
+          // Add folder header
+          results.push({
+            id: `folder-${folder.key}`,
+            isFolder: true,
+            folderName: folder.label,
+            folderKey: folder.key,
+            no: "",
+          });
+
+          // Add matching records from this folder
+          const folderRecords = matchingRecords.filter(record => record.folderKey === folder.key);
+          folderRecords.forEach((record) => {
+            results.push({
+              ...record,
+              no: "",
+            });
+          });
+        }
+      });
+
+      return results;
+    }
+  }, [displayData, searchQuery, filterType, isGlobalSearch, folders]);
+
+  // Define columns based on active folder and search mode
+  const columns = useMemo(() => {
+    if (isGlobalSearch && searchQuery) {
+      // Global search columns
+      return [
+        {
+          key: "folderName",
+          label: "Results",
+          render: (value, row) => {
+            if (row.isFolder) {
+              return (
+                <div className="flex items-center gap-2 py-2">
+                  <Folder className="w-5 h-5 text-[#A3AED0]" />
+                  <span className="font-semibold text-[#A3AED0]">{row.folderName}</span>
+                </div>
+              );
+            } else {
+              // Record row
+              return (
+                <div className="ml-6">
+                  {row.recordType === "user" ? (
+                    <div className="flex flex-col">
+                      <div className="font-semibold">{row.full_name}</div>
+                      <div className="text-xs text-gray-400">{row.email}</div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col">
+                      <div className="font-semibold">{row.studentName}</div>
+                      <div className="text-xs text-gray-400">{row.violation}</div>
+                    </div>
                   )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ),
+                </div>
+              );
+            }
           },
-        ]
-      : [
-          {
-            key: "no",
-            label: "No",
-            width: "w-10",
-            render: (value) => <span>{value}</span>,
+        },
+        {
+          key: "details",
+          label: "",
+          render: (value, row) => {
+            if (row.isFolder) {
+              return null;
+            }
+            return row.recordType === "user" ? (
+              <div className="text-sm text-gray-300">
+                <div>Program: {row.program}</div>
+                <div>Status: {row.statusDisplay}</div>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-300">
+                <div>Type: {row.type}</div>
+                <div>Date: {row.date}</div>
+              </div>
+            );
           },
-          {
-            key: "date",
-            label: "Date",
-            render: (value) => value,
-          },
-          {
-            key: "studentName",
-            label: "Student Name",
-            render: (value) => value,
-          },
-          {
-            key: "yearSection",
-            label: "Year/Section",
-          },
-          {
-            key: "violation",
-            label: "Violation",
-          },
-          {
-            key: "type",
-            label: "Type",
-          },
-          {
-            key: "reportedBy",
-            label: "Reported by",
-          },
-          {
-            key: "remarks",
-            label: "Remarks",
-          },
-          {
-            key: "signature",
-            label: "Signature",
-            render: (value) => (
-              <Button
-                size="sm"
-                variant="secondary"
-                className={`px-3 py-1 ${
-                  value === "Signed"
-                    ? "bg-green-600/50 text-green-200"
-                    : "bg-gray-600/50 text-gray-200"
-                }`}
-              >
-                {value}
-              </Button>
-            ),
-          },
-          {
-            key: "actions",
-            label: "",
-            align: "center",
-            render: (_value, row) => (
-              <Button
-                size="sm"
-                variant="secondary"
-                className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
-                onClick={() => handleEdit(row, "violation")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+        },
+        {
+          key: "actions",
+          label: "",
+          align: "center",
+          render: (_value, row) => {
+            if (row.isFolder) {
+              return (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+                  onClick={() => {
+                    setActiveFolder(row.folderKey);
+                    setIsGlobalSearch(false);
+                    setSearchQuery("");
+                  }}
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
-                  />
-                </svg>
-                Edit
-              </Button>
-            ),
-          },
-        ];
+                  <Folder className="w-4 h-4" />
+                  Open Folder
+                </Button>
+              );
+            }
 
-  const tableTitle =
-    activeFolder === "users"
-      ? "Archived Users"
-      : `Archived Student Records - S.Y. ${activeFolder} (${activeSemester})`;
+            // Record actions
+            if (row.recordType === "user") {
+              return (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
+                      <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                    <DropdownMenuItem onClick={() => handleEdit(row, "user")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
+                      <Edit className="w-4 h-4" />
+                      <span>Edit</span>
+                    </DropdownMenuItem>
+                    {row.status !== "Graduated" && (
+                      <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Restore</span>
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            } else {
+              return (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+                  onClick={() => handleEdit(row, "violation")}
+                >
+                  <Edit className="w-4 h-4" />
+                  Edit
+                </Button>
+              );
+            }
+          },
+        },
+      ];
+    } else {
+      // Regular folder view columns
+      return activeFolder === "users"
+        ? [
+            {
+              key: "no",
+              label: "No",
+              width: "w-10",
+              render: (value) => <span>{value}</span>,
+            },
+            {
+              key: "name",
+              label: "Full Name",
+              render: (value) => value,
+            },
+            {
+              key: "email",
+              label: "Email",
+            },
+            {
+              key: "program",
+              label: "Program",
+            },
+            {
+              key: "yearSection",
+              label: "Year/Section",
+            },
+            {
+              key: "status",
+              label: "Status",
+              render: (value, row) => row.statusDisplay || value,
+            },
+            {
+              key: "violationCount",
+              label: "Violation Count",
+            },
+            {
+              key: "archivedDate",
+              label: "Archived Date",
+            },
+            {
+              key: "actions",
+              label: "",
+              align: "center",
+              render: (_value, row) => (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
+                      <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                    <DropdownMenuItem onClick={() => handleEdit(row, "user")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
+                      <Edit className="w-4 h-4" />
+                      <span>Edit</span>
+                    </DropdownMenuItem>
+                    {row.status !== "Graduated" && (
+                      <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Restore</span>
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ),
+            },
+          ]
+        : [
+            {
+              key: "no",
+              label: "No",
+              width: "w-10",
+              render: (value) => <span>{value}</span>,
+            },
+            {
+              key: "date",
+              label: "Date",
+              render: (value) => value,
+            },
+            {
+              key: "studentName",
+              label: "Student Name",
+              render: (value) => value,
+            },
+            {
+              key: "yearSection",
+              label: "Year/Section",
+            },
+            {
+              key: "violation",
+              label: "Violation",
+            },
+            {
+              key: "type",
+              label: "Type",
+            },
+            {
+              key: "reportedBy",
+              label: "Reported by",
+            },
+            {
+              key: "remarks",
+              label: "Remarks",
+            },
+            {
+              key: "signature",
+              label: "Signature",
+              render: (value) => (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={`px-3 py-1 ${
+                    value === "Signed"
+                      ? "bg-green-600/50 text-green-200"
+                      : "bg-gray-600/50 text-gray-200"
+                  }`}
+                >
+                  {value}
+                </Button>
+              ),
+            },
+            {
+              key: "actions",
+              label: "",
+              align: "center",
+              render: (_value, row) => (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+                  onClick={() => handleEdit(row, "violation")}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
+                    />
+                  </svg>
+                  Edit
+                </Button>
+              ),
+            },
+          ];
+    }
+  }, [activeFolder, isGlobalSearch, searchQuery]);
+
+  const tableTitle = isGlobalSearch
+    ? searchQuery
+      ? `Global Search Results for "${searchQuery}"`
+      : "Global Search (enter keywords to find records)"
+    : activeFolder === "users"
+    ? "Archived Users"
+    : `Archived Student Records - S.Y. ${activeFolder} (${activeSemester})`;
 
   const handleEdit = (row, type) => {
     setSelectedRow(row);
@@ -589,6 +930,10 @@ const Archives = () => {
   const clearFilters = () => {
     setSearchQuery("");
     setFilterType("");
+    if (isGlobalSearch) {
+      setIsGlobalSearch(false);
+      setAllArchivedViolations([]); // Clear global search data
+    }
   };
 
   return (
@@ -614,41 +959,85 @@ const Archives = () => {
       )}
 
       <AnimatedContent delay={0.1}>
-        <SearchBar
-          placeholder="Search by name, ID, or records..."
-          className="mb-4 w-80"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </AnimatedContent>
-
-      <AnimatedContent delay={0.2}>
-        <div className="flex gap-4 mb-6 overflow-x-auto pb-2">
-          {folders.map((folder) => (
-            <button
-              key={folder.key}
+        <div className="flex gap-4 items-center mb-4">
+          <SearchBar
+            placeholder={
+              isGlobalSearch
+                ? "Search across all folders..."
+                : `Search ${activeFolder === "users" ? "users" : "records"}...`
+            }
+            className="flex-1 w-80"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-300">Search Mode:</label>
+            <Button
+              size="sm"
+              variant={isGlobalSearch ? "default" : "secondary"}
+              className={`px-3 py-1 text-xs ${
+                isGlobalSearch
+                  ? "bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8]"
+                  : "bg-[#3D4654] hover:bg-[#4d5664] text-gray-300"
+              } border-0`}
               onClick={() => {
-                setActiveFolder(folder.key);
-                setActiveSemester("1ST SEM");
+                setIsGlobalSearch(true);
+                setSearchQuery(""); // Clear search when switching to global
+                setFilterType("");
               }}
-              className={`flex flex-col items-center px-4 py-2 rounded-xl transition-all duration-200 flex-shrink-0 ${
-                activeFolder === folder.key
-                  ? "bg-[#23262B] border-2 border-[#A3AED0]"
-                  : "bg-[#23262B]/60 border border-transparent"
-              } hover:bg-[#23262B]`}
             >
-              <span className="mb-2 flex items-center justify-center w-[80px] h-[60px]">
-                <Folder className="w-8 h-8" />
-              </span>
-              <span className="text-xs font-semibold text-white text-center">
-                {folder.label}
-              </span>
-            </button>
-          ))}
+              Global
+            </Button>
+            <Button
+              size="sm"
+              variant={!isGlobalSearch ? "default" : "secondary"}
+              className={`px-3 py-1 text-xs ${
+                !isGlobalSearch
+                  ? "bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8]"
+                  : "bg-[#3D4654] hover:bg-[#4d5664] text-gray-300"
+              } border-0`}
+              onClick={() => {
+                setIsGlobalSearch(false);
+                setSearchQuery(""); // Clear search when switching to current folder
+                setFilterType("");
+                setAllArchivedViolations([]); // Clear global search data
+              }}
+            >
+              Current Folder
+            </Button>
+          </div>
         </div>
       </AnimatedContent>
 
-      {activeFolder !== "users" && (
+      <AnimatedContent delay={0.2}>
+        {!isGlobalSearch && (
+          <div className="flex gap-4 mb-6 overflow-x-auto pb-2">
+            {folders.map((folder) => (
+              <button
+                key={folder.key}
+                onClick={() => {
+                  setActiveFolder(folder.key);
+                  setActiveSemester("1ST SEM");
+                }}
+                className={`flex flex-col items-center px-4 py-2 rounded-xl transition-all duration-200 flex-shrink-0 ${
+                  activeFolder === folder.key
+                    ? "bg-[#23262B] border-2 border-[#A3AED0]"
+                    : "bg-[#23262B]/60 border border-transparent"
+                } hover:bg-[#23262B]`}
+              >
+                <span className="mb-2 flex items-center justify-center w-[80px] h-[60px]">
+                  <Folder className="w-8 h-8" />
+                </span>
+                <span className="text-xs font-semibold text-white text-center">
+                  {folder.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </AnimatedContent>
+
+      {activeFolder !== "users" && !isGlobalSearch && (
         <AnimatedContent delay={0.25}>
           <TableTabs
             tabs={semesterTabs}
@@ -665,7 +1054,7 @@ const Archives = () => {
 
           <div className="flex justify-between items-center mb-4">
             <div className="flex gap-2">
-              {activeFolder !== "users" && (
+              {activeFolder !== "users" && !isGlobalSearch && (
                 <>
                   {/* Violation Type Filter */}
                   <DropdownMenu>
@@ -703,7 +1092,7 @@ const Archives = () => {
               )}
 
               {/* Clear Filters Button */}
-              {(filterType || searchQuery) && (
+              {(filterType || searchQuery || isGlobalSearch) && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -728,17 +1117,49 @@ const Archives = () => {
           {isLoading ? (
             <div className="text-center py-8 text-gray-400">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400"></div>
-              <p className="mt-2">Loading data...</p>
+              <p className="mt-2">
+                {isGlobalSearch && searchQuery
+                  ? "Searching across all folders..."
+                  : "Loading data..."}
+              </p>
             </div>
           ) : filteredData.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
-              No records found
-              {activeFolder === "users"
-                ? " in archived users."
-                : " for this semester."}
+              {isGlobalSearch
+                ? searchQuery
+                  ? "No matching folders or records found"
+                  : "Enter a search term to start global search"
+                : activeFolder === "users"
+                ? "No archived users found"
+                : "No records found for this semester."}
             </div>
           ) : (
-            <DataTable columns={columns} data={filteredData} />
+            <DataTable
+              columns={columns}
+              data={filteredData}
+              onRowClick={(row) => {
+                if (!isGlobalSearch) return;
+
+                if (row.isFolder) {
+                  setActiveFolder(row.folderKey);
+                  setActiveSemester("1ST SEM");
+                  setIsGlobalSearch(false);
+                  setSearchQuery("");
+                  setFilterType("");
+                  return;
+                }
+
+                if (row.recordType === "user") {
+                  setActiveFolder("users");
+                } else if (row.recordType === "violation") {
+                  setActiveFolder(row.folderKey || "users");
+                  setActiveSemester("1ST SEM");
+                }
+                setIsGlobalSearch(false);
+                setSearchQuery("");
+                setFilterType("");
+              }}
+            />
           )}
         </div>
       </AnimatedContent>
