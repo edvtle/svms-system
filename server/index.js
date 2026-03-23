@@ -3780,6 +3780,154 @@ app.get("/api/archive/school-years", async (req, res) => {
   }
 });
 
+// DELETE school year (deletes all archived violations for that year)
+app.delete("/api/archive/school-years/:schoolYear", async (req, res) => {
+  const { schoolYear } = req.params;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  if (!schoolYear) {
+    return res.status(400).json({
+      status: "error",
+      message: "School year is required.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Check if school year exists and has violations
+    const checkResult = await pool.query(
+      `SELECT COUNT(*) as count FROM student_violation_archives WHERE school_year = $1`,
+      [schoolYear]
+    );
+
+    const violationCount = parseInt(checkResult.rows[0].count);
+
+    if (violationCount === 0) {
+      return res.status(404).json({
+        status: "error",
+        message: `School year ${schoolYear} not found or has no archived violations.`,
+      });
+    }
+
+    // Delete all archived violations for this school year
+    await pool.query(
+      `DELETE FROM student_violation_archives WHERE school_year = $1`,
+      [schoolYear]
+    );
+
+    // Log the audit event
+    await logAuditEvent(req, {
+      action: "DELETE_SCHOOL_YEAR",
+      targetType: "ARCHIVE_SCHOOL_YEAR",
+      targetId: schoolYear,
+      details: `Deleted school year ${schoolYear} with ${violationCount} archived violations`,
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      message: `Successfully deleted school year ${schoolYear} and ${violationCount} archived violations.`,
+    });
+  } catch (error) {
+    console.error("Error deleting school year:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to delete school year (${error.message}).`,
+    });
+  }
+});
+
+// PUT rename school year
+app.put("/api/archive/school-years/:oldSchoolYear", async (req, res) => {
+  const { oldSchoolYear } = req.params;
+  const { newSchoolYear } = req.body;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  if (!oldSchoolYear || !newSchoolYear) {
+    return res.status(400).json({
+      status: "error",
+      message: "Both old and new school year are required.",
+    });
+  }
+
+  if (oldSchoolYear === newSchoolYear) {
+    return res.status(400).json({
+      status: "error",
+      message: "New school year must be different from the current one.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    // Check if old school year exists
+    const checkOldResult = await pool.query(
+      `SELECT COUNT(*) as count FROM student_violation_archives WHERE school_year = $1`,
+      [oldSchoolYear]
+    );
+
+    if (parseInt(checkOldResult.rows[0].count) === 0) {
+      return res.status(404).json({
+        status: "error",
+        message: `School year ${oldSchoolYear} not found.`,
+      });
+    }
+
+    // Check if new school year already exists
+    const checkNewResult = await pool.query(
+      `SELECT COUNT(*) as count FROM student_violation_archives WHERE school_year = $1`,
+      [newSchoolYear]
+    );
+
+    if (parseInt(checkNewResult.rows[0].count) > 0) {
+      return res.status(409).json({
+        status: "error",
+        message: `School year ${newSchoolYear} already exists.`,
+      });
+    }
+
+    // Update all archived violations for this school year
+    const updateResult = await pool.query(
+      `UPDATE student_violation_archives SET school_year = $1 WHERE school_year = $2`,
+      [newSchoolYear, oldSchoolYear]
+    );
+
+    // Log the audit event
+    await logAuditEvent(req, {
+      action: "RENAME_SCHOOL_YEAR",
+      targetType: "ARCHIVE_SCHOOL_YEAR",
+      targetId: oldSchoolYear,
+      details: `Renamed school year from ${oldSchoolYear} to ${newSchoolYear} (${updateResult.rowCount} violations updated)`,
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      message: `Successfully renamed school year from ${oldSchoolYear} to ${newSchoolYear}.`,
+      updatedCount: updateResult.rowCount,
+    });
+  } catch (error) {
+    console.error("Error renaming school year:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to rename school year (${error.message}).`,
+    });
+  }
+});
+
 // GET archived violations by school year and semester
 app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
   const { schoolYear, semester } = req.params;

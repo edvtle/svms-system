@@ -4,7 +4,7 @@ import SearchBar from "../../components/ui/SearchBar";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
 import TableTabs from "../../components/ui/TableTabs";
-import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw } from "lucide-react";
+import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -58,6 +58,14 @@ const Archives = () => {
   const [editType, setEditType] = useState("user"); // "user" or "violation"
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [userToRestore, setUserToRestore] = useState(null);
+
+  // School year management states
+  const [isDeleteSchoolYearModalOpen, setIsDeleteSchoolYearModalOpen] = useState(false);
+  const [schoolYearToDelete, setSchoolYearToDelete] = useState(null);
+  const [isRenameSchoolYearModalOpen, setIsRenameSchoolYearModalOpen] = useState(false);
+  const [schoolYearToRename, setSchoolYearToRename] = useState(null);
+  const [newSchoolYearName, setNewSchoolYearName] = useState("");
+  const [isSchoolYearActionLoading, setIsSchoolYearActionLoading] = useState(false);
 
   // Load archived users on mount
   useEffect(() => {
@@ -382,6 +390,94 @@ const Archives = () => {
   const handleRestoreClick = (user) => {
     setUserToRestore(user);
     setIsRestoreModalOpen(true);
+  };
+
+  // School year management handlers
+  const handleDeleteSchoolYear = async () => {
+    if (!schoolYearToDelete) return;
+
+    try {
+      setIsSchoolYearActionLoading(true);
+      const response = await fetch(`/api/archive/school-years/${schoolYearToDelete}`, {
+        method: "DELETE",
+        headers: { ...getAuditHeaders() },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Remove the school year from the list
+        setSchoolYears((prev) => prev.filter((year) => year !== schoolYearToDelete));
+        // If the deleted year was active, switch to users folder
+        if (activeFolder === schoolYearToDelete) {
+          setActiveFolder("users");
+          setActiveSemester("1ST SEM");
+        }
+        setIsDeleteSchoolYearModalOpen(false);
+        setSchoolYearToDelete(null);
+        setError(""); // Clear any previous errors
+        // Trigger archive completion event to refresh other components
+        window.dispatchEvent(new CustomEvent("archiveCompleted"));
+      } else {
+        const data = await response.json();
+        setError(data.message || "Failed to delete school year");
+      }
+    } catch (err) {
+      setError("Error deleting school year: " + err.message);
+    } finally {
+      setIsSchoolYearActionLoading(false);
+    }
+  };
+
+  const handleRenameSchoolYear = async () => {
+    if (!schoolYearToRename || !newSchoolYearName.trim()) return;
+
+    try {
+      setIsSchoolYearActionLoading(true);
+      const response = await fetch(`/api/archive/school-years/${schoolYearToRename}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+        body: JSON.stringify({ newSchoolYear: newSchoolYearName.trim() }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Update the school year in the list
+        setSchoolYears((prev) => prev.map((year) =>
+          year === schoolYearToRename ? newSchoolYearName.trim() : year
+        ));
+        // If the renamed year was active, update the active folder
+        if (activeFolder === schoolYearToRename) {
+          setActiveFolder(newSchoolYearName.trim());
+        }
+        setIsRenameSchoolYearModalOpen(false);
+        setSchoolYearToRename(null);
+        setNewSchoolYearName("");
+        setError(""); // Clear any previous errors
+        // Trigger archive completion event to refresh other components
+        window.dispatchEvent(new CustomEvent("archiveCompleted"));
+      } else {
+        const data = await response.json();
+        setError(data.message || "Failed to rename school year");
+      }
+    } catch (err) {
+      setError("Error renaming school year: " + err.message);
+    } finally {
+      setIsSchoolYearActionLoading(false);
+    }
+  };
+
+  const handleDeleteSchoolYearClick = (schoolYear) => {
+    setSchoolYearToDelete(schoolYear);
+    setIsDeleteSchoolYearModalOpen(true);
+  };
+
+  const handleRenameSchoolYearClick = (schoolYear) => {
+    setSchoolYearToRename(schoolYear);
+    setNewSchoolYearName(schoolYear);
+    setIsRenameSchoolYearModalOpen(true);
   };
 
   // Get all folders (USERS + School Years)
@@ -1013,25 +1109,51 @@ const Archives = () => {
         {!isGlobalSearch && (
           <div className="flex gap-4 mb-6 overflow-x-auto pb-2">
             {folders.map((folder) => (
-              <button
-                key={folder.key}
-                onClick={() => {
-                  setActiveFolder(folder.key);
-                  setActiveSemester("1ST SEM");
-                }}
-                className={`flex flex-col items-center px-4 py-2 rounded-xl transition-all duration-200 flex-shrink-0 ${
-                  activeFolder === folder.key
-                    ? "bg-[#23262B] border-2 border-[#A3AED0]"
-                    : "bg-[#23262B]/60 border border-transparent"
-                } hover:bg-[#23262B]`}
-              >
-                <span className="mb-2 flex items-center justify-center w-[80px] h-[60px]">
-                  <Folder className="w-8 h-8" />
-                </span>
-                <span className="text-xs font-semibold text-white text-center">
-                  {folder.label}
-                </span>
-              </button>
+              <div key={folder.key} className="relative flex-shrink-0">
+                <button
+                  onClick={() => {
+                    setActiveFolder(folder.key);
+                    setActiveSemester("1ST SEM");
+                  }}
+                  className={`flex flex-col items-center px-4 py-2 rounded-xl transition-all duration-200 ${folder.key !== "users" ? "pr-8" : ""} ${
+                    activeFolder === folder.key
+                      ? "bg-[#23262B] border-2 border-[#A3AED0]"
+                      : "bg-[#23262B]/60 border border-transparent"
+                  } hover:bg-[#23262B]`}
+                >
+                  <span className="mb-2 flex items-center justify-center w-[80px] h-[60px]">
+                    <Folder className="w-8 h-8" />
+                  </span>
+                  <span className="text-xs font-semibold text-white text-center w-full">
+                    {folder.label}
+                  </span>
+                </button>
+                {folder.key !== "users" && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="absolute top-1 right-1 w-6 h-6 hover:bg-[#3D4654] rounded-full flex items-center justify-center transition-colors">
+                        <MoreVertical className="w-3 h-3 text-[#A3AED0]" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                      <DropdownMenuItem
+                        onClick={() => handleRenameSchoolYearClick(folder.key)}
+                        className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900"
+                      >
+                        <Edit className="w-4 h-4" />
+                        <span>Rename</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => handleDeleteSchoolYearClick(folder.key)}
+                        className="gap-2 cursor-pointer text-red-700 hover:bg-red-100 hover:text-red-800 focus:bg-red-100 focus:text-red-800"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Delete</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -1209,6 +1331,110 @@ const Archives = () => {
                 className="bg-green-700 hover:bg-green-800 border-0 text-white"
               >
                 Restore User
+              </Button>
+            </ModalFooter>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete School Year Confirmation Modal */}
+      {isDeleteSchoolYearModalOpen && schoolYearToDelete && (
+        <Modal
+          isOpen={isDeleteSchoolYearModalOpen}
+          onClose={() => {
+            setIsDeleteSchoolYearModalOpen(false);
+            setSchoolYearToDelete(null);
+          }}
+          showCloseButton={true}
+        >
+          <div className="bg-transparent">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-red-400" />
+              <h3 className="text-lg font-bold text-white">Confirm Delete School Year</h3>
+            </div>
+            <p className="text-gray-300 mb-6">
+              Are you sure you want to delete the school year{" "}
+              <span className="font-semibold text-[#A3AED0]">
+                S.Y. {schoolYearToDelete}
+              </span>
+              ? This will permanently delete all archived violation records for this school year and cannot be undone.
+            </p>
+            <ModalFooter>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setIsDeleteSchoolYearModalOpen(false);
+                  setSchoolYearToDelete(null);
+                }}
+                className="bg-[#3D4654] hover:bg-[#4d5664] border-0"
+                disabled={isSchoolYearActionLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDeleteSchoolYear}
+                disabled={isSchoolYearActionLoading}
+                className="bg-red-700 hover:bg-red-800 border-0 text-white"
+              >
+                {isSchoolYearActionLoading ? "Deleting..." : "Delete School Year"}
+              </Button>
+            </ModalFooter>
+          </div>
+        </Modal>
+      )}
+
+      {/* Rename School Year Modal */}
+      {isRenameSchoolYearModalOpen && schoolYearToRename && (
+        <Modal
+          isOpen={isRenameSchoolYearModalOpen}
+          onClose={() => {
+            setIsRenameSchoolYearModalOpen(false);
+            setSchoolYearToRename(null);
+            setNewSchoolYearName("");
+          }}
+          showCloseButton={true}
+        >
+          <div className="bg-transparent">
+            <div className="flex items-center gap-3 mb-4">
+              <Edit className="w-6 h-6 text-blue-400" />
+              <h3 className="text-lg font-bold text-white">Rename School Year</h3>
+            </div>
+            <p className="text-gray-300 mb-4">
+              Enter a new name for the school year{" "}
+              <span className="font-semibold text-[#A3AED0]">
+                S.Y. {schoolYearToRename}
+              </span>
+              :
+            </p>
+            <div className="mb-6">
+              <input
+                type="text"
+                value={newSchoolYearName}
+                onChange={(e) => setNewSchoolYearName(e.target.value)}
+                className="w-full px-3 py-2 bg-[#23262B] border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-[#A3AED0]"
+                placeholder="e.g., 2024-2025"
+                disabled={isSchoolYearActionLoading}
+              />
+            </div>
+            <ModalFooter>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setIsRenameSchoolYearModalOpen(false);
+                  setSchoolYearToRename(null);
+                  setNewSchoolYearName("");
+                }}
+                className="bg-[#3D4654] hover:bg-[#4d5664] border-0"
+                disabled={isSchoolYearActionLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleRenameSchoolYear}
+                disabled={isSchoolYearActionLoading || !newSchoolYearName.trim() || newSchoolYearName.trim() === schoolYearToRename}
+                className="bg-blue-700 hover:bg-blue-800 border-0 text-white"
+              >
+                {isSchoolYearActionLoading ? "Renaming..." : "Rename School Year"}
               </Button>
             </ModalFooter>
           </div>
