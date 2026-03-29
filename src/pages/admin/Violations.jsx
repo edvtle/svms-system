@@ -86,6 +86,23 @@ const Violations = () => {
 
   const availableDegrees = getAvailableDegrees()
 
+  const matchViolationToQuery = (item, query) => {
+    const q = query.trim().toLowerCase()
+    if (!q) return true
+
+    const itemMatches = (value) => String(value || '').toLowerCase().includes(q)
+
+    if (itemMatches(item.name) || itemMatches(item.degree) || itemMatches(item.category)) {
+      return true
+    }
+
+    if ((item.children || []).some((child) => itemMatches(child.name) || itemMatches(child.degree) || itemMatches(child.category))) {
+      return true
+    }
+
+    return false
+  }
+
   // helper for add/edit form to restrict degree list based on selected category
   const getFormDegrees = (category) => {
     if (category === 'Minor Offenses') {
@@ -112,25 +129,34 @@ const Violations = () => {
       children: (parentChildrenMap[violation.id] || []).sort((a, b) => a.name.localeCompare(b.name)),
     }))
 
+  useEffect(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return
+
+    const firstMatch = groupedViolations.find((item) => matchViolationToQuery(item, query))
+    if (!firstMatch) return
+
+    const targetCategory = ['First Degree', 'Second Degree'].includes(firstMatch.degree) ? 'minor' : 'major'
+    if (categoryFilter !== targetCategory) {
+      setCategoryFilter(targetCategory)
+    }
+  }, [searchQuery, groupedViolations, categoryFilter])
+
   const filteredData = groupedViolations.filter(item => {
+    const query = searchQuery.trim().toLowerCase()
+
     let categoryMatch = true
-    if (categoryFilter === 'minor') {
-      categoryMatch = ['First Degree', 'Second Degree'].includes(item.degree)
-    } else if (categoryFilter === 'major') {
-      categoryMatch = ['Third Degree', 'Fourth Degree', 'Fifth Degree', 'Sixth Degree', 'Seventh Degree'].includes(item.degree)
+    if (!query) {
+      if (categoryFilter === 'minor') {
+        categoryMatch = ['First Degree', 'Second Degree'].includes(item.degree)
+      } else if (categoryFilter === 'major') {
+        categoryMatch = ['Third Degree', 'Fourth Degree', 'Fifth Degree', 'Sixth Degree', 'Seventh Degree'].includes(item.degree)
+      }
     }
 
-    let degreeMatch = !specificDegree || item.degree === specificDegree
+    const degreeMatch = !specificDegree || item.degree === specificDegree
 
-    const query = searchQuery.trim().toLowerCase()
-    const searchMatch =
-      !query ||
-      String(item.name || '').toLowerCase().includes(query) ||
-      String(item.degree || '').toLowerCase().includes(query) ||
-      String(item.category || '').toLowerCase().includes(query) ||
-      (item.children || []).some((child) =>
-        String(child.name || '').toLowerCase().includes(query)
-      )
+    const searchMatch = matchViolationToQuery(item, query)
 
     return categoryMatch && degreeMatch && searchMatch
   })
