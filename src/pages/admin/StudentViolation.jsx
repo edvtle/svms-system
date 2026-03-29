@@ -1314,7 +1314,7 @@ const StudentViolation = () => {
             }}
           >
             <Download className="w-4 h-4" />
-            Generate
+            Export
           </Button>
         </div>
       </AnimatedContent>

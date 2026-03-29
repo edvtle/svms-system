@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Card from "../../components/ui/Card";
 import AdminStatCard from "../../components/ui/AdminStatCard";
@@ -7,7 +7,8 @@ import {
   ViewStudentsButton,
 } from "../../components/ui/QuickActionButton";
 import AnimatedContent from "../../components/ui/AnimatedContent";
-import Modal from "../../components/ui/Modal";
+import Modal, { ModalFooter } from "../../components/ui/Modal";
+import Button from "../../components/ui/Button";
 import DataTable, {
   TableCellText,
   TableCellDateTime,
@@ -31,6 +32,55 @@ import {
   Search,
 } from "lucide-react";
 
+const RANKING_EXPORT_HEADER_IMAGE_PATH = "/plpasig_header.jpg";
+const EXCEL_HEADER_IMAGE_WIDTH_PX = 560;
+const EXCEL_HEADER_IMAGE_HEIGHT_PX = 82;
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const getDataUrlDimensions = (dataUrl) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+    };
+    img.onerror = () => reject(new Error("Unable to load image dimensions."));
+    img.src = dataUrl;
+  });
+
+const parseYearSection = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) {
+    return { year: "", section: "", normalized: "" };
+  }
+
+  const compact = normalized.replace(/\s+/g, "");
+  const match = compact.match(/^(\d+)([A-Z]+)?$/);
+  if (match) {
+    return {
+      year: match[1] || "",
+      section: match[2] || "",
+      normalized: `${match[1] || ""}${match[2] || ""}`,
+    };
+  }
+
+  const yearMatch = compact.match(/\d+/);
+  const sectionMatch = compact.match(/[A-Z]+/);
+  const year = yearMatch ? yearMatch[0] : "";
+  const section = sectionMatch ? sectionMatch[0] : "";
+  return {
+    year,
+    section,
+    normalized: `${year}${section}`,
+  };
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const [selectedSemester, setSelectedSemester] = useState("1st Sem");
@@ -53,6 +103,9 @@ const Dashboard = () => {
 
   const [rankingData, setRankingData] = useState([]);
   const [isLoadingRanking, setIsLoadingRanking] = useState(true);
+  const [showRankingExportModal, setShowRankingExportModal] = useState(false);
+  const [rankingExportFormat, setRankingExportFormat] = useState("excel");
+  const [isExportingRanking, setIsExportingRanking] = useState(false);
 
   const filteredRankingData = rankingData.filter((student) => {
     const matchesSearch = student.name
@@ -67,104 +120,351 @@ const Dashboard = () => {
     return matchesSearch && matchesProgram && matchesYear && matchesSection;
   });
 
-  useEffect(() => {
-    let isMounted = true;
+  const programFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(rankingData.map((student) => String(student.program || "").trim()).filter(Boolean))).sort(),
+    [rankingData],
+  );
 
-    const degreeRank = {
-      "First Degree": 1,
-      "Second Degree": 2,
-      "Third Degree": 3,
-      "Fourth Degree": 4,
-      "Fifth Degree": 5,
-      "Sixth Degree": 6,
-      "Seventh Degree": 7,
-    };
+  const yearFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(rankingData.map((student) => String(student.year || "").trim()).filter(Boolean))).sort(
+        (a, b) => Number(a) - Number(b),
+      ),
+    [rankingData],
+  );
 
-    const fetchViolationMetrics = async () => {
-      setIsLoadingMetrics(true);
+  const sectionFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(rankingData.map((student) => String(student.section || "").trim()).filter(Boolean))).sort(),
+    [rankingData],
+  );
 
-      try {
-        const [studentsRes, violationsRes] = await Promise.all([
-          fetch("/api/students"),
-          fetch("/api/student-violations"),
-        ]);
+  const rankingExportRows = useMemo(
+    () =>
+      filteredRankingData.map((student) => ({
+        rank: student.rank,
+        studentName: student.name,
+        schoolId: student.id,
+        program: student.program,
+        year: student.year,
+        section: student.section,
+        totalViolations: student.violations,
+      })),
+    [filteredRankingData],
+  );
 
-        const studentsResult = await studentsRes.json().catch(() => ({}));
-        const violationsResult = await violationsRes.json().catch(() => ({}));
+  const formatDateForFileName = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
 
-        if (!studentsRes.ok || !Array.isArray(studentsResult?.students)) {
-          throw new Error("Failed to load students.");
-        }
-
-        if (!violationsRes.ok || !Array.isArray(violationsResult?.records)) {
-          throw new Error("Failed to load violations.");
-        }
-
-        const activeRecords = violationsResult.records.filter((rec) => !rec.cleared_at);
-
-        const studentMaxDegree = activeRecords.reduce((acc, rec) => {
-          const studentId = Number(rec.student_id);
-          if (!studentId) return acc;
-
-          const rank = degreeRank[String(rec.violation_degree)] || 0;
-          acc[studentId] = Math.max(acc[studentId] || 0, rank);
-          return acc;
-        }, {});
-
-        // Create map of violation counts from students
-        const violationCountMap = {};
-        (studentsResult.students || []).forEach((student) => {
-          violationCountMap[student.id] = Number(student.violation_count) || 0;
-        });
-
-        // Categorize students (each in one category based on highest severity)
-        let warningStudents = 0;
-        let atRiskStudents = 0;
-        let highRiskStudents = 0;
-
-        Object.entries(studentMaxDegree).forEach(([studentId, degree]) => {
-          const count = violationCountMap[studentId] || 0;
-          
-          // Categorize by highest severity
-          if (count >= 5 || (degree >= 5 && degree <= 7)) {
-            highRiskStudents += 1;
-          } else if ((count >= 3 && count <= 4) || (degree >= 3 && degree <= 4)) {
-            atRiskStudents += 1;
-          } else if (count === 2 || degree === 2) {
-            warningStudents += 1;
-          }
-        });
-
-        if (isMounted) {
-          setViolationMetrics({
-            activeViolations: activeRecords.length,
-            warningStudents,
-            atRiskStudents,
-            highRiskStudents,
-          });
-        }
-      } catch (_error) {
-        if (isMounted) {
-          setViolationMetrics({
-            activeViolations: 0,
-            warningStudents: 0,
-            atRiskStudents: 0,
-            highRiskStudents: 0,
-          });
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoadingMetrics(false);
-        }
-      }
-    };
-
-    fetchViolationMetrics();
-
-    return () => {
-      isMounted = false;
-    };
+  const downloadBlob = useCallback((blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }, []);
+
+  const resolveRankingHeaderImage = useCallback(async () => {
+    const response = await fetch(RANKING_EXPORT_HEADER_IMAGE_PATH);
+    if (!response.ok) {
+      throw new Error(`Required header image not found: ${RANKING_EXPORT_HEADER_IMAGE_PATH}`);
+    }
+
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    const dimensions = await getDataUrlDimensions(dataUrl);
+    const extension = String(blob.type || "").toLowerCase().includes("png") ? "png" : "jpeg";
+    const imageFormat = extension === "png" ? "PNG" : "JPEG";
+
+    return { dataUrl, dimensions, extension, imageFormat };
+  }, []);
+
+  const exportRankingAsExcel = useCallback(async () => {
+    const [{ Workbook }, { dataUrl, dimensions, extension }] = await Promise.all([
+      import("exceljs"),
+      resolveRankingHeaderImage(),
+    ]);
+
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet("Violation Ranking", {
+      views: [{ state: "frozen", ySplit: 6 }],
+    });
+
+    sheet.columns = [
+      { key: "rank", width: 10 },
+      { key: "studentName", width: 30 },
+      { key: "schoolId", width: 18 },
+      { key: "program", width: 14 },
+      { key: "year", width: 10 },
+      { key: "section", width: 10 },
+      { key: "totalViolations", width: 20 },
+    ];
+
+    sheet.mergeCells("A1:G3");
+    sheet.mergeCells("A4:G4");
+    sheet.mergeCells("A5:G5");
+    sheet.getRow(1).height = 26;
+    sheet.getRow(2).height = 26;
+    sheet.getRow(3).height = 26;
+    sheet.getRow(4).height = 28;
+    sheet.getRow(5).height = 18;
+
+    const titleCell = sheet.getCell("A4");
+    titleCell.value = "Student Violation Ranking Report";
+    titleCell.font = { name: "Calibri", size: 18, bold: true };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const subtitleCell = sheet.getCell("A5");
+    subtitleCell.value = `Generated: ${new Date().toLocaleString()}`;
+    subtitleCell.font = { name: "Calibri", size: 11, color: { argb: "FF4B5563" } };
+    subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const headerRegionWidthPx = sheet.columns.reduce(
+      (total, column) => total + Number(column.width || 10) * 7.5,
+      0,
+    );
+    const headerRegionHeightPx = [1, 2, 3].reduce(
+      (total, rowNumber) => total + Number(sheet.getRow(rowNumber).height || 15) * 1.333,
+      0,
+    );
+    const imageScale = Math.min(
+      (headerRegionWidthPx - 24) / dimensions.width,
+      (headerRegionHeightPx - 6) / dimensions.height,
+      EXCEL_HEADER_IMAGE_WIDTH_PX / dimensions.width,
+      EXCEL_HEADER_IMAGE_HEIGHT_PX / dimensions.height,
+      1,
+    );
+    const imageWidthPx = Math.max(8, Math.round(dimensions.width * imageScale));
+    const imageHeightPx = Math.max(8, Math.round(dimensions.height * imageScale));
+    const leftOffsetPx = Math.max((headerRegionWidthPx - imageWidthPx) / 2, 0);
+    const topOffsetPx = Math.max((headerRegionHeightPx - imageHeightPx) / 2, 0);
+
+    const toColCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let colIndex = 0; colIndex < sheet.columns.length; colIndex += 1) {
+        const colPx = Number(sheet.columns[colIndex]?.width || 10) * 7.5;
+        if (remaining <= colPx) {
+          return colIndex + remaining / colPx;
+        }
+        remaining -= colPx;
+      }
+      return sheet.columns.length - 1;
+    };
+
+    const toRowCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let rowIndex = 1; rowIndex <= 3; rowIndex += 1) {
+        const rowPx = Number(sheet.getRow(rowIndex).height || 15) * 1.333;
+        if (remaining <= rowPx) {
+          return rowIndex - 1 + remaining / rowPx;
+        }
+        remaining -= rowPx;
+      }
+      return 2;
+    };
+
+    const imageId = workbook.addImage({ base64: dataUrl, extension });
+    sheet.addImage(imageId, {
+      tl: {
+        col: toColCoordinate(leftOffsetPx),
+        row: toRowCoordinate(topOffsetPx),
+      },
+      ext: {
+        width: imageWidthPx,
+        height: imageHeightPx,
+      },
+    });
+
+    const headerRowNumber = 6;
+    const headerRow = sheet.getRow(headerRowNumber);
+    headerRow.values = [
+      "Rank",
+      "Student Name",
+      "School ID",
+      "Program",
+      "Year",
+      "Section",
+      "Total Violations",
+    ];
+    headerRow.height = 24;
+
+    headerRow.eachCell((cell) => {
+      cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0F172A" },
+      };
+      cell.alignment = {
+        horizontal: "left",
+        vertical: "middle",
+        wrapText: true,
+        indent: 1,
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFCBD5E1" } },
+        left: { style: "thin", color: { argb: "FFCBD5E1" } },
+        bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+        right: { style: "thin", color: { argb: "FFCBD5E1" } },
+      };
+    });
+
+    const firstDataRow = headerRowNumber + 1;
+    for (const [index, row] of rankingExportRows.entries()) {
+      const excelRowNumber = firstDataRow + index;
+      const excelRow = sheet.getRow(excelRowNumber);
+      excelRow.values = [
+        row.rank,
+        row.studentName,
+        row.schoolId,
+        row.program,
+        row.year,
+        row.section,
+        row.totalViolations,
+      ];
+      excelRow.height = 28;
+
+      excelRow.eachCell((cell) => {
+        cell.font = { name: "Calibri", size: 11, color: { argb: "FF1F2937" } };
+        cell.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+          wrapText: true,
+          indent: 1,
+        };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFCBD5E1" } },
+          left: { style: "thin", color: { argb: "FFCBD5E1" } },
+          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+          right: { style: "thin", color: { argb: "FFCBD5E1" } },
+        };
+        if (excelRowNumber % 2 === 0) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" },
+          };
+        }
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    downloadBlob(blob, `student_violation_ranking_${formatDateForFileName()}.xlsx`);
+  }, [downloadBlob, rankingExportRows, resolveRankingHeaderImage]);
+
+  const exportRankingAsPdf = useCallback(async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const { dataUrl, dimensions, imageFormat } = await resolveRankingHeaderImage();
+    const tableMarginLeft = 10;
+    const tableMarginRight = 10;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const tableWidth = pageWidth - tableMarginLeft - tableMarginRight;
+    const baseColumnWidths = [14, 58, 30, 24, 16, 16, 28];
+    const baseTotalWidth = baseColumnWidths.reduce((sum, width) => sum + width, 0);
+    const widthScale = tableWidth / baseTotalWidth;
+    const tableColumnWidths = baseColumnWidths.map((width) => width * widthScale);
+    const tableCenterX = tableMarginLeft + tableWidth / 2;
+    let startY = 22;
+
+    if (dataUrl) {
+      const headerWidth = tableWidth;
+      const headerHeight = (dimensions.height * headerWidth) / dimensions.width;
+      const headerX = tableMarginLeft;
+      doc.addImage(dataUrl, imageFormat, headerX, 8, headerWidth, headerHeight);
+      startY = 8 + headerHeight + 8;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("Student Violation Ranking Report", tableCenterX, startY, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, tableCenterX, startY + 5, {
+      align: "center",
+    });
+
+    autoTable(doc, {
+      startY: startY + 9,
+      head: [["Rank", "Student Name", "School ID", "Program", "Year", "Section", "Total Violations"]],
+      body: rankingExportRows.map((row) => [
+        row.rank,
+        row.studentName,
+        row.schoolId,
+        row.program,
+        row.year,
+        row.section,
+        row.totalViolations,
+      ]),
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.4,
+        textColor: [31, 41, 55],
+        halign: "left",
+        valign: "middle",
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        halign: "left",
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      margin: { left: tableMarginLeft, right: tableMarginRight },
+      tableWidth,
+      columnStyles: {
+        0: { cellWidth: tableColumnWidths[0] },
+        1: { cellWidth: tableColumnWidths[1] },
+        2: { cellWidth: tableColumnWidths[2] },
+        3: { cellWidth: tableColumnWidths[3] },
+        4: { cellWidth: tableColumnWidths[4] },
+        5: { cellWidth: tableColumnWidths[5] },
+        6: { cellWidth: tableColumnWidths[6] },
+      },
+    });
+
+    doc.save(`student_violation_ranking_${formatDateForFileName()}.pdf`);
+  }, [rankingExportRows, resolveRankingHeaderImage]);
+
+  const handleConfirmRankingExport = async () => {
+    if (rankingExportRows.length === 0) {
+      alert("No rows available to export.");
+      return;
+    }
+
+    setIsExportingRanking(true);
+    try {
+      if (rankingExportFormat === "excel") {
+        await exportRankingAsExcel();
+      } else {
+        await exportRankingAsPdf();
+      }
+      setShowRankingExportModal(false);
+    } catch (error) {
+      alert(error?.message || "Unable to export report.");
+    } finally {
+      setIsExportingRanking(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -187,7 +487,8 @@ const Dashboard = () => {
       return "bg-gray-500";
     };
 
-    const fetchRankingData = async () => {
+    const fetchDashboardViolationData = async () => {
+      setIsLoadingMetrics(true);
       setIsLoadingRanking(true);
 
       try {
@@ -200,21 +501,48 @@ const Dashboard = () => {
         const violationsResult = await violationsRes.json().catch(() => ({}));
 
         if (!studentsRes.ok || !Array.isArray(studentsResult?.students)) {
-          throw new Error("Failed to load students for ranking.");
+          throw new Error("Failed to load students.");
         }
         if (!violationsRes.ok || !Array.isArray(violationsResult?.records)) {
-          throw new Error("Failed to load violation logs for ranking.");
+          throw new Error("Failed to load violations.");
         }
 
-        const studentById = new Map(
-          studentsResult.students.map((student) => [Number(student.id), student]),
-        );
+        const students = studentsResult.students || [];
+        const activeRecords = violationsResult.records.filter((rec) => !rec.cleared_at);
 
-        const activeViolations = violationsResult.records.filter(
-          (rec) => !rec.cleared_at,
-        );
+        const studentById = new Map(students.map((student) => [Number(student.id), student]));
 
-        const stats = activeViolations.reduce((acc, rec) => {
+        const studentMaxDegree = activeRecords.reduce((acc, rec) => {
+          const studentId = Number(rec.student_id);
+          if (!studentId) return acc;
+
+          const rank = degreeRank[String(rec.violation_degree)] || 0;
+          acc[studentId] = Math.max(acc[studentId] || 0, rank);
+          return acc;
+        }, {});
+
+        const violationCountMap = {};
+        students.forEach((student) => {
+          violationCountMap[student.id] = Number(student.violation_count) || 0;
+        });
+
+        let warningStudents = 0;
+        let atRiskStudents = 0;
+        let highRiskStudents = 0;
+
+        Object.entries(studentMaxDegree).forEach(([studentId, degree]) => {
+          const count = violationCountMap[studentId] || 0;
+
+          if (count >= 5 || (degree >= 5 && degree <= 7)) {
+            highRiskStudents += 1;
+          } else if ((count >= 3 && count <= 4) || (degree >= 3 && degree <= 4)) {
+            atRiskStudents += 1;
+          } else if (count === 2 || degree === 2) {
+            warningStudents += 1;
+          }
+        });
+
+        const rankingStats = activeRecords.reduce((acc, rec) => {
           const studentId = Number(rec.student_id);
           if (!studentId || !studentById.has(studentId)) return acc;
 
@@ -233,18 +561,20 @@ const Dashboard = () => {
           return acc;
         }, {});
 
-        const newRankingData = Object.entries(stats)
+        const newRankingData = Object.entries(rankingStats)
           .map(([studentId, data]) => {
             const student = studentById.get(Number(studentId));
+            const parsedYearSection = parseYearSection(student?.year_section);
             return {
-              rank: "", // assigned later
+              rank: "",
               name: student?.full_name || student?.username || "Unknown",
               violations: data.count,
               color: getRiskColor(data.maxDegreeRank),
               id: student?.school_id || "",
               program: student?.program || "",
-              year: student?.year_section?.split(" ")[0] || "",
-              section: student?.year_section?.split(" ")[1] || "",
+              year: parsedYearSection.year,
+              section: parsedYearSection.section,
+              yearSection: parsedYearSection.normalized,
               maxDegreeRank: data.maxDegreeRank,
             };
           })
@@ -255,20 +585,33 @@ const Dashboard = () => {
           }));
 
         if (isMounted) {
+          setViolationMetrics({
+            activeViolations: activeRecords.length,
+            warningStudents,
+            atRiskStudents,
+            highRiskStudents,
+          });
           setRankingData(newRankingData);
         }
       } catch (_error) {
         if (isMounted) {
+          setViolationMetrics({
+            activeViolations: 0,
+            warningStudents: 0,
+            atRiskStudents: 0,
+            highRiskStudents: 0,
+          });
           setRankingData([]);
         }
       } finally {
         if (isMounted) {
+          setIsLoadingMetrics(false);
           setIsLoadingRanking(false);
         }
       }
     };
 
-    fetchRankingData();
+    fetchDashboardViolationData();
 
     return () => {
       isMounted = false;
@@ -822,48 +1165,13 @@ const Dashboard = () => {
             violations.
           </p>
           <button
-            className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors"
+            className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors inline-flex items-center gap-2"
             onClick={() => {
-              // Export functionality - create CSV from filtered data
-              const csvContent = [
-                [
-                  "Rank",
-                  "Student Name",
-                  "ID",
-                  "Program",
-                  "Year",
-                  "Section",
-                  "Total Violations",
-                ],
-                ...filteredRankingData.map((student) => [
-                  student.rank,
-                  student.name,
-                  student.id,
-                  student.program,
-                  student.year,
-                  student.section,
-                  student.violations,
-                ]),
-              ]
-                .map((row) => row.join(","))
-                .join("\n");
-
-              const blob = new Blob([csvContent], {
-                type: "text/csv;charset=utf-8;",
-              });
-              const link = document.createElement("a");
-              const url = URL.createObjectURL(blob);
-              link.setAttribute("href", url);
-              link.setAttribute(
-                "download",
-                `student_violation_ranking_${new Date().toISOString().split("T")[0]}.csv`,
-              );
-              link.style.visibility = "hidden";
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
+              setRankingExportFormat("excel");
+              setShowRankingExportModal(true);
             }}
           >
+            <Download className="w-4 h-4" />
             Export
           </button>
         </div>
@@ -886,12 +1194,11 @@ const Dashboard = () => {
               <DropdownMenuItem onClick={() => setProgramFilter("All")}>
                 All
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setProgramFilter("BSIT")}>
-                BSIT
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setProgramFilter("BSCS")}>
-                BSCS
-              </DropdownMenuItem>
+              {programFilterOptions.map((program) => (
+                <DropdownMenuItem key={program} onClick={() => setProgramFilter(program)}>
+                  {program}
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -905,18 +1212,11 @@ const Dashboard = () => {
               <DropdownMenuItem onClick={() => setYearLevelFilter("All")}>
                 All
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("1")}>
-                1
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("2")}>
-                2
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("3")}>
-                3
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("4")}>
-                4
-              </DropdownMenuItem>
+              {yearFilterOptions.map((year) => (
+                <DropdownMenuItem key={year} onClick={() => setYearLevelFilter(year)}>
+                  {year}
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -930,21 +1230,11 @@ const Dashboard = () => {
               <DropdownMenuItem onClick={() => setSectionFilter("All")}>
                 All
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("A")}>
-                A
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("B")}>
-                B
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("C")}>
-                C
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("D")}>
-                D
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("E")}>
-                E
-              </DropdownMenuItem>
+              {sectionFilterOptions.map((section) => (
+                <DropdownMenuItem key={section} onClick={() => setSectionFilter(section)}>
+                  {section}
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -986,8 +1276,7 @@ const Dashboard = () => {
                     <div>
                       <p className={textSize}>{student.name}</p>
                       <p className="text-[12px] text-gray-400 mt-0.5">
-                        Program: {student.program} | Year: {student.year} |
-                        Section: {student.section}
+                        Program: {student.program} | Year/Section: {student.yearSection || `${student.year}${student.section}`}
                       </p>
                     </div>
                   </div>
@@ -1040,6 +1329,62 @@ const Dashboard = () => {
             onRowClick={(row) => console.log("Row clicked", row)}
           />
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={showRankingExportModal}
+        onClose={() => {
+          if (!isExportingRanking) {
+            setShowRankingExportModal(false);
+          }
+        }}
+        title={<span className="font-black font-inter">Export Student Violation Ranking Report</span>}
+        size="md"
+        showCloseButton={!isExportingRanking}
+      >
+        <p className="text-sm text-gray-300 mb-3">
+          Choose a format for exporting the current table view.
+        </p>
+        <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 mb-4">
+          <p className="text-xs text-gray-300">
+            Rows to export: <span className="font-semibold text-white">{rankingExportRows.length}</span>
+          </p>
+        </div>
+
+        <label className="block text-sm font-medium text-white mb-2">Format</label>
+        <div className="relative">
+          <select
+            value={rankingExportFormat}
+            onChange={(event) => setRankingExportFormat(event.target.value)}
+            disabled={isExportingRanking}
+            className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
+          >
+            <option value="excel">Excel (.xlsx)</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
+        </div>
+
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowRankingExportModal(false)}
+            disabled={isExportingRanking}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleConfirmRankingExport}
+            disabled={isExportingRanking}
+            className="px-6 py-2.5"
+          >
+            {isExportingRanking ? "Exporting..." : "Export"}
+          </Button>
+        </ModalFooter>
       </Modal>
     </div>
   );
