@@ -5,6 +5,7 @@ import Card from "../../components/ui/Card";
 import StatCard from "../../components/ui/StatCard";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
+import TableTabs from "../../components/ui/TableTabs";
 import {
   Plus,
   TrendingUp,
@@ -89,8 +90,13 @@ const StudentViolation = () => {
   const [sortOrder, setSortOrder] = useState("A-Z");
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState("");
+  const [activeStatusTab, setActiveStatusTab] = useState("pending");
   const [selectedRiskLevel, setSelectedRiskLevel] = useState("");
+
+  const statusTabs = [
+    { key: "pending", label: "Pending" },
+    { key: "cleared", label: "Cleared" },
+  ];
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -440,7 +446,6 @@ const StudentViolation = () => {
     sortOrder !== "A-Z" ||
     Boolean(selectedYear) ||
     Boolean(selectedDate) ||
-    Boolean(selectedStatus) ||
     Boolean(selectedRiskLevel);
 
   const resetFilters = () => {
@@ -448,7 +453,6 @@ const StudentViolation = () => {
     setSortOrder("A-Z");
     setSelectedYear("");
     setSelectedDate("");
-    setSelectedStatus("");
     setSelectedRiskLevel("");
   };
 
@@ -503,18 +507,17 @@ const StudentViolation = () => {
           String(row.school_id || "").toLowerCase().includes(query) ||
           String(row.violation_label || "").toLowerCase().includes(query);
 
-        const matchesStatus =
-          !selectedStatus ||
-          (selectedStatus === "Cleared"
+        const matchesTab =
+          activeStatusTab === "cleared"
             ? Boolean(row.cleared_at)
-            : !row.cleared_at);
+            : !row.cleared_at;
 
         const studentRisk = studentRiskById[String(Number(row.student_id))] || "";
         const matchesRisk = !selectedRiskLevel || studentRisk === selectedRiskLevel;
 
         return (
           matchesSearch &&
-          matchesStatus &&
+          matchesTab &&
           matchesRisk &&
           yearMatches(row, selectedYear) &&
           dateMatches(row, selectedDate)
@@ -543,7 +546,7 @@ const StudentViolation = () => {
   }, [
     records,
     searchTerm,
-    selectedStatus,
+    activeStatusTab,
     selectedRiskLevel,
     selectedYear,
     selectedDate,
@@ -1336,20 +1339,6 @@ const StudentViolation = () => {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="secondary" size="sm" className="min-w-[90px] justify-between">
-                  {selectedStatus || "Status"}
-                  <ChevronDown className="ml-2 w-4 h-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => setSelectedStatus("")}>All</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setSelectedStatus("Cleared")}>Cleared</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setSelectedStatus("Pending")}>Pending</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
                 <Button variant="secondary" size="sm" className="min-w-[120px] justify-between">
                   {selectedRiskLevel || "Risk Level"}
                   <ChevronDown className="ml-2 w-4 h-4" />
@@ -1391,6 +1380,15 @@ const StudentViolation = () => {
       </AnimatedContent>
 
       <AnimatedContent delay={0.5}>
+        <TableTabs
+          tabs={statusTabs}
+          activeTab={activeStatusTab}
+          onTabChange={setActiveStatusTab}
+          className="mb-4"
+        />
+      </AnimatedContent>
+
+      <AnimatedContent delay={0.6}>
         {isLoading ? (
           <div className="text-gray-300">Loading...</div>
         ) : (
