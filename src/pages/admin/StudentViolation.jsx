@@ -90,6 +90,7 @@ const StudentViolation = () => {
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
+  const [selectedRiskLevel, setSelectedRiskLevel] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -439,7 +440,8 @@ const StudentViolation = () => {
     sortOrder !== "A-Z" ||
     Boolean(selectedYear) ||
     Boolean(selectedDate) ||
-    Boolean(selectedStatus);
+    Boolean(selectedStatus) ||
+    Boolean(selectedRiskLevel);
 
   const resetFilters = () => {
     setSearchTerm("");
@@ -447,7 +449,48 @@ const StudentViolation = () => {
     setSelectedYear("");
     setSelectedDate("");
     setSelectedStatus("");
+    setSelectedRiskLevel("");
   };
+
+  const studentRiskById = useMemo(() => {
+    const degreeRank = {
+      "First Degree": 1,
+      "Second Degree": 2,
+      "Third Degree": 3,
+      "Fourth Degree": 4,
+      "Fifth Degree": 5,
+      "Sixth Degree": 6,
+      "Seventh Degree": 7,
+    };
+
+    const activeByStudent = records.reduce((acc, row) => {
+      if (row.cleared_at) return acc;
+      const studentId = Number(row.student_id);
+      if (!studentId) return acc;
+
+      if (!acc[studentId]) {
+        acc[studentId] = { count: 0, maxDegree: 0 };
+      }
+
+      acc[studentId].count += 1;
+      const rank = degreeRank[String(row.violation_degree)] || 0;
+      acc[studentId].maxDegree = Math.max(acc[studentId].maxDegree, rank);
+      return acc;
+    }, {});
+
+    const riskMap = {};
+    Object.entries(activeByStudent).forEach(([studentId, data]) => {
+      if (data.count >= 5 || (data.maxDegree >= 5 && data.maxDegree <= 7)) {
+        riskMap[studentId] = "High-risk";
+      } else if ((data.count >= 3 && data.count <= 4) || (data.maxDegree >= 3 && data.maxDegree <= 4)) {
+        riskMap[studentId] = "At-risk";
+      } else if (data.count === 2 || data.maxDegree === 2) {
+        riskMap[studentId] = "Warning";
+      }
+    });
+
+    return riskMap;
+  }, [records]);
 
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -466,9 +509,13 @@ const StudentViolation = () => {
             ? Boolean(row.cleared_at)
             : !row.cleared_at);
 
+        const studentRisk = studentRiskById[String(Number(row.student_id))] || "";
+        const matchesRisk = !selectedRiskLevel || studentRisk === selectedRiskLevel;
+
         return (
           matchesSearch &&
           matchesStatus &&
+          matchesRisk &&
           yearMatches(row, selectedYear) &&
           dateMatches(row, selectedDate)
         );
@@ -493,7 +540,16 @@ const StudentViolation = () => {
         }
         return lastNameB.localeCompare(lastNameA);
       });
-  }, [records, searchTerm, selectedStatus, selectedYear, selectedDate, sortOrder]);
+  }, [
+    records,
+    searchTerm,
+    selectedStatus,
+    selectedRiskLevel,
+    selectedYear,
+    selectedDate,
+    sortOrder,
+    studentRiskById,
+  ]);
 
   const metrics = useMemo(() => {
     const degreeRank = {
@@ -1289,6 +1345,21 @@ const StudentViolation = () => {
                 <DropdownMenuItem onClick={() => setSelectedStatus("")}>All</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setSelectedStatus("Cleared")}>Cleared</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setSelectedStatus("Pending")}>Pending</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="secondary" size="sm" className="min-w-[120px] justify-between">
+                  {selectedRiskLevel || "Risk Level"}
+                  <ChevronDown className="ml-2 w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={() => setSelectedRiskLevel("")}>All</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSelectedRiskLevel("Warning")}>Warning</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSelectedRiskLevel("At-risk")}>At-risk</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSelectedRiskLevel("High-risk")}>High-risk</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 

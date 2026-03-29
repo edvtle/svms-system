@@ -58,6 +58,7 @@ const UserManagement = () => {
   const [selectedSection, setSelectedSection] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState("A-Z");
+  const [violationCountSort, setViolationCountSort] = useState("");
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -136,7 +137,7 @@ const UserManagement = () => {
       const violations = Array.isArray(violationsResult.records) ? violationsResult.records : [];
       const studentDegreeMap = violations.reduce((acc, record) => {
         if (record.student_id == null) return acc;
-        if (record.cleared_at) return acc; // only active violations adjust risk color
+        if (record.cleared_at) return acc; 
 
         const rank = degreeRank[String(record.violation_degree)] || 0;
         acc[record.student_id] = Math.max(acc[record.student_id] || 0, rank);
@@ -620,6 +621,13 @@ const UserManagement = () => {
 
       return true;
     }).sort((a, b) => {
+      if (violationCountSort === "asc" || violationCountSort === "desc") {
+        const diff = Number(a.violationCount || 0) - Number(b.violationCount || 0);
+        if (diff !== 0) {
+          return violationCountSort === "asc" ? diff : -diff;
+        }
+      }
+
       const lastNameA = toText(a.lastName);
       const lastNameB = toText(b.lastName);
       const fullNameA = toText(a.studentName);
@@ -648,6 +656,7 @@ const UserManagement = () => {
     selectedSection,
     searchQuery,
     sortOrder,
+    violationCountSort,
   ]);
 
   const statistics = useMemo(() => {
@@ -1123,6 +1132,7 @@ const UserManagement = () => {
     setSelectedSection("");
     setSearchQuery("");
     setSortOrder("A-Z");
+    setViolationCountSort("");
     setActiveTab("regular");
   };
 
@@ -1290,10 +1300,39 @@ const UserManagement = () => {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="min-w-[170px] justify-between"
+              >
+                {violationCountSort === "asc"
+                  ? "Violations: Asc"
+                  : violationCountSort === "desc"
+                    ? "Violations: Desc"
+                    : "Violation Count"}
+                <ChevronDown className="ml-2 w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setViolationCountSort("")}>
+                Default
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setViolationCountSort("asc")}>
+                Ascending
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setViolationCountSort("desc")}>
+                Descending
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {(selectedProgram ||
             selectedYear ||
             selectedSection ||
             sortOrder !== "A-Z" ||
+            violationCountSort ||
             searchQuery ||
             activeTab !== "regular") && (
             <Button
