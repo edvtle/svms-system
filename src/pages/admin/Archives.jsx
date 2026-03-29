@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useCallback, useState, useEffect, useMemo } from "react";
 import AnimatedContent from "../../components/ui/AnimatedContent";
 import SearchBar from "../../components/ui/SearchBar";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
 import TableTabs from "../../components/ui/TableTabs";
-import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw, Trash2 } from "lucide-react";
+import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw, Trash2, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -19,6 +19,35 @@ const semesterTabs = [
   { key: "1ST SEM", label: "1st Semester" },
   { key: "2ND SEM", label: "2nd Semester" },
 ];
+
+const EXPORT_HEADER_IMAGE_PATH = "/plpasig_header.png";
+const EXCEL_HEADER_IMAGE_WIDTH_PX = 560;
+const EXCEL_HEADER_IMAGE_HEIGHT_PX = 82;
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const getDataUrlDimensions = (dataUrl) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+    };
+    img.onerror = () => reject(new Error("Unable to load image dimensions."));
+    img.src = dataUrl;
+  });
+
+const detectDataUrlImageFormat = (dataUrl) => {
+  if (String(dataUrl || "").startsWith("data:image/jpeg")) {
+    return "JPEG";
+  }
+  return "PNG";
+};
 
 // Helper function to safely format dates
 const formatDate = (dateString) => {
@@ -66,6 +95,9 @@ const Archives = () => {
   const [schoolYearToRename, setSchoolYearToRename] = useState(null);
   const [newSchoolYearName, setNewSchoolYearName] = useState("");
   const [isSchoolYearActionLoading, setIsSchoolYearActionLoading] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState("excel");
+  const [isExporting, setIsExporting] = useState(false);
 
   // Load archived users on mount
   useEffect(() => {
@@ -501,6 +533,7 @@ const Archives = () => {
           id: user.id,
           no: "",
           full_name: user.full_name,
+          schoolId: user.school_id,
           name: (
             <div>
               <div className="font-semibold">{user.full_name}</div>
@@ -530,6 +563,8 @@ const Archives = () => {
         return archivedViolations.map((violation) => ({
           id: violation.id,
           no: "",
+          studentNameText: violation.student_name,
+          studentIdText: violation.school_id,
           studentName: (
             <div>
               <div className="font-semibold">{violation.student_name}</div>
@@ -571,6 +606,7 @@ const Archives = () => {
           id: user.id,
           no: "",
           full_name: user.full_name,
+          schoolId: user.school_id,
           name: (
             <div>
               <div className="font-semibold">{user.full_name}</div>
@@ -610,6 +646,8 @@ const Archives = () => {
           allData.push({
             id: violation.id,
             no: "",
+            studentNameText: violation.student_name,
+            studentIdText: violation.school_id,
             studentName: (
               <div>
                 <div className="font-semibold">{violation.student_name}</div>
@@ -736,6 +774,681 @@ const Archives = () => {
       return results;
     }
   }, [displayData, searchQuery, filterType, isGlobalSearch, folders]);
+
+  const usersExportRows = useMemo(
+    () =>
+      filteredData
+        .filter((row) => !row.isFolder)
+        .map((row, index) => ({
+          no: index + 1,
+          schoolId: String(row.schoolId || ""),
+          studentName: String(row.full_name || ""),
+          program: String(row.program || ""),
+          yearSection: String(row.yearSection || ""),
+          status: String(row.status || ""),
+          violationCount: Number(row.violationCount) || 0,
+        })),
+    [filteredData],
+  );
+
+  const violationsExportRows = useMemo(
+    () =>
+      filteredData
+        .filter((row) => !row.isFolder)
+        .map((row, index) => ({
+          no: index + 1,
+          date: row.date || "",
+          studentName: row.studentNameText || "",
+          schoolId: row.studentIdText || "",
+          yearSection: row.yearSection || "",
+          violation: row.violation || "",
+          reportedBy: row.reportedBy || "-",
+          remarks: row.remarks || "-",
+          signatureImage: row.signatureImage || "",
+          status: "Archived",
+        })),
+    [filteredData],
+  );
+
+  const formatDateForFileName = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const downloadBlob = useCallback((blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const resolveHeaderImage = useCallback(async () => {
+    const response = await fetch(EXPORT_HEADER_IMAGE_PATH);
+    if (!response.ok) {
+      throw new Error(`Required header image not found: ${EXPORT_HEADER_IMAGE_PATH}`);
+    }
+
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    const dimensions = await getDataUrlDimensions(dataUrl);
+
+    return { dataUrl, dimensions };
+  }, []);
+
+  const exportUsersAsExcel = useCallback(async () => {
+    const [{ Workbook }, { dataUrl, dimensions }] = await Promise.all([
+      import("exceljs"),
+      resolveHeaderImage(),
+    ]);
+
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet("Archived Users", {
+      views: [{ state: "frozen", ySplit: 6 }],
+    });
+
+    sheet.columns = [
+      { key: "no", width: 6 },
+      { key: "schoolId", width: 18 },
+      { key: "studentName", width: 30 },
+      { key: "program", width: 14 },
+      { key: "yearSection", width: 16 },
+      { key: "status", width: 14 },
+      { key: "violationCount", width: 16 },
+    ];
+
+    sheet.mergeCells("A1:G3");
+    sheet.mergeCells("A4:G4");
+    sheet.mergeCells("A5:G5");
+    sheet.getRow(1).height = 26;
+    sheet.getRow(2).height = 26;
+    sheet.getRow(3).height = 26;
+    sheet.getRow(4).height = 28;
+    sheet.getRow(5).height = 18;
+
+    const titleCell = sheet.getCell("A4");
+    titleCell.value = "Archived Users Report";
+    titleCell.font = { name: "Calibri", size: 18, bold: true };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const subtitleCell = sheet.getCell("A5");
+    subtitleCell.value = `Generated: ${new Date().toLocaleString()}`;
+    subtitleCell.font = { name: "Calibri", size: 11, color: { argb: "FF4B5563" } };
+    subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const headerRegionWidthPx = sheet.columns.reduce(
+      (total, column) => total + Number(column.width || 10) * 7.5,
+      0,
+    );
+    const headerRegionHeightPx = [1, 2, 3].reduce(
+      (total, rowNumber) => total + Number(sheet.getRow(rowNumber).height || 15) * 1.333,
+      0,
+    );
+    const imageScale = Math.min(
+      (headerRegionWidthPx - 24) / dimensions.width,
+      (headerRegionHeightPx - 6) / dimensions.height,
+      EXCEL_HEADER_IMAGE_WIDTH_PX / dimensions.width,
+      EXCEL_HEADER_IMAGE_HEIGHT_PX / dimensions.height,
+      1,
+    );
+    const imageWidthPx = Math.max(8, Math.round(dimensions.width * imageScale));
+    const imageHeightPx = Math.max(8, Math.round(dimensions.height * imageScale));
+    const leftOffsetPx = Math.max((headerRegionWidthPx - imageWidthPx) / 2, 0);
+    const topOffsetPx = Math.max((headerRegionHeightPx - imageHeightPx) / 2, 0);
+
+    const toColCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let colIndex = 0; colIndex < sheet.columns.length; colIndex += 1) {
+        const colPx = Number(sheet.columns[colIndex]?.width || 10) * 7.5;
+        if (remaining <= colPx) {
+          return colIndex + remaining / colPx;
+        }
+        remaining -= colPx;
+      }
+      return sheet.columns.length - 1;
+    };
+
+    const toRowCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let rowIndex = 1; rowIndex <= 3; rowIndex += 1) {
+        const rowPx = Number(sheet.getRow(rowIndex).height || 15) * 1.333;
+        if (remaining <= rowPx) {
+          return rowIndex - 1 + remaining / rowPx;
+        }
+        remaining -= rowPx;
+      }
+      return 2;
+    };
+
+    const imageId = workbook.addImage({ base64: dataUrl, extension: "png" });
+    sheet.addImage(imageId, {
+      tl: {
+        col: toColCoordinate(leftOffsetPx),
+        row: toRowCoordinate(topOffsetPx),
+      },
+      ext: {
+        width: imageWidthPx,
+        height: imageHeightPx,
+      },
+    });
+
+    const headerRowNumber = 6;
+    const headerRow = sheet.getRow(headerRowNumber);
+    headerRow.values = [
+      "No",
+      "School ID",
+      "Student Name",
+      "Program",
+      "Year/Section",
+      "Status",
+      "Violation Count",
+    ];
+    headerRow.height = 24;
+
+    headerRow.eachCell((cell) => {
+      cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0F172A" },
+      };
+      cell.alignment = {
+        horizontal: "left",
+        vertical: "middle",
+        wrapText: true,
+        indent: 1,
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFCBD5E1" } },
+        left: { style: "thin", color: { argb: "FFCBD5E1" } },
+        bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+        right: { style: "thin", color: { argb: "FFCBD5E1" } },
+      };
+    });
+
+    const firstDataRow = headerRowNumber + 1;
+    for (const [index, row] of usersExportRows.entries()) {
+      const excelRowNumber = firstDataRow + index;
+      const excelRow = sheet.getRow(excelRowNumber);
+      excelRow.values = [
+        row.no,
+        row.schoolId,
+        row.studentName,
+        row.program,
+        row.yearSection,
+        row.status,
+        row.violationCount,
+      ];
+      excelRow.height = 28;
+
+      excelRow.eachCell((cell) => {
+        cell.font = { name: "Calibri", size: 11, color: { argb: "FF1F2937" } };
+        cell.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+          wrapText: true,
+          indent: 1,
+        };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFCBD5E1" } },
+          left: { style: "thin", color: { argb: "FFCBD5E1" } },
+          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+          right: { style: "thin", color: { argb: "FFCBD5E1" } },
+        };
+        if (excelRowNumber % 2 === 0) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" },
+          };
+        }
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const filename = `archived_users_${formatDateForFileName()}.xlsx`;
+    downloadBlob(blob, filename);
+  }, [downloadBlob, resolveHeaderImage, usersExportRows]);
+
+  const exportUsersAsPdf = useCallback(async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const { dataUrl, dimensions } = await resolveHeaderImage();
+    const tableMarginLeft = 10;
+    const tableMarginRight = 10;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const tableWidth = pageWidth - tableMarginLeft - tableMarginRight;
+    const baseColumnWidths = [12, 28, 55, 24, 26, 24, 24];
+    const baseTotalWidth = baseColumnWidths.reduce((sum, width) => sum + width, 0);
+    const widthScale = tableWidth / baseTotalWidth;
+    const tableColumnWidths = baseColumnWidths.map((width) => width * widthScale);
+    const tableCenterX = tableMarginLeft + tableWidth / 2;
+    let startY = 22;
+
+    if (dataUrl) {
+      const headerWidth = tableWidth;
+      const headerHeight = (dimensions.height * headerWidth) / dimensions.width;
+      const headerX = tableMarginLeft;
+      doc.addImage(dataUrl, "PNG", headerX, 8, headerWidth, headerHeight);
+      startY = 8 + headerHeight + 8;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("Archived Users Report", tableCenterX, startY, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, tableCenterX, startY + 5, {
+      align: "center",
+    });
+
+    autoTable(doc, {
+      startY: startY + 9,
+      head: [["No", "School ID", "Student Name", "Program", "Year/Section", "Status", "Violation Count"]],
+      body: usersExportRows.map((row) => [
+        row.no,
+        row.schoolId,
+        row.studentName,
+        row.program,
+        row.yearSection,
+        row.status,
+        row.violationCount,
+      ]),
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.4,
+        textColor: [31, 41, 55],
+        halign: "left",
+        valign: "middle",
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        halign: "left",
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      margin: { left: tableMarginLeft, right: tableMarginRight },
+      tableWidth,
+      columnStyles: {
+        0: { cellWidth: tableColumnWidths[0] },
+        1: { cellWidth: tableColumnWidths[1] },
+        2: { cellWidth: tableColumnWidths[2] },
+        3: { cellWidth: tableColumnWidths[3] },
+        4: { cellWidth: tableColumnWidths[4] },
+        5: { cellWidth: tableColumnWidths[5] },
+        6: { cellWidth: tableColumnWidths[6] },
+      },
+    });
+
+    doc.save(`archived_users_${formatDateForFileName()}.pdf`);
+  }, [resolveHeaderImage, usersExportRows]);
+
+  const exportViolationsAsExcel = useCallback(async () => {
+    const [{ Workbook }, { dataUrl }] = await Promise.all([
+      import("exceljs"),
+      resolveHeaderImage(),
+    ]);
+
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet("Archived Violations", {
+      views: [{ state: "frozen", ySplit: 6 }],
+    });
+
+    sheet.columns = [
+      { key: "no", width: 6 },
+      { key: "date", width: 13 },
+      { key: "studentName", width: 22 },
+      { key: "schoolId", width: 14 },
+      { key: "yearSection", width: 12 },
+      { key: "violation", width: 38 },
+      { key: "reportedBy", width: 17 },
+      { key: "remarks", width: 24 },
+      { key: "signature", width: 16 },
+      { key: "status", width: 14 },
+    ];
+
+    sheet.mergeCells("A1:J3");
+    sheet.mergeCells("A4:J4");
+    sheet.mergeCells("A5:J5");
+    sheet.getRow(1).height = 26;
+    sheet.getRow(2).height = 26;
+    sheet.getRow(3).height = 26;
+    sheet.getRow(4).height = 28;
+    sheet.getRow(5).height = 18;
+
+    const titleCell = sheet.getCell("A4");
+    titleCell.value = `Archived Student Records Report - S.Y. ${activeFolder} (${activeSemester})`;
+    titleCell.font = { name: "Calibri", size: 18, bold: true };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const subtitleCell = sheet.getCell("A5");
+    subtitleCell.value = `Generated: ${new Date().toLocaleString()}`;
+    subtitleCell.font = { name: "Calibri", size: 11, color: { argb: "FF4B5563" } };
+    subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const headerRegionWidthPx = sheet.columns.reduce(
+      (total, column) => total + Number(column.width || 10) * 7.5,
+      0,
+    );
+    const headerRegionHeightPx = [1, 2, 3].reduce(
+      (total, rowNumber) => total + Number(sheet.getRow(rowNumber).height || 15) * 1.333,
+      0,
+    );
+    const leftOffsetPx = Math.max((headerRegionWidthPx - EXCEL_HEADER_IMAGE_WIDTH_PX) / 2, 0);
+    const topOffsetPx = Math.max((headerRegionHeightPx - EXCEL_HEADER_IMAGE_HEIGHT_PX) / 2, 0);
+
+    const toColCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let colIndex = 0; colIndex < sheet.columns.length; colIndex += 1) {
+        const colPx = Number(sheet.columns[colIndex]?.width || 10) * 7.5;
+        if (remaining <= colPx) {
+          return colIndex + remaining / colPx;
+        }
+        remaining -= colPx;
+      }
+      return sheet.columns.length - 1;
+    };
+
+    const toRowCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let rowIndex = 1; rowIndex <= 3; rowIndex += 1) {
+        const rowPx = Number(sheet.getRow(rowIndex).height || 15) * 1.333;
+        if (remaining <= rowPx) {
+          return rowIndex - 1 + remaining / rowPx;
+        }
+        remaining -= rowPx;
+      }
+      return 2;
+    };
+
+    const imageId = workbook.addImage({ base64: dataUrl, extension: "png" });
+    sheet.addImage(imageId, {
+      tl: {
+        col: toColCoordinate(leftOffsetPx),
+        row: toRowCoordinate(topOffsetPx),
+      },
+      ext: {
+        width: EXCEL_HEADER_IMAGE_WIDTH_PX,
+        height: EXCEL_HEADER_IMAGE_HEIGHT_PX,
+      },
+    });
+
+    const headerRowNumber = 6;
+    const headerRow = sheet.getRow(headerRowNumber);
+    headerRow.values = [
+      "No",
+      "Date",
+      "Student Name",
+      "School ID",
+      "Year/Section",
+      "Violation",
+      "Reported By",
+      "Remarks",
+      "Signature",
+      "Status",
+    ];
+    headerRow.height = 24;
+
+    headerRow.eachCell((cell) => {
+      cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0F172A" },
+      };
+      cell.alignment = {
+        horizontal: "left",
+        vertical: "middle",
+        wrapText: true,
+        indent: 1,
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFCBD5E1" } },
+        left: { style: "thin", color: { argb: "FFCBD5E1" } },
+        bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+        right: { style: "thin", color: { argb: "FFCBD5E1" } },
+      };
+    });
+
+    const firstDataRow = headerRowNumber + 1;
+    for (const [index, row] of violationsExportRows.entries()) {
+      const excelRowNumber = firstDataRow + index;
+      const excelRow = sheet.getRow(excelRowNumber);
+      excelRow.values = [
+        row.no,
+        row.date,
+        row.studentName,
+        row.schoolId,
+        row.yearSection,
+        row.violation,
+        row.reportedBy,
+        row.remarks,
+        "",
+        row.status,
+      ];
+      excelRow.height = 34;
+
+      excelRow.eachCell((cell) => {
+        cell.font = { name: "Calibri", size: 11, color: { argb: "FF1F2937" } };
+        cell.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+          wrapText: true,
+          indent: 1,
+        };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFCBD5E1" } },
+          left: { style: "thin", color: { argb: "FFCBD5E1" } },
+          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+          right: { style: "thin", color: { argb: "FFCBD5E1" } },
+        };
+        if (excelRowNumber % 2 === 0) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" },
+          };
+        }
+      });
+
+      if (row.signatureImage) {
+        const sigExt = String(row.signatureImage).startsWith("data:image/jpeg")
+          ? "jpeg"
+          : "png";
+        const sigDims = await getDataUrlDimensions(row.signatureImage);
+        const signatureColWidthUnits = sheet.columns[8]?.width || 16;
+        const signatureColWidthPx = signatureColWidthUnits * 7.5;
+        const rowHeightPx = (excelRow.height || 34) * 1.333;
+        const maxSigWidth = Math.max(signatureColWidthPx - 12, 8);
+        const maxSigHeight = Math.max(rowHeightPx - 8, 8);
+        const sigScale = Math.min(maxSigWidth / sigDims.width, maxSigHeight / sigDims.height, 1);
+        const drawWidth = Math.max(8, Math.round(sigDims.width * sigScale));
+        const drawHeight = Math.max(8, Math.round(sigDims.height * sigScale));
+        const xOffsetPx = (signatureColWidthPx - drawWidth) / 2;
+        const yOffsetPx = (rowHeightPx - drawHeight) / 2;
+        const signatureImageId = workbook.addImage({
+          base64: row.signatureImage,
+          extension: sigExt,
+        });
+
+        sheet.addImage(signatureImageId, {
+          tl: {
+            col: 8 + xOffsetPx / 7.5,
+            row: excelRowNumber - 1 + yOffsetPx / rowHeightPx,
+          },
+          ext: { width: drawWidth, height: drawHeight },
+        });
+      }
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const filename = `archived_student_records_${formatDateForFileName()}.xlsx`;
+    downloadBlob(blob, filename);
+  }, [activeFolder, activeSemester, downloadBlob, resolveHeaderImage, violationsExportRows]);
+
+  const exportViolationsAsPdf = useCallback(async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const { dataUrl } = await resolveHeaderImage();
+    let startY = 22;
+
+    if (dataUrl) {
+      const imgProps = doc.getImageProperties(dataUrl);
+      const maxHeaderWidth = 220;
+      const calculatedHeight = (imgProps.height * maxHeaderWidth) / imgProps.width;
+      const headerWidth = Math.min(maxHeaderWidth, 260);
+      const headerHeight = calculatedHeight;
+      const headerX = (doc.internal.pageSize.getWidth() - headerWidth) / 2;
+      doc.addImage(dataUrl, "PNG", headerX, 8, headerWidth, headerHeight);
+      startY = 8 + headerHeight + 8;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("Archived Student Records Report", 148.5, startY, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 148.5, startY + 5, {
+      align: "center",
+    });
+
+    autoTable(doc, {
+      startY: startY + 9,
+      head: [
+        [
+          "No",
+          "Date",
+          "Student Name",
+          "School ID",
+          "Year/Section",
+          "Violation",
+          "Reported By",
+          "Remarks",
+          "Signature",
+          "Status",
+        ],
+      ],
+      body: violationsExportRows.map((row) => [
+        row.no,
+        row.date,
+        row.studentName,
+        row.schoolId,
+        row.yearSection,
+        row.violation,
+        row.reportedBy,
+        row.remarks,
+        "",
+        row.status,
+      ]),
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.4,
+        textColor: [31, 41, 55],
+        halign: "left",
+        valign: "middle",
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        halign: "left",
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      margin: { left: 10, right: 10 },
+      columnStyles: {
+        0: { cellWidth: 10 },
+        1: { cellWidth: 22 },
+        2: { cellWidth: 36 },
+        3: { cellWidth: 26 },
+        4: { cellWidth: 22 },
+        5: { cellWidth: 40 },
+        6: { cellWidth: 26 },
+        7: { cellWidth: 50 },
+        8: { cellWidth: 22, minCellHeight: 12 },
+        9: { cellWidth: 22 },
+      },
+      didDrawCell: (data) => {
+        if (data.section !== "body" || data.column.index !== 8) {
+          return;
+        }
+
+        const signatureImage = violationsExportRows[data.row.index]?.signatureImage;
+        if (!signatureImage) {
+          return;
+        }
+
+        const imgFormat = detectDataUrlImageFormat(signatureImage);
+        const maxW = Math.max(data.cell.width - 2, 2);
+        const maxH = Math.max(data.cell.height - 2, 2);
+        const imgW = Math.min(maxW, 18);
+        const imgH = Math.min(maxH, 8);
+        const imgX = data.cell.x + (data.cell.width - imgW) / 2;
+        const imgY = data.cell.y + (data.cell.height - imgH) / 2;
+
+        data.doc.addImage(signatureImage, imgFormat, imgX, imgY, imgW, imgH);
+      },
+    });
+
+    doc.save(`archived_student_records_${formatDateForFileName()}.pdf`);
+  }, [resolveHeaderImage, violationsExportRows]);
+
+  const handleConfirmExport = async () => {
+    const isUsersFolder = activeFolder === "users";
+    const exportRows = isUsersFolder ? usersExportRows : violationsExportRows;
+
+    if (exportRows.length === 0) {
+      alert("No rows available to export.");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      if (isUsersFolder) {
+        if (exportFormat === "excel") {
+          await exportUsersAsExcel();
+        } else {
+          await exportUsersAsPdf();
+        }
+      } else if (exportFormat === "excel") {
+        await exportViolationsAsExcel();
+      } else {
+        await exportViolationsAsPdf();
+      }
+
+      setShowExportModal(false);
+    } catch (err) {
+      alert(err?.message || "Unable to export report.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Define columns based on active folder and search mode
   const columns = useMemo(() => {
@@ -1230,7 +1943,8 @@ const Archives = () => {
               variant="secondary"
               size="sm"
               className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
-              disabled
+              disabled={isGlobalSearch || filteredData.length === 0}
+              onClick={() => setShowExportModal(true)}
             >
               <Download className="w-4 h-4" /> Export
             </Button>
@@ -1440,6 +2154,65 @@ const Archives = () => {
           </div>
         </Modal>
       )}
+
+      <Modal
+        isOpen={showExportModal}
+        onClose={() => {
+          if (!isExporting) {
+            setShowExportModal(false);
+          }
+        }}
+        title={<span className="font-black font-inter">Export Archive Report</span>}
+        size="md"
+        showCloseButton={!isExporting}
+      >
+        <p className="text-sm text-gray-300 mb-3">
+          Choose a format for exporting the current table view.
+        </p>
+        <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 mb-4">
+          <p className="text-xs text-gray-300">
+            Rows to export:{" "}
+            <span className="font-semibold text-white">
+              {activeFolder === "users" ? usersExportRows.length : violationsExportRows.length}
+            </span>
+          </p>
+        </div>
+
+        <label className="block text-sm font-medium text-white mb-2">Format</label>
+        <div className="relative">
+          <select
+            value={exportFormat}
+            onChange={(event) => setExportFormat(event.target.value)}
+            disabled={isExporting}
+            className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
+          >
+            <option value="excel">Excel (.xlsx)</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
+        </div>
+
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowExportModal(false)}
+            disabled={isExporting}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleConfirmExport}
+            disabled={isExporting}
+            className="px-6 py-2.5"
+          >
+            {isExporting ? "Exporting..." : "Export"}
+          </Button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 };
