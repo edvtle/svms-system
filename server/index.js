@@ -3466,12 +3466,35 @@ app.post("/api/archive/violations", async (req, res) => {
 
     const currentSettings = settingsResult.rows[0] || {};
 
+    // Validate semester value
+    const validSemesters = ["1ST SEM", "2ND SEM", "SUMMER"];
+    if (!validSemesters.includes(String(semester).toUpperCase().trim())) {
+      return res.status(400).json({
+        status: "error",
+        message: `Invalid semester '${semester}'. Valid values are ${validSemesters.join(", ")}.`,
+      });
+    }
+
+    const normalizedSemester = String(semester).toUpperCase().trim();
+
     // Determine next semester and school year
     let nextSemester = "2ND SEM";
     let nextSchoolYear = schoolYear;
 
-    if (semester === "2ND SEM") {
+    if (normalizedSemester === "1ST SEM") {
+      nextSemester = "2ND SEM";
+      nextSchoolYear = schoolYear;
+    } else if (normalizedSemester === "2ND SEM") {
+      nextSemester = "SUMMER";
+      nextSchoolYear = schoolYear;
+    } else if (normalizedSemester === "SUMMER") {
       const [startYear, endYear] = schoolYear.split("-").map(Number);
+      if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid school year format. Expected format YYYY-YYYY.",
+        });
+      }
       nextSemester = "1ST SEM";
       nextSchoolYear = `${endYear}-${endYear + 1}`;
     }
@@ -3494,7 +3517,7 @@ app.post("/api/archive/violations", async (req, res) => {
        WHERE svl.semester = $1
        AND svl.school_year = $2
        AND svl.cleared_at IS NULL`,
-      [semester, schoolYear],
+      [normalizedSemester, schoolYear],
     );
 
     const clearedResult = await pool.query(
@@ -3502,7 +3525,7 @@ app.post("/api/archive/violations", async (req, res) => {
        WHERE svl.semester = $1
        AND svl.school_year = $2
        AND svl.cleared_at IS NOT NULL`,
-      [semester, schoolYear],
+      [normalizedSemester, schoolYear],
     );
 
     const pendingViolations = pendingResult.rows || [];
@@ -3542,7 +3565,7 @@ app.post("/api/archive/violations", async (req, res) => {
             violation.remarks,
             violation.signature_image,
             violation.signature_updated_at,
-            semester,
+            normalizedSemester,
             schoolYear,
             isUnresolved,
             req.user?.id || null,
@@ -3565,7 +3588,7 @@ app.post("/api/archive/violations", async (req, res) => {
         `DELETE FROM student_violation_logs 
          WHERE semester = $1 
          AND school_year = $2`,
-        [semester, schoolYear],
+        [normalizedSemester, schoolYear],
       );
       console.log(`Deleted ${archivedCount} violations from active table`);
 
@@ -3591,12 +3614,11 @@ app.post("/api/archive/violations", async (req, res) => {
       }
     }
 
-    // STEP 4: If archiving 2nd semester, promote students and archive 4th year students
+    // STEP 4: Promote students and archive/graduated students based on semester.
     let archivedStudentCount = 0;
-    if (semester === "2ND SEM") {
+    if (normalizedSemester === "2ND SEM") {
       for (const student of students) {
-        // Prefer year_section (actual visible year) as the source of truth.
-        // Fall back to stored year_level only if year_section is not parseable.
+        // Prefer year_section (actual visible year) as source-of-truth.
         let parsedYearSection = null;
         if (student.year_section) {
           const match = String(student.year_section).trim().match(/^(\d+)/);
@@ -3614,7 +3636,7 @@ app.post("/api/archive/violations", async (req, res) => {
         }
 
         if (yearLevel === 4) {
-          // Archive 4th year students with "Graduated" status
+          // Archive 4th year students as Graduated (existing behavior)
           await pool.query(
             `UPDATE "Students"
              SET is_archived = true,
@@ -3627,8 +3649,8 @@ app.post("/api/archive/violations", async (req, res) => {
             [nextSemester, nextSchoolYear, student.id],
           );
           archivedStudentCount++;
-        } else if (yearLevel >= 1 && yearLevel < 4) {
-          // Promote 1st, 2nd, 3rd year students
+        } else if (yearLevel === 1 || yearLevel === 2) {
+          // Promote 1st and 2nd Year students after 2nd sem
           const nextYear = yearLevel + 1;
           const nextYearSection = student.year_section
             ? student.year_section.replace(/^\d+/, String(nextYear))
@@ -3644,8 +3666,17 @@ app.post("/api/archive/violations", async (req, res) => {
             [nextYear, nextYearSection, nextSemester, nextSchoolYear, student.id],
           );
           promotedCount++;
+        } else if (yearLevel === 3) {
+          // 3rd Year goes to SUMMER, do not promote yet until SUMMER is archived.
+          await pool.query(
+            `UPDATE "Students"
+             SET current_semester = $1,
+                 current_school_year = $2
+             WHERE id = $3`,
+            [nextSemester, nextSchoolYear, student.id],
+          );
         } else {
-          // Do not archive students without a valid year level value.
+          // No valid year level: just advance semester/year
           await pool.query(
             `UPDATE "Students"
              SET current_semester = $1,
@@ -3656,8 +3687,62 @@ app.post("/api/archive/violations", async (req, res) => {
         }
       }
       console.log(`Archived ${archivedStudentCount} 4th year students with Graduated status`);
+    } else if (normalizedSemester === "SUMMER") {
+      for (const student of students) {
+        let parsedYearSection = null;
+        if (student.year_section) {
+          const match = String(student.year_section).trim().match(/^(\d+)/);
+          if (match) {
+            parsedYearSection = Number(match[1]);
+          }
+        }
+
+        let yearLevel = Number.isFinite(parsedYearSection)
+          ? parsedYearSection
+          : Number(student.year_level);
+
+        if (!Number.isFinite(yearLevel)) {
+          yearLevel = null;
+        }
+
+        if (yearLevel === 3) {
+          // Promote 3rd Year -> 4th Year after SUMMER
+          const nextYearSection = student.year_section
+            ? student.year_section.replace(/^\d+/, "4")
+            : null;
+
+          await pool.query(
+            `UPDATE "Students"
+             SET year_level = 4,
+                 year_section = COALESCE($1, year_section),
+                 current_semester = $2,
+                 current_school_year = $3
+             WHERE id = $4`,
+            [nextYearSection, nextSemester, nextSchoolYear, student.id],
+          );
+          promotedCount++;
+        } else if (yearLevel === 4) {
+          // Maintain or finalize 4th year through Summer.
+          await pool.query(
+            `UPDATE "Students"
+             SET current_semester = $1,
+                 current_school_year = $2
+             WHERE id = $3`,
+            [nextSemester, nextSchoolYear, student.id],
+          );
+        } else {
+          // 1st/2nd (and undefined) remain in place, advance semester/year only.
+          await pool.query(
+            `UPDATE "Students"
+             SET current_semester = $1,
+                 current_school_year = $2
+             WHERE id = $3`,
+            [nextSemester, nextSchoolYear, student.id],
+          );
+        }
+      }
     } else {
-      // If archiving 1st semester, just update semester
+      // If archiving 1st semester, update semester/year only
       for (const student of students) {
         await pool.query(
           `UPDATE "Students"
@@ -3682,7 +3767,7 @@ app.post("/api/archive/violations", async (req, res) => {
     await pool.query(
       `INSERT INTO "ArchiveHistory" (semester, school_year, total_students_archived, students_promoted)
        VALUES ($1, $2, $3, $4)`,
-      [semester, schoolYear, students.length, promotedCount],
+      [normalizedSemester, schoolYear, students.length, promotedCount],
     );
 
     // STEP 7: Log audit event
@@ -3690,9 +3775,9 @@ app.post("/api/archive/violations", async (req, res) => {
       action: "ARCHIVE_VIOLATIONS",
       targetType: "Violations",
       targetId: null,
-      details: `Archived ${archivedCount} violations for ${semester} S.Y. ${schoolYear}`,
+      details: `Archived ${archivedCount} violations for ${normalizedSemester} S.Y. ${schoolYear}`,
       metadata: {
-        semester,
+        semester: normalizedSemester,
         schoolYear,
         archivedCount,
         nextSemester,
@@ -3712,6 +3797,8 @@ app.post("/api/archive/violations", async (req, res) => {
       archivedCount,
       pendingCount,
       clearedCount,
+      semester: normalizedSemester,
+      schoolYear,
       nextSemester,
       nextSchoolYear,
       studentPromotedCount: promotedCount,

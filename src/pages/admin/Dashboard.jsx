@@ -861,6 +861,11 @@ const Dashboard = () => {
                     >
                       2nd Sem
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSelectedSemester("Summer")}
+                    >
+                      Summer
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <button

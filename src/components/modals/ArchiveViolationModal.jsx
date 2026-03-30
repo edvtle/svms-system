@@ -33,8 +33,8 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
           setCurrentSchoolYear(data.currentSchoolYear);
 
           // If current semester is 2nd, default to 2nd (for archiving), then next year
-          if (data.currentSemester === '2ND SEM') {
-            setSelectedSemester('2ND SEM');
+          if (data.currentSemester === '2ND SEM' || data.currentSemester === 'SUMMER') {
+            setSelectedSemester(data.currentSemester);
             setSelectedSchoolYear(data.currentSchoolYear);
           } else {
             // Default to 1st semester
@@ -270,6 +270,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
               <option value="">Select Semester...</option>
               <option value="1ST SEM">1ST SEM</option>
               <option value="2ND SEM">2ND SEM</option>
+              <option value="SUMMER">SUMMER</option>
             </select>
           </div>
 
@@ -286,7 +287,7 @@ const ArchiveViolationModal = ({ isOpen, onClose, onArchive }) => {
               className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-slate-400 mt-1">
-              {selectedSemester === '2ND SEM' && selectedSchoolYear
+              {(selectedSemester === '2ND SEM' || selectedSemester === 'SUMMER') && selectedSchoolYear
                 ? `Next School Year will be: ${Number(selectedSchoolYear.split('-')[1]) + 1}`
                 : 'Enter the school year (e.g., 2025-2026)'}
             </p>

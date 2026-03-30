@@ -100,6 +100,7 @@ const EditSemesterYearModal = ({ isOpen, onClose, currentSemester, currentSchool
             >
               <option value="1ST SEM">1ST SEM</option>
               <option value="2ND SEM">2ND SEM</option>
+              <option value="SUMMER">SUMMER</option>
             </select>
           </div>
 

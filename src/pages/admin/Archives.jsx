@@ -18,6 +18,7 @@ import { getAuditHeaders } from "@/lib/auditHeaders";
 const semesterTabs = [
   { key: "1ST SEM", label: "1st Semester" },
   { key: "2ND SEM", label: "2nd Semester" },
+  { key: "SUMMER", label: "Summer" },
 ];
 
 // Helper function to safely format dates
@@ -289,10 +290,16 @@ const Archives = () => {
             const response2nd = await fetch(`/api/archive/violations/${year}/2ND SEM`, {
               headers: { ...getAuditHeaders() },
             });
+            const responseSummer = await fetch(`/api/archive/violations/${year}/SUMMER`, {
+              headers: { ...getAuditHeaders() },
+            });
             const unresolved1st = await fetch(`/api/archive/unresolved/${year}/1ST SEM`, {
               headers: { ...getAuditHeaders() },
             });
             const unresolved2nd = await fetch(`/api/archive/unresolved/${year}/2ND SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const unresolvedSummer = await fetch(`/api/archive/unresolved/${year}/SUMMER`, {
               headers: { ...getAuditHeaders() },
             });
 
@@ -310,6 +317,13 @@ const Archives = () => {
               }
             }
 
+            if (responseSummer.ok) {
+              const dataSummer = await responseSummer.json();
+              if (dataSummer.status === "ok" && Array.isArray(dataSummer.violations)) {
+                allViolations.push(...(dataSummer.violations || []));
+              }
+            }
+
             if (unresolved1st.ok) {
               const dataUnresolved1st = await unresolved1st.json();
               if (dataUnresolved1st.status === "ok" && Array.isArray(dataUnresolved1st.violations)) {
@@ -324,6 +338,15 @@ const Archives = () => {
               if (dataUnresolved2nd.status === "ok" && Array.isArray(dataUnresolved2nd.violations)) {
                 unresolvedAll.push(
                   ...dataUnresolved2nd.violations.map((v) => ({ ...v, isUnresolved: true })),
+                );
+              }
+            }
+
+            if (unresolvedSummer.ok) {
+              const dataUnresolvedSummer = await unresolvedSummer.json();
+              if (dataUnresolvedSummer.status === "ok" && Array.isArray(dataUnresolvedSummer.violations)) {
+                unresolvedAll.push(
+                  ...dataUnresolvedSummer.violations.map((v) => ({ ...v, isUnresolved: true })),
                 );
               }
             }

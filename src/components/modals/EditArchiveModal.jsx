@@ -218,13 +218,19 @@ const EditArchiveModal = ({ isOpen, onClose, record, editType = "user", onSave }
               />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <GlassInput
-                label={<span className="text-sm font-medium text-white mb-2">Semester</span>}
-                name="semester"
-                value={formData.semester}
-                onChange={handleChange}
-                placeholder="e.g., 1ST SEM, 2ND SEM"
-              />
+              <div>
+                <label className="block text-sm font-medium text-white mb-2">Semester</label>
+                <select
+                  name="semester"
+                  value={formData.semester}
+                  onChange={handleChange}
+                  className="w-full backdrop-blur-md border border-white/5 rounded-xl px-4 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-white/20 transition-all"
+                >
+                  <option value="1ST SEM">1ST SEM</option>
+                  <option value="2ND SEM">2ND SEM</option>
+                  <option value="SUMMER">SUMMER</option>
+                </select>
+              </div>
               <GlassInput
                 label={<span className="text-sm font-medium text-white mb-2">School Year</span>}
                 name="schoolYear"
