@@ -4,7 +4,7 @@ import SearchBar from "../../components/ui/SearchBar";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
 import TableTabs from "../../components/ui/TableTabs";
-import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw, Trash2 } from "lucide-react";
+import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw, Trash2, Check } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -1089,6 +1089,10 @@ const Archives = () => {
             label: "Violation",
           },
           {
+            key: "type",
+            label: "Type",
+          },
+          {
             key: "reportedBy",
             label: "Reported by",
           },
@@ -1099,19 +1103,24 @@ const Archives = () => {
           {
             key: "signature",
             label: "Signature",
-            render: (value) => (
-              <Button
-                size="sm"
-                variant="secondary"
-                className={`px-3 py-1 ${
-                  value === "Signed"
-                    ? "bg-green-600/50 text-green-200"
-                    : "bg-gray-600/50 text-gray-200"
-                }`}
-              >
-                {value}
-              </Button>
-            ),
+            render: (_value, row) =>
+              row.signatureImage ? (
+                <div className="flex items-center gap-2">
+                  <img
+                    src={row.signatureImage}
+                    alt="Signature"
+                    className="h-8 w-24 object-contain bg-white rounded border border-gray-200"
+                  />
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="px-3 py-1 h-7 text-xs gap-1"
+                >
+                  Attach
+                </Button>
+              ),
           },
           {
             key: "status",
@@ -1120,10 +1129,11 @@ const Archives = () => {
               <Button
                 size="sm"
                 variant="secondary"
-                className="bg-green-600/50 text-green-100 hover:bg-green-500/70"
+                className="bg-[#A3AED0] text-white px-3 py-1 gap-2 flex items-center"
                 onClick={() => handleClearUnresolved(row)}
               >
-                Cleared
+                <Check className="w-4 h-4" />
+                <span className="font-semibold">Cleared</span>
               </Button>
             ),
           },
@@ -1195,19 +1205,24 @@ const Archives = () => {
         {
           key: "signature",
           label: "Signature",
-          render: (value) => (
-            <Button
-              size="sm"
-              variant="secondary"
-              className={`px-3 py-1 ${
-                value === "Signed"
-                  ? "bg-green-600/50 text-green-200"
-                  : "bg-gray-600/50 text-gray-200"
-              }`}
-            >
-              {value}
-            </Button>
-          ),
+          render: (_value, row) =>
+            row.signatureImage ? (
+              <div className="flex items-center gap-2">
+                <img
+                  src={row.signatureImage}
+                  alt="Signature"
+                  className="h-8 w-24 object-contain bg-white rounded border border-gray-200"
+                />
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="px-3 py-1 h-7 text-xs gap-1"
+              >
+                Attach
+              </Button>
+            ),
         },
         {
           key: "actions",
@@ -1273,17 +1288,27 @@ const Archives = () => {
         throw new Error(data.message || "Failed to clear unresolved record.");
       }
 
+      // Remove from unresolved in current view immediately
       setArchivedViolations((items) => items.filter((item) => item.id !== row.id));
+      setAllUnresolvedViolations((items) => items.filter((item) => item.id !== row.id));
 
-      // Move to archived view for this school year
+      // Keep the user in the unresolved view after clearing.
       const destinationYear = selectedUnresolvedYear || row.school_year || activeFolder;
-      setActiveFolder(destinationYear);
-      setIsGlobalSearch(false);
-      setSelectedUnresolvedYear("");
+      const destinationSemester = row.semester || activeSemester;
 
-      window.dispatchEvent(new CustomEvent("archiveCompleted", {
-        detail: { archivedCount: 1, schoolYear: destinationYear }
-      }));
+      setIsGlobalSearch(false);
+      // Keep activeFolder as "unresolved" and do not clear selectedUnresolvedYear
+      // so the user remains in the same unresolved context.
+
+      window.dispatchEvent(
+        new CustomEvent("archiveCompleted", {
+          detail: {
+            archivedCount: 1,
+            schoolYear: destinationYear,
+            semester: destinationSemester,
+          },
+        }),
+      );
     } catch (err) {
       setError(err.message || "Unable to clear unresolved record.");
     } finally {
