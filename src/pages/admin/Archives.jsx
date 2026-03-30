@@ -1,10 +1,10 @@
-import React, { useCallback, useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import AnimatedContent from "../../components/ui/AnimatedContent";
 import SearchBar from "../../components/ui/SearchBar";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
 import TableTabs from "../../components/ui/TableTabs";
-import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw, Trash2, ChevronDown } from "lucide-react";
+import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -19,35 +19,6 @@ const semesterTabs = [
   { key: "1ST SEM", label: "1st Semester" },
   { key: "2ND SEM", label: "2nd Semester" },
 ];
-
-const EXPORT_HEADER_IMAGE_PATH = "/plpasig_header.png";
-const EXCEL_HEADER_IMAGE_WIDTH_PX = 560;
-const EXCEL_HEADER_IMAGE_HEIGHT_PX = 82;
-
-const blobToDataUrl = (blob) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-
-const getDataUrlDimensions = (dataUrl) =>
-  new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
-    };
-    img.onerror = () => reject(new Error("Unable to load image dimensions."));
-    img.src = dataUrl;
-  });
-
-const detectDataUrlImageFormat = (dataUrl) => {
-  if (String(dataUrl || "").startsWith("data:image/jpeg")) {
-    return "JPEG";
-  }
-  return "PNG";
-};
 
 // Helper function to safely format dates
 const formatDate = (dateString) => {
@@ -80,7 +51,10 @@ const Archives = () => {
   const [archivedUsers, setArchivedUsers] = useState([]);
   const [archivedViolations, setArchivedViolations] = useState([]);
   const [allArchivedViolations, setAllArchivedViolations] = useState([]); // For global search
+  const [allUnresolvedViolations, setAllUnresolvedViolations] = useState([]); // Global unresolved records
   const [schoolYears, setSchoolYears] = useState([]);
+  const [unresolvedSchoolYears, setUnresolvedSchoolYears] = useState([]);
+  const [selectedUnresolvedYear, setSelectedUnresolvedYear] = useState("");
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
@@ -95,9 +69,6 @@ const Archives = () => {
   const [schoolYearToRename, setSchoolYearToRename] = useState(null);
   const [newSchoolYearName, setNewSchoolYearName] = useState("");
   const [isSchoolYearActionLoading, setIsSchoolYearActionLoading] = useState(false);
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [exportFormat, setExportFormat] = useState("excel");
-  const [isExporting, setIsExporting] = useState(false);
 
   // Load archived users on mount
   useEffect(() => {
@@ -213,6 +184,33 @@ const Archives = () => {
     };
   }, [activeFolder]);
 
+  // Load unresolved school years for UNRESOLVED folder
+  useEffect(() => {
+    const loadUnresolvedSchoolYears = async () => {
+      if (activeFolder !== "unresolved") {
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/archive/unresolved-school-years", {
+          headers: { ...getAuditHeaders() },
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === "ok" && Array.isArray(data.schoolYears)) {
+          setUnresolvedSchoolYears(data.schoolYears);
+        } else {
+          setUnresolvedSchoolYears([]);
+        }
+      } catch (err) {
+        console.error("Error loading unresolved school years:", err);
+        setUnresolvedSchoolYears([]);
+      }
+    };
+
+    loadUnresolvedSchoolYears();
+  }, [activeFolder]);
+
   // Load violations when folder or semester changes
   useEffect(() => {
     const loadViolations = async () => {
@@ -221,21 +219,39 @@ const Archives = () => {
         return;
       }
 
+      if (activeFolder === "unresolved" && !selectedUnresolvedYear) {
+        setArchivedViolations([]);
+        return;
+      }
+
       try {
         setIsLoading(true);
         setError("");
-        console.log(`Loading violations for ${activeSemester} S.Y. ${activeFolder}`);
 
-        const response = await fetch(
-          `/api/archive/violations/${activeFolder}/${activeSemester}`,
-          { headers: { ...getAuditHeaders() } },
+        const targetYear =
+          activeFolder === "unresolved" ? selectedUnresolvedYear : activeFolder;
+
+        console.log(
+          `Loading violations for ${activeSemester} S.Y. ${targetYear} (${activeFolder})`,
         );
+
+        const endpoint =
+          activeFolder === "unresolved"
+            ? `/api/archive/unresolved/${encodeURIComponent(targetYear)}/${encodeURIComponent(activeSemester)}`
+            : `/api/archive/violations/${encodeURIComponent(targetYear)}/${encodeURIComponent(activeSemester)}`;
+
+        const response = await fetch(endpoint, {
+          headers: { ...getAuditHeaders() },
+        });
+
         const data = await response.json();
 
         if (response.ok && data.status === "ok") {
           const violations = data.violations || [];
           setArchivedViolations(violations);
-          console.log(`✓ Loaded ${violations.length} archived violations for ${activeSemester} S.Y. ${activeFolder}`);
+          console.log(
+            `✓ Loaded ${violations.length} archived violations for ${activeSemester} S.Y. ${targetYear}`,
+          );
         } else {
           console.warn("Error loading violations:", data.message);
           setError(data.message || "Failed to load violations");
@@ -251,7 +267,7 @@ const Archives = () => {
     };
 
     loadViolations();
-  }, [activeFolder, activeSemester]);
+  }, [activeFolder, activeSemester, selectedUnresolvedYear]);
 
   // Load all violations for global search
   useEffect(() => {
@@ -263,12 +279,20 @@ const Archives = () => {
         console.log("Loading all violations for global search...");
 
         const allViolations = [];
+        const unresolvedAll = [];
+
         for (const year of schoolYears) {
           try {
             const response1st = await fetch(`/api/archive/violations/${year}/1ST SEM`, {
               headers: { ...getAuditHeaders() },
             });
             const response2nd = await fetch(`/api/archive/violations/${year}/2ND SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const unresolved1st = await fetch(`/api/archive/unresolved/${year}/1ST SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const unresolved2nd = await fetch(`/api/archive/unresolved/${year}/2ND SEM`, {
               headers: { ...getAuditHeaders() },
             });
 
@@ -285,10 +309,30 @@ const Archives = () => {
                 allViolations.push(...(data2nd.violations || []));
               }
             }
+
+            if (unresolved1st.ok) {
+              const dataUnresolved1st = await unresolved1st.json();
+              if (dataUnresolved1st.status === "ok" && Array.isArray(dataUnresolved1st.violations)) {
+                unresolvedAll.push(
+                  ...dataUnresolved1st.violations.map((v) => ({ ...v, isUnresolved: true })),
+                );
+              }
+            }
+
+            if (unresolved2nd.ok) {
+              const dataUnresolved2nd = await unresolved2nd.json();
+              if (dataUnresolved2nd.status === "ok" && Array.isArray(dataUnresolved2nd.violations)) {
+                unresolvedAll.push(
+                  ...dataUnresolved2nd.violations.map((v) => ({ ...v, isUnresolved: true })),
+                );
+              }
+            }
           } catch (err) {
             console.warn(`Error loading violations for ${year}:`, err);
           }
         }
+
+        setAllUnresolvedViolations(unresolvedAll);
 
         setAllArchivedViolations(allViolations);
         console.log(`✓ Loaded ${allViolations.length} total archived violations for global search`);
@@ -304,6 +348,13 @@ const Archives = () => {
       loadAllViolations();
     }
   }, [isGlobalSearch, schoolYears, allArchivedViolations.length]);
+
+  // Reset unresolved selection when leaving unresolved folder
+  useEffect(() => {
+    if (activeFolder !== "unresolved") {
+      setSelectedUnresolvedYear("");
+    }
+  }, [activeFolder]);
 
   // Load archived users when users folder is clicked
   useEffect(() => {
@@ -512,10 +563,11 @@ const Archives = () => {
     setIsRenameSchoolYearModalOpen(true);
   };
 
-  // Get all folders (USERS + School Years)
+  // Get all folders (USERS + UNRESOLVED + School Years)
   const folders = useMemo(
     () => [
       { key: "users", label: "USERS" },
+      { key: "unresolved", label: "UNRESOLVED" },
       ...schoolYears.map((year) => ({
         key: year,
         label: `S.Y. ${year}`,
@@ -533,7 +585,6 @@ const Archives = () => {
           id: user.id,
           no: "",
           full_name: user.full_name,
-          schoolId: user.school_id,
           name: (
             <div>
               <div className="font-semibold">{user.full_name}</div>
@@ -563,8 +614,6 @@ const Archives = () => {
         return archivedViolations.map((violation) => ({
           id: violation.id,
           no: "",
-          studentNameText: violation.student_name,
-          studentIdText: violation.school_id,
           studentName: (
             <div>
               <div className="font-semibold">{violation.student_name}</div>
@@ -584,8 +633,12 @@ const Archives = () => {
           date: formatDate(violation.archived_at),
           archivedAt: violation.archived_at,
           violationId: violation.id,
-          folder: `S.Y. ${activeFolder}`,
-          folderKey: activeFolder,
+          folder: activeFolder === "unresolved" ? `UNRESOLVED` : `S.Y. ${activeFolder}`,
+          folderKey:
+            activeFolder === "unresolved"
+              ? `unresolved-${selectedUnresolvedYear || violation.school_year || ""}`
+              : activeFolder,
+          status: activeFolder === "unresolved" ? "Unresolved" : "Archived",
           recordType: "violation",
           searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
         }));
@@ -606,7 +659,6 @@ const Archives = () => {
           id: user.id,
           no: "",
           full_name: user.full_name,
-          schoolId: user.school_id,
           name: (
             <div>
               <div className="font-semibold">{user.full_name}</div>
@@ -646,8 +698,6 @@ const Archives = () => {
           allData.push({
             id: violation.id,
             no: "",
-            studentNameText: violation.student_name,
-            studentIdText: violation.school_id,
             studentName: (
               <div>
                 <div className="font-semibold">{violation.student_name}</div>
@@ -670,6 +720,48 @@ const Archives = () => {
             folder: `S.Y. ${violation.school_year}`,
             folderKey: violation.school_year,
             recordType: "violation",
+            // Add searchable text for global search
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+          });
+        });
+      }
+
+      // Add unresolved violations in global search
+      if (allUnresolvedViolations.length > 0) {
+        allUnresolvedViolations.forEach((violation) => {
+          const hasViolation =
+            (violation.student_name && violation.student_name.trim()) ||
+            (violation.school_id && violation.school_id.trim());
+          if (!hasViolation) return;
+
+          allData.push({
+            id: violation.id,
+            no: "",
+            studentName: (
+              <div>
+                <div className="font-semibold">{violation.student_name}</div>
+                <div className="text-xs text-gray-400">{violation.school_id}</div>
+              </div>
+            ),
+            yearSection: violation.year_section,
+            violation: violation.violation_label,
+            type:
+              violation.violation_category && violation.violation_degree
+                ? `${violation.violation_category} - ${violation.violation_degree}`
+                : "-",
+            reportedBy: violation.reported_by || "-",
+            remarks: violation.remarks || "-",
+            signature: violation.signature_image ? "Signed" : "No Signature",
+            signatureImage: violation.signature_image,
+            date: formatDate(violation.archived_at),
+            archivedAt: violation.archived_at,
+            violationId: violation.id,
+            folder: `UNRESOLVED S.Y. ${violation.school_year}`,
+            folderKey: `unresolved-${violation.school_year}`,
+            subFolderKey: violation.school_year,
+            recordType: "violation",
+            isUnresolved: true,
+            schoolYear: violation.school_year,
             // Add searchable text for global search
             searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
           });
@@ -730,8 +822,16 @@ const Archives = () => {
       const matchingFolders = new Set();
       const matchingRecords = [];
 
-      // Check folder names
-      folders.forEach((folder) => {
+      // Check folder names (including unresolved subfolder suggestions)
+      const allSearchFolders = [
+        ...folders,
+        ...unresolvedSchoolYears.map((year) => ({
+          key: `unresolved-${year}`,
+          label: `UNRESOLVED S.Y. ${year}`,
+        })),
+      ];
+
+      allSearchFolders.forEach((folder) => {
         if (folder.label.toLowerCase().includes(query)) {
           matchingFolders.add(folder.key);
         }
@@ -749,7 +849,7 @@ const Archives = () => {
       const results = [];
 
       // First, add folders that match the search
-      folders.forEach((folder) => {
+      allSearchFolders.forEach((folder) => {
         if (matchingFolders.has(folder.key)) {
           // Add folder header
           results.push({
@@ -761,7 +861,7 @@ const Archives = () => {
           });
 
           // Add matching records from this folder
-          const folderRecords = matchingRecords.filter(record => record.folderKey === folder.key);
+          const folderRecords = matchingRecords.filter((record) => record.folderKey === folder.key);
           folderRecords.forEach((record) => {
             results.push({
               ...record,
@@ -774,681 +874,6 @@ const Archives = () => {
       return results;
     }
   }, [displayData, searchQuery, filterType, isGlobalSearch, folders]);
-
-  const usersExportRows = useMemo(
-    () =>
-      filteredData
-        .filter((row) => !row.isFolder)
-        .map((row, index) => ({
-          no: index + 1,
-          schoolId: String(row.schoolId || ""),
-          studentName: String(row.full_name || ""),
-          program: String(row.program || ""),
-          yearSection: String(row.yearSection || ""),
-          status: String(row.status || ""),
-          violationCount: Number(row.violationCount) || 0,
-        })),
-    [filteredData],
-  );
-
-  const violationsExportRows = useMemo(
-    () =>
-      filteredData
-        .filter((row) => !row.isFolder)
-        .map((row, index) => ({
-          no: index + 1,
-          date: row.date || "",
-          studentName: row.studentNameText || "",
-          schoolId: row.studentIdText || "",
-          yearSection: row.yearSection || "",
-          violation: row.violation || "",
-          reportedBy: row.reportedBy || "-",
-          remarks: row.remarks || "-",
-          signatureImage: row.signatureImage || "",
-          status: "Archived",
-        })),
-    [filteredData],
-  );
-
-  const formatDateForFileName = () => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  };
-
-  const downloadBlob = useCallback((blob, filename) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, []);
-
-  const resolveHeaderImage = useCallback(async () => {
-    const response = await fetch(EXPORT_HEADER_IMAGE_PATH);
-    if (!response.ok) {
-      throw new Error(`Required header image not found: ${EXPORT_HEADER_IMAGE_PATH}`);
-    }
-
-    const blob = await response.blob();
-    const dataUrl = await blobToDataUrl(blob);
-    const dimensions = await getDataUrlDimensions(dataUrl);
-
-    return { dataUrl, dimensions };
-  }, []);
-
-  const exportUsersAsExcel = useCallback(async () => {
-    const [{ Workbook }, { dataUrl, dimensions }] = await Promise.all([
-      import("exceljs"),
-      resolveHeaderImage(),
-    ]);
-
-    const workbook = new Workbook();
-    const sheet = workbook.addWorksheet("Archived Users", {
-      views: [{ state: "frozen", ySplit: 6 }],
-    });
-
-    sheet.columns = [
-      { key: "no", width: 6 },
-      { key: "schoolId", width: 18 },
-      { key: "studentName", width: 30 },
-      { key: "program", width: 14 },
-      { key: "yearSection", width: 16 },
-      { key: "status", width: 14 },
-      { key: "violationCount", width: 16 },
-    ];
-
-    sheet.mergeCells("A1:G3");
-    sheet.mergeCells("A4:G4");
-    sheet.mergeCells("A5:G5");
-    sheet.getRow(1).height = 26;
-    sheet.getRow(2).height = 26;
-    sheet.getRow(3).height = 26;
-    sheet.getRow(4).height = 28;
-    sheet.getRow(5).height = 18;
-
-    const titleCell = sheet.getCell("A4");
-    titleCell.value = "Archived Users Report";
-    titleCell.font = { name: "Calibri", size: 18, bold: true };
-    titleCell.alignment = { horizontal: "center", vertical: "middle" };
-
-    const subtitleCell = sheet.getCell("A5");
-    subtitleCell.value = `Generated: ${new Date().toLocaleString()}`;
-    subtitleCell.font = { name: "Calibri", size: 11, color: { argb: "FF4B5563" } };
-    subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
-
-    const headerRegionWidthPx = sheet.columns.reduce(
-      (total, column) => total + Number(column.width || 10) * 7.5,
-      0,
-    );
-    const headerRegionHeightPx = [1, 2, 3].reduce(
-      (total, rowNumber) => total + Number(sheet.getRow(rowNumber).height || 15) * 1.333,
-      0,
-    );
-    const imageScale = Math.min(
-      (headerRegionWidthPx - 24) / dimensions.width,
-      (headerRegionHeightPx - 6) / dimensions.height,
-      EXCEL_HEADER_IMAGE_WIDTH_PX / dimensions.width,
-      EXCEL_HEADER_IMAGE_HEIGHT_PX / dimensions.height,
-      1,
-    );
-    const imageWidthPx = Math.max(8, Math.round(dimensions.width * imageScale));
-    const imageHeightPx = Math.max(8, Math.round(dimensions.height * imageScale));
-    const leftOffsetPx = Math.max((headerRegionWidthPx - imageWidthPx) / 2, 0);
-    const topOffsetPx = Math.max((headerRegionHeightPx - imageHeightPx) / 2, 0);
-
-    const toColCoordinate = (pixelOffset) => {
-      let remaining = pixelOffset;
-      for (let colIndex = 0; colIndex < sheet.columns.length; colIndex += 1) {
-        const colPx = Number(sheet.columns[colIndex]?.width || 10) * 7.5;
-        if (remaining <= colPx) {
-          return colIndex + remaining / colPx;
-        }
-        remaining -= colPx;
-      }
-      return sheet.columns.length - 1;
-    };
-
-    const toRowCoordinate = (pixelOffset) => {
-      let remaining = pixelOffset;
-      for (let rowIndex = 1; rowIndex <= 3; rowIndex += 1) {
-        const rowPx = Number(sheet.getRow(rowIndex).height || 15) * 1.333;
-        if (remaining <= rowPx) {
-          return rowIndex - 1 + remaining / rowPx;
-        }
-        remaining -= rowPx;
-      }
-      return 2;
-    };
-
-    const imageId = workbook.addImage({ base64: dataUrl, extension: "png" });
-    sheet.addImage(imageId, {
-      tl: {
-        col: toColCoordinate(leftOffsetPx),
-        row: toRowCoordinate(topOffsetPx),
-      },
-      ext: {
-        width: imageWidthPx,
-        height: imageHeightPx,
-      },
-    });
-
-    const headerRowNumber = 6;
-    const headerRow = sheet.getRow(headerRowNumber);
-    headerRow.values = [
-      "No",
-      "School ID",
-      "Student Name",
-      "Program",
-      "Year/Section",
-      "Status",
-      "Violation Count",
-    ];
-    headerRow.height = 24;
-
-    headerRow.eachCell((cell) => {
-      cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF0F172A" },
-      };
-      cell.alignment = {
-        horizontal: "left",
-        vertical: "middle",
-        wrapText: true,
-        indent: 1,
-      };
-      cell.border = {
-        top: { style: "thin", color: { argb: "FFCBD5E1" } },
-        left: { style: "thin", color: { argb: "FFCBD5E1" } },
-        bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
-        right: { style: "thin", color: { argb: "FFCBD5E1" } },
-      };
-    });
-
-    const firstDataRow = headerRowNumber + 1;
-    for (const [index, row] of usersExportRows.entries()) {
-      const excelRowNumber = firstDataRow + index;
-      const excelRow = sheet.getRow(excelRowNumber);
-      excelRow.values = [
-        row.no,
-        row.schoolId,
-        row.studentName,
-        row.program,
-        row.yearSection,
-        row.status,
-        row.violationCount,
-      ];
-      excelRow.height = 28;
-
-      excelRow.eachCell((cell) => {
-        cell.font = { name: "Calibri", size: 11, color: { argb: "FF1F2937" } };
-        cell.alignment = {
-          horizontal: "left",
-          vertical: "middle",
-          wrapText: true,
-          indent: 1,
-        };
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFCBD5E1" } },
-          left: { style: "thin", color: { argb: "FFCBD5E1" } },
-          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
-          right: { style: "thin", color: { argb: "FFCBD5E1" } },
-        };
-        if (excelRowNumber % 2 === 0) {
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFF8FAFC" },
-          };
-        }
-      });
-    }
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    const filename = `archived_users_${formatDateForFileName()}.xlsx`;
-    downloadBlob(blob, filename);
-  }, [downloadBlob, resolveHeaderImage, usersExportRows]);
-
-  const exportUsersAsPdf = useCallback(async () => {
-    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
-      import("jspdf"),
-      import("jspdf-autotable"),
-    ]);
-
-    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const { dataUrl, dimensions } = await resolveHeaderImage();
-    const tableMarginLeft = 10;
-    const tableMarginRight = 10;
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const tableWidth = pageWidth - tableMarginLeft - tableMarginRight;
-    const baseColumnWidths = [12, 28, 55, 24, 26, 24, 24];
-    const baseTotalWidth = baseColumnWidths.reduce((sum, width) => sum + width, 0);
-    const widthScale = tableWidth / baseTotalWidth;
-    const tableColumnWidths = baseColumnWidths.map((width) => width * widthScale);
-    const tableCenterX = tableMarginLeft + tableWidth / 2;
-    let startY = 22;
-
-    if (dataUrl) {
-      const headerWidth = tableWidth;
-      const headerHeight = (dimensions.height * headerWidth) / dimensions.width;
-      const headerX = tableMarginLeft;
-      doc.addImage(dataUrl, "PNG", headerX, 8, headerWidth, headerHeight);
-      startY = 8 + headerHeight + 8;
-    }
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.text("Archived Users Report", tableCenterX, startY, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, tableCenterX, startY + 5, {
-      align: "center",
-    });
-
-    autoTable(doc, {
-      startY: startY + 9,
-      head: [["No", "School ID", "Student Name", "Program", "Year/Section", "Status", "Violation Count"]],
-      body: usersExportRows.map((row) => [
-        row.no,
-        row.schoolId,
-        row.studentName,
-        row.program,
-        row.yearSection,
-        row.status,
-        row.violationCount,
-      ]),
-      theme: "grid",
-      styles: {
-        fontSize: 8,
-        cellPadding: 2.4,
-        textColor: [31, 41, 55],
-        halign: "left",
-        valign: "middle",
-      },
-      headStyles: {
-        fillColor: [15, 23, 42],
-        textColor: [255, 255, 255],
-        fontStyle: "bold",
-        halign: "left",
-      },
-      alternateRowStyles: {
-        fillColor: [248, 250, 252],
-      },
-      margin: { left: tableMarginLeft, right: tableMarginRight },
-      tableWidth,
-      columnStyles: {
-        0: { cellWidth: tableColumnWidths[0] },
-        1: { cellWidth: tableColumnWidths[1] },
-        2: { cellWidth: tableColumnWidths[2] },
-        3: { cellWidth: tableColumnWidths[3] },
-        4: { cellWidth: tableColumnWidths[4] },
-        5: { cellWidth: tableColumnWidths[5] },
-        6: { cellWidth: tableColumnWidths[6] },
-      },
-    });
-
-    doc.save(`archived_users_${formatDateForFileName()}.pdf`);
-  }, [resolveHeaderImage, usersExportRows]);
-
-  const exportViolationsAsExcel = useCallback(async () => {
-    const [{ Workbook }, { dataUrl }] = await Promise.all([
-      import("exceljs"),
-      resolveHeaderImage(),
-    ]);
-
-    const workbook = new Workbook();
-    const sheet = workbook.addWorksheet("Archived Violations", {
-      views: [{ state: "frozen", ySplit: 6 }],
-    });
-
-    sheet.columns = [
-      { key: "no", width: 6 },
-      { key: "date", width: 13 },
-      { key: "studentName", width: 22 },
-      { key: "schoolId", width: 14 },
-      { key: "yearSection", width: 12 },
-      { key: "violation", width: 38 },
-      { key: "reportedBy", width: 17 },
-      { key: "remarks", width: 24 },
-      { key: "signature", width: 16 },
-      { key: "status", width: 14 },
-    ];
-
-    sheet.mergeCells("A1:J3");
-    sheet.mergeCells("A4:J4");
-    sheet.mergeCells("A5:J5");
-    sheet.getRow(1).height = 26;
-    sheet.getRow(2).height = 26;
-    sheet.getRow(3).height = 26;
-    sheet.getRow(4).height = 28;
-    sheet.getRow(5).height = 18;
-
-    const titleCell = sheet.getCell("A4");
-    titleCell.value = `Archived Student Records Report - S.Y. ${activeFolder} (${activeSemester})`;
-    titleCell.font = { name: "Calibri", size: 18, bold: true };
-    titleCell.alignment = { horizontal: "center", vertical: "middle" };
-
-    const subtitleCell = sheet.getCell("A5");
-    subtitleCell.value = `Generated: ${new Date().toLocaleString()}`;
-    subtitleCell.font = { name: "Calibri", size: 11, color: { argb: "FF4B5563" } };
-    subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
-
-    const headerRegionWidthPx = sheet.columns.reduce(
-      (total, column) => total + Number(column.width || 10) * 7.5,
-      0,
-    );
-    const headerRegionHeightPx = [1, 2, 3].reduce(
-      (total, rowNumber) => total + Number(sheet.getRow(rowNumber).height || 15) * 1.333,
-      0,
-    );
-    const leftOffsetPx = Math.max((headerRegionWidthPx - EXCEL_HEADER_IMAGE_WIDTH_PX) / 2, 0);
-    const topOffsetPx = Math.max((headerRegionHeightPx - EXCEL_HEADER_IMAGE_HEIGHT_PX) / 2, 0);
-
-    const toColCoordinate = (pixelOffset) => {
-      let remaining = pixelOffset;
-      for (let colIndex = 0; colIndex < sheet.columns.length; colIndex += 1) {
-        const colPx = Number(sheet.columns[colIndex]?.width || 10) * 7.5;
-        if (remaining <= colPx) {
-          return colIndex + remaining / colPx;
-        }
-        remaining -= colPx;
-      }
-      return sheet.columns.length - 1;
-    };
-
-    const toRowCoordinate = (pixelOffset) => {
-      let remaining = pixelOffset;
-      for (let rowIndex = 1; rowIndex <= 3; rowIndex += 1) {
-        const rowPx = Number(sheet.getRow(rowIndex).height || 15) * 1.333;
-        if (remaining <= rowPx) {
-          return rowIndex - 1 + remaining / rowPx;
-        }
-        remaining -= rowPx;
-      }
-      return 2;
-    };
-
-    const imageId = workbook.addImage({ base64: dataUrl, extension: "png" });
-    sheet.addImage(imageId, {
-      tl: {
-        col: toColCoordinate(leftOffsetPx),
-        row: toRowCoordinate(topOffsetPx),
-      },
-      ext: {
-        width: EXCEL_HEADER_IMAGE_WIDTH_PX,
-        height: EXCEL_HEADER_IMAGE_HEIGHT_PX,
-      },
-    });
-
-    const headerRowNumber = 6;
-    const headerRow = sheet.getRow(headerRowNumber);
-    headerRow.values = [
-      "No",
-      "Date",
-      "Student Name",
-      "School ID",
-      "Year/Section",
-      "Violation",
-      "Reported By",
-      "Remarks",
-      "Signature",
-      "Status",
-    ];
-    headerRow.height = 24;
-
-    headerRow.eachCell((cell) => {
-      cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF0F172A" },
-      };
-      cell.alignment = {
-        horizontal: "left",
-        vertical: "middle",
-        wrapText: true,
-        indent: 1,
-      };
-      cell.border = {
-        top: { style: "thin", color: { argb: "FFCBD5E1" } },
-        left: { style: "thin", color: { argb: "FFCBD5E1" } },
-        bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
-        right: { style: "thin", color: { argb: "FFCBD5E1" } },
-      };
-    });
-
-    const firstDataRow = headerRowNumber + 1;
-    for (const [index, row] of violationsExportRows.entries()) {
-      const excelRowNumber = firstDataRow + index;
-      const excelRow = sheet.getRow(excelRowNumber);
-      excelRow.values = [
-        row.no,
-        row.date,
-        row.studentName,
-        row.schoolId,
-        row.yearSection,
-        row.violation,
-        row.reportedBy,
-        row.remarks,
-        "",
-        row.status,
-      ];
-      excelRow.height = 34;
-
-      excelRow.eachCell((cell) => {
-        cell.font = { name: "Calibri", size: 11, color: { argb: "FF1F2937" } };
-        cell.alignment = {
-          horizontal: "left",
-          vertical: "middle",
-          wrapText: true,
-          indent: 1,
-        };
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFCBD5E1" } },
-          left: { style: "thin", color: { argb: "FFCBD5E1" } },
-          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
-          right: { style: "thin", color: { argb: "FFCBD5E1" } },
-        };
-        if (excelRowNumber % 2 === 0) {
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFF8FAFC" },
-          };
-        }
-      });
-
-      if (row.signatureImage) {
-        const sigExt = String(row.signatureImage).startsWith("data:image/jpeg")
-          ? "jpeg"
-          : "png";
-        const sigDims = await getDataUrlDimensions(row.signatureImage);
-        const signatureColWidthUnits = sheet.columns[8]?.width || 16;
-        const signatureColWidthPx = signatureColWidthUnits * 7.5;
-        const rowHeightPx = (excelRow.height || 34) * 1.333;
-        const maxSigWidth = Math.max(signatureColWidthPx - 12, 8);
-        const maxSigHeight = Math.max(rowHeightPx - 8, 8);
-        const sigScale = Math.min(maxSigWidth / sigDims.width, maxSigHeight / sigDims.height, 1);
-        const drawWidth = Math.max(8, Math.round(sigDims.width * sigScale));
-        const drawHeight = Math.max(8, Math.round(sigDims.height * sigScale));
-        const xOffsetPx = (signatureColWidthPx - drawWidth) / 2;
-        const yOffsetPx = (rowHeightPx - drawHeight) / 2;
-        const signatureImageId = workbook.addImage({
-          base64: row.signatureImage,
-          extension: sigExt,
-        });
-
-        sheet.addImage(signatureImageId, {
-          tl: {
-            col: 8 + xOffsetPx / 7.5,
-            row: excelRowNumber - 1 + yOffsetPx / rowHeightPx,
-          },
-          ext: { width: drawWidth, height: drawHeight },
-        });
-      }
-    }
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    const filename = `archived_student_records_${formatDateForFileName()}.xlsx`;
-    downloadBlob(blob, filename);
-  }, [activeFolder, activeSemester, downloadBlob, resolveHeaderImage, violationsExportRows]);
-
-  const exportViolationsAsPdf = useCallback(async () => {
-    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
-      import("jspdf"),
-      import("jspdf-autotable"),
-    ]);
-
-    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const { dataUrl } = await resolveHeaderImage();
-    let startY = 22;
-
-    if (dataUrl) {
-      const imgProps = doc.getImageProperties(dataUrl);
-      const maxHeaderWidth = 220;
-      const calculatedHeight = (imgProps.height * maxHeaderWidth) / imgProps.width;
-      const headerWidth = Math.min(maxHeaderWidth, 260);
-      const headerHeight = calculatedHeight;
-      const headerX = (doc.internal.pageSize.getWidth() - headerWidth) / 2;
-      doc.addImage(dataUrl, "PNG", headerX, 8, headerWidth, headerHeight);
-      startY = 8 + headerHeight + 8;
-    }
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.text("Archived Student Records Report", 148.5, startY, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 148.5, startY + 5, {
-      align: "center",
-    });
-
-    autoTable(doc, {
-      startY: startY + 9,
-      head: [
-        [
-          "No",
-          "Date",
-          "Student Name",
-          "School ID",
-          "Year/Section",
-          "Violation",
-          "Reported By",
-          "Remarks",
-          "Signature",
-          "Status",
-        ],
-      ],
-      body: violationsExportRows.map((row) => [
-        row.no,
-        row.date,
-        row.studentName,
-        row.schoolId,
-        row.yearSection,
-        row.violation,
-        row.reportedBy,
-        row.remarks,
-        "",
-        row.status,
-      ]),
-      theme: "grid",
-      styles: {
-        fontSize: 8,
-        cellPadding: 2.4,
-        textColor: [31, 41, 55],
-        halign: "left",
-        valign: "middle",
-      },
-      headStyles: {
-        fillColor: [15, 23, 42],
-        textColor: [255, 255, 255],
-        fontStyle: "bold",
-        halign: "left",
-      },
-      alternateRowStyles: {
-        fillColor: [248, 250, 252],
-      },
-      margin: { left: 10, right: 10 },
-      columnStyles: {
-        0: { cellWidth: 10 },
-        1: { cellWidth: 22 },
-        2: { cellWidth: 36 },
-        3: { cellWidth: 26 },
-        4: { cellWidth: 22 },
-        5: { cellWidth: 40 },
-        6: { cellWidth: 26 },
-        7: { cellWidth: 50 },
-        8: { cellWidth: 22, minCellHeight: 12 },
-        9: { cellWidth: 22 },
-      },
-      didDrawCell: (data) => {
-        if (data.section !== "body" || data.column.index !== 8) {
-          return;
-        }
-
-        const signatureImage = violationsExportRows[data.row.index]?.signatureImage;
-        if (!signatureImage) {
-          return;
-        }
-
-        const imgFormat = detectDataUrlImageFormat(signatureImage);
-        const maxW = Math.max(data.cell.width - 2, 2);
-        const maxH = Math.max(data.cell.height - 2, 2);
-        const imgW = Math.min(maxW, 18);
-        const imgH = Math.min(maxH, 8);
-        const imgX = data.cell.x + (data.cell.width - imgW) / 2;
-        const imgY = data.cell.y + (data.cell.height - imgH) / 2;
-
-        data.doc.addImage(signatureImage, imgFormat, imgX, imgY, imgW, imgH);
-      },
-    });
-
-    doc.save(`archived_student_records_${formatDateForFileName()}.pdf`);
-  }, [resolveHeaderImage, violationsExportRows]);
-
-  const handleConfirmExport = async () => {
-    const isUsersFolder = activeFolder === "users";
-    const exportRows = isUsersFolder ? usersExportRows : violationsExportRows;
-
-    if (exportRows.length === 0) {
-      alert("No rows available to export.");
-      return;
-    }
-
-    setIsExporting(true);
-    try {
-      if (isUsersFolder) {
-        if (exportFormat === "excel") {
-          await exportUsersAsExcel();
-        } else {
-          await exportUsersAsPdf();
-        }
-      } else if (exportFormat === "excel") {
-        await exportViolationsAsExcel();
-      } else {
-        await exportViolationsAsPdf();
-      }
-
-      setShowExportModal(false);
-    } catch (err) {
-      alert(err?.message || "Unable to export report.");
-    } finally {
-      setIsExporting(false);
-    }
-  };
 
   // Define columns based on active folder and search mode
   const columns = useMemo(() => {
@@ -1570,155 +995,250 @@ const Archives = () => {
       ];
     } else {
       // Regular folder view columns
-      return activeFolder === "users"
-        ? [
-            {
-              key: "no",
-              label: "No",
-              width: "w-10",
-              render: (value) => <span>{value}</span>,
-            },
-            {
-              key: "name",
-              label: "Full Name",
-              render: (value) => value,
-            },
-            {
-              key: "email",
-              label: "Email",
-            },
-            {
-              key: "program",
-              label: "Program",
-            },
-            {
-              key: "yearSection",
-              label: "Year/Section",
-            },
-            {
-              key: "status",
-              label: "Status",
-              render: (value, row) => row.statusDisplay || value,
-            },
-            {
-              key: "violationCount",
-              label: "Violation Count",
-            },
-            {
-              key: "archivedDate",
-              label: "Archived Date",
-            },
-            {
-              key: "actions",
-              label: "",
-              align: "center",
-              render: (_value, row) => (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
-                      <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
-                    <DropdownMenuItem onClick={() => handleEdit(row, "user")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
-                      <Edit className="w-4 h-4" />
-                      <span>Edit</span>
+      if (activeFolder === "users") {
+        return [
+          {
+            key: "no",
+            label: "No",
+            width: "w-10",
+            render: (value) => <span>{value}</span>,
+          },
+          {
+            key: "name",
+            label: "Full Name",
+            render: (value) => value,
+          },
+          {
+            key: "email",
+            label: "Email",
+          },
+          {
+            key: "program",
+            label: "Program",
+          },
+          {
+            key: "yearSection",
+            label: "Year/Section",
+          },
+          {
+            key: "status",
+            label: "Status",
+            render: (value, row) => row.statusDisplay || value,
+          },
+          {
+            key: "violationCount",
+            label: "Violation Count",
+          },
+          {
+            key: "archivedDate",
+            label: "Archived Date",
+          },
+          {
+            key: "actions",
+            label: "",
+            align: "center",
+            render: (_value, row) => (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
+                    <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                  <DropdownMenuItem onClick={() => handleEdit(row, "user")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
+                    <Edit className="w-4 h-4" />
+                    <span>Edit</span>
+                  </DropdownMenuItem>
+                  {row.status !== "Graduated" && (
+                    <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Restore</span>
                     </DropdownMenuItem>
-                    {row.status !== "Graduated" && (
-                      <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
-                        <RotateCcw className="w-4 h-4" />
-                        <span>Restore</span>
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ),
-            },
-          ]
-        : [
-            {
-              key: "no",
-              label: "No",
-              width: "w-10",
-              render: (value) => <span>{value}</span>,
-            },
-            {
-              key: "date",
-              label: "Date",
-              render: (value) => value,
-            },
-            {
-              key: "studentName",
-              label: "Student Name",
-              render: (value) => value,
-            },
-            {
-              key: "yearSection",
-              label: "Year/Section",
-            },
-            {
-              key: "violation",
-              label: "Violation",
-            },
-            {
-              key: "type",
-              label: "Type",
-            },
-            {
-              key: "reportedBy",
-              label: "Reported by",
-            },
-            {
-              key: "remarks",
-              label: "Remarks",
-            },
-            {
-              key: "signature",
-              label: "Signature",
-              render: (value) => (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className={`px-3 py-1 ${
-                    value === "Signed"
-                      ? "bg-green-600/50 text-green-200"
-                      : "bg-gray-600/50 text-gray-200"
-                  }`}
-                >
-                  {value}
-                </Button>
-              ),
-            },
-            {
-              key: "actions",
-              label: "",
-              align: "center",
-              render: (_value, row) => (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
-                  onClick={() => handleEdit(row, "violation")}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
-                    />
-                  </svg>
-                  Edit
-                </Button>
-              ),
-            },
-          ];
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ),
+          },
+        ];
+      }
+
+      if (activeFolder === "unresolved") {
+        return [
+          {
+            key: "no",
+            label: "No",
+            width: "w-10",
+            render: (value) => <span>{value}</span>,
+          },
+          {
+            key: "date",
+            label: "Date",
+            render: (value) => value,
+          },
+          {
+            key: "studentName",
+            label: "Student Name",
+            render: (value) => value,
+          },
+          {
+            key: "yearSection",
+            label: "Year/Section",
+          },
+          {
+            key: "violation",
+            label: "Violation",
+          },
+          {
+            key: "reportedBy",
+            label: "Reported by",
+          },
+          {
+            key: "remarks",
+            label: "Remarks",
+          },
+          {
+            key: "signature",
+            label: "Signature",
+            render: (value) => (
+              <Button
+                size="sm"
+                variant="secondary"
+                className={`px-3 py-1 ${
+                  value === "Signed"
+                    ? "bg-green-600/50 text-green-200"
+                    : "bg-gray-600/50 text-gray-200"
+                }`}
+              >
+                {value}
+              </Button>
+            ),
+          },
+          {
+            key: "status",
+            label: "Status",
+            render: (_value, row) => (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="bg-green-600/50 text-green-100 hover:bg-green-500/70"
+                onClick={() => handleClearUnresolved(row)}
+              >
+                Cleared
+              </Button>
+            ),
+          },
+          {
+            key: "actions",
+            label: "",
+            align: "center",
+            render: (_value, row) => (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
+                    <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                  <DropdownMenuItem onClick={() => handleEdit(row, "violation")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
+                    <Edit className="w-4 h-4" />
+                    <span>Edit</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleDeleteArchivedViolation(row)} className="gap-2 cursor-pointer text-red-700 hover:bg-red-100 hover:text-red-800 focus:bg-red-100 focus:text-red-800">
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ),
+          },
+        ];
+      }
+
+      // Default archive table columns
+      return [
+        {
+          key: "no",
+          label: "No",
+          width: "w-10",
+          render: (value) => <span>{value}</span>,
+        },
+        {
+          key: "date",
+          label: "Date",
+          render: (value) => value,
+        },
+        {
+          key: "studentName",
+          label: "Student Name",
+          render: (value) => value,
+        },
+        {
+          key: "yearSection",
+          label: "Year/Section",
+        },
+        {
+          key: "violation",
+          label: "Violation",
+        },
+        {
+          key: "type",
+          label: "Type",
+        },
+        {
+          key: "reportedBy",
+          label: "Reported by",
+        },
+        {
+          key: "remarks",
+          label: "Remarks",
+        },
+        {
+          key: "signature",
+          label: "Signature",
+          render: (value) => (
+            <Button
+              size="sm"
+              variant="secondary"
+              className={`px-3 py-1 ${
+                value === "Signed"
+                  ? "bg-green-600/50 text-green-200"
+                  : "bg-gray-600/50 text-gray-200"
+              }`}
+            >
+              {value}
+            </Button>
+          ),
+        },
+        {
+          key: "actions",
+          label: "",
+          align: "center",
+          render: (_value, row) => (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+              onClick={() => handleEdit(row, "violation")}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
+                />
+              </svg>
+              Edit
+            </Button>
+          ),
+        },
+      ];
     }
   }, [activeFolder, isGlobalSearch, searchQuery]);
 
@@ -1728,7 +1248,74 @@ const Archives = () => {
       : "Global Search (enter keywords to find records)"
     : activeFolder === "users"
     ? "Archived Users"
+    : activeFolder === "unresolved"
+    ? selectedUnresolvedYear
+      ? `Unresolved Student Records - S.Y. ${selectedUnresolvedYear} (${activeSemester})`
+      : "Unresolved Student Records - Select a Year"
     : `Archived Student Records - S.Y. ${activeFolder} (${activeSemester})`;
+
+  const handleClearUnresolved = async (row) => {
+    if (!row?.id) return;
+
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/archive/violations/${row.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+        body: JSON.stringify({ isUnresolved: false }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.status !== "ok") {
+        throw new Error(data.message || "Failed to clear unresolved record.");
+      }
+
+      setArchivedViolations((items) => items.filter((item) => item.id !== row.id));
+
+      // Move to archived view for this school year
+      const destinationYear = selectedUnresolvedYear || row.school_year || activeFolder;
+      setActiveFolder(destinationYear);
+      setIsGlobalSearch(false);
+      setSelectedUnresolvedYear("");
+
+      window.dispatchEvent(new CustomEvent("archiveCompleted", {
+        detail: { archivedCount: 1, schoolYear: destinationYear }
+      }));
+    } catch (err) {
+      setError(err.message || "Unable to clear unresolved record.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteArchivedViolation = async (row) => {
+    if (!row?.id) return;
+    if (!window.confirm("Delete this archived violation?")) return;
+
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/archive/violations/${row.id}`, {
+        method: "DELETE",
+        headers: {
+          ...getAuditHeaders(),
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.status !== "ok") {
+        throw new Error(data.message || "Failed to delete record.");
+      }
+
+      setArchivedViolations((items) => items.filter((item) => item.id !== row.id));
+    } catch (err) {
+      setError(err.message || "Unable to delete record.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleEdit = (row, type) => {
     setSelectedRow(row);
@@ -1827,6 +1414,9 @@ const Archives = () => {
                   onClick={() => {
                     setActiveFolder(folder.key);
                     setActiveSemester("1ST SEM");
+                    if (folder.key === "unresolved") {
+                      setSelectedUnresolvedYear("");
+                    }
                   }}
                   className={`flex flex-col items-center px-4 py-2 rounded-xl transition-all duration-200 ${folder.key !== "users" ? "pr-8" : ""} ${
                     activeFolder === folder.key
@@ -1841,7 +1431,7 @@ const Archives = () => {
                     {folder.label}
                   </span>
                 </button>
-                {folder.key !== "users" && (
+                {folder.key !== "users" && folder.key !== "unresolved" && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button className="absolute top-1 right-1 w-6 h-6 hover:bg-[#3D4654] rounded-full flex items-center justify-center transition-colors">
@@ -1872,7 +1462,82 @@ const Archives = () => {
         )}
       </AnimatedContent>
 
-      {activeFolder !== "users" && !isGlobalSearch && (
+      {activeFolder === "unresolved" && !selectedUnresolvedYear && !isGlobalSearch && (
+        <AnimatedContent delay={0.25}>
+          <div className="bg-[#23262B] rounded-xl p-6 mb-4">
+            <h3 className="text-lg font-bold mb-3">Unresolved Violations</h3>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {schoolYears.length === 0 ? (
+                <div className="text-gray-300 col-span-full">No school year yet.</div>
+              ) : (
+                schoolYears
+                  .filter((year) =>
+                    searchQuery
+                      ? String(year).toLowerCase().includes(searchQuery.toLowerCase())
+                      : true,
+                  )
+                  .map((year) => (
+                    <button
+                      key={year}
+                      onClick={() => {
+                        setSelectedUnresolvedYear(year);
+                        setActiveSemester("1ST SEM");
+                      }}
+                      className="rounded-lg border border-[#A3AED0]/30 p-3 text-left text-sm text-white hover:border-[#A3AED0]"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Folder className="w-4 h-4 text-[#A3AED0]" />
+                        <span className="font-semibold">S.Y. {year}</span>
+                      </div>
+                    </button>
+                  ))
+              )}
+              {schoolYears.length > 0 &&
+                !schoolYears.some((year) =>
+                  searchQuery
+                    ? String(year).toLowerCase().includes(searchQuery.toLowerCase())
+                    : true,
+                ) && (
+                  <div className="text-gray-300 col-span-full">
+                    No matching school year found.
+                  </div>
+                )}
+            </div>
+          </div>
+        </AnimatedContent>
+      )}
+
+      {activeFolder !== "users" && !isGlobalSearch && selectedUnresolvedYear && (
+        <AnimatedContent delay={0.25}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Folder className="w-4 h-4 text-[#A3AED0]" />
+              <span className="text-sm text-[#A3AED0] font-semibold">UNRESOLVED</span>
+              <span className="text-sm text-gray-300">&gt;</span>
+              <span className="text-sm text-white font-medium">S.Y. {selectedUnresolvedYear}</span>
+            </div>
+            <Button
+              size="xs"
+              variant="secondary"
+              className="px-2 py-1"
+              onClick={() => {
+                setSelectedUnresolvedYear("");
+              }}
+            >
+              Back to Year Selection
+            </Button>
+          </div>
+          <TableTabs
+            tabs={semesterTabs}
+            activeTab={activeSemester}
+            onTabChange={setActiveSemester}
+            className="mb-4"
+          />
+        </AnimatedContent>
+      )}
+
+      {activeFolder !== "users" && !isGlobalSearch && activeFolder !== "unresolved" && (
         <AnimatedContent delay={0.25}>
           <TableTabs
             tabs={semesterTabs}
@@ -1883,8 +1548,9 @@ const Archives = () => {
         </AnimatedContent>
       )}
 
-      <AnimatedContent delay={0.4}>
-        <div className="bg-[#23262B] rounded-xl p-6">
+      {!(activeFolder === "unresolved" && !selectedUnresolvedYear && !isGlobalSearch) && (
+        <AnimatedContent delay={0.4}>
+          <div className="bg-[#23262B] rounded-xl p-6">
           <h3 className="text-lg font-bold mb-4">{tableTitle}</h3>
 
           <div className="flex justify-between items-center mb-4">
@@ -1943,8 +1609,7 @@ const Archives = () => {
               variant="secondary"
               size="sm"
               className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
-              disabled={isGlobalSearch || filteredData.length === 0}
-              onClick={() => setShowExportModal(true)}
+              disabled
             >
               <Download className="w-4 h-4" /> Export
             </Button>
@@ -1967,6 +1632,8 @@ const Archives = () => {
                   : "Enter a search term to start global search"
                 : activeFolder === "users"
                 ? "No archived users found"
+                : activeFolder === "unresolved"
+                ? "No unresolved records found for this semester."
                 : "No records found for this semester."}
             </div>
           ) : (
@@ -1977,8 +1644,16 @@ const Archives = () => {
                 if (!isGlobalSearch) return;
 
                 if (row.isFolder) {
-                  setActiveFolder(row.folderKey);
-                  setActiveSemester("1ST SEM");
+                  if (row.folderKey && row.folderKey.startsWith("unresolved-")) {
+                    setActiveFolder("unresolved");
+                    setSelectedUnresolvedYear(row.folderKey.replace("unresolved-", ""));
+                    setActiveSemester("1ST SEM");
+                  } else {
+                    setActiveFolder(row.folderKey);
+                    if (row.folderKey !== "users" && row.folderKey !== "unresolved") {
+                      setActiveSemester("1ST SEM");
+                    }
+                  }
                   setIsGlobalSearch(false);
                   setSearchQuery("");
                   setFilterType("");
@@ -1988,8 +1663,14 @@ const Archives = () => {
                 if (row.recordType === "user") {
                   setActiveFolder("users");
                 } else if (row.recordType === "violation") {
-                  setActiveFolder(row.folderKey || "users");
-                  setActiveSemester("1ST SEM");
+                  if (row.isUnresolved) {
+                    setActiveFolder("unresolved");
+                    setSelectedUnresolvedYear(row.schoolYear || "");
+                    setActiveSemester("1ST SEM");
+                  } else {
+                    setActiveFolder(row.folderKey || "users");
+                    setActiveSemester("1ST SEM");
+                  }
                 }
                 setIsGlobalSearch(false);
                 setSearchQuery("");
@@ -1999,6 +1680,7 @@ const Archives = () => {
           )}
         </div>
       </AnimatedContent>
+      )}
 
       {/* Edit Modal */}
       {isEditOpen && selectedRow && (
@@ -2154,65 +1836,6 @@ const Archives = () => {
           </div>
         </Modal>
       )}
-
-      <Modal
-        isOpen={showExportModal}
-        onClose={() => {
-          if (!isExporting) {
-            setShowExportModal(false);
-          }
-        }}
-        title={<span className="font-black font-inter">Export Archive Report</span>}
-        size="md"
-        showCloseButton={!isExporting}
-      >
-        <p className="text-sm text-gray-300 mb-3">
-          Choose a format for exporting the current table view.
-        </p>
-        <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 mb-4">
-          <p className="text-xs text-gray-300">
-            Rows to export:{" "}
-            <span className="font-semibold text-white">
-              {activeFolder === "users" ? usersExportRows.length : violationsExportRows.length}
-            </span>
-          </p>
-        </div>
-
-        <label className="block text-sm font-medium text-white mb-2">Format</label>
-        <div className="relative">
-          <select
-            value={exportFormat}
-            onChange={(event) => setExportFormat(event.target.value)}
-            disabled={isExporting}
-            className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
-          >
-            <option value="excel">Excel (.xlsx)</option>
-            <option value="pdf">PDF</option>
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
-        </div>
-
-        <ModalFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setShowExportModal(false)}
-            disabled={isExporting}
-            className="px-6 py-2.5"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            onClick={handleConfirmExport}
-            disabled={isExporting}
-            className="px-6 py-2.5"
-          >
-            {isExporting ? "Exporting..." : "Export"}
-          </Button>
-        </ModalFooter>
-      </Modal>
     </div>
   );
 };

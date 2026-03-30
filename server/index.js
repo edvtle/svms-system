@@ -3484,40 +3484,56 @@ app.post("/api/archive/violations", async (req, res) => {
     const students = studentsResult.rows || [];
     let promotedCount = 0;
     let archivedCount = 0;
+    let pendingCount = 0;
+    let clearedCount = 0;
 
     // STEP 1: Get all violations for the given semester that need to be archived
-    // Filter by violation's semester and school_year, not student's current semester/year
-    const violationsToArchive = await pool.query(
+    // Separate pending/unresolved and cleared violations
+    const pendingResult = await pool.query(
       `SELECT svl.* FROM student_violation_logs svl
-       WHERE svl.semester = $1 
-       AND svl.school_year = $2 
+       WHERE svl.semester = $1
+       AND svl.school_year = $2
        AND svl.cleared_at IS NULL`,
       [semester, schoolYear],
     );
 
-    const violations = violationsToArchive.rows || [];
-    console.log(
-      `Found ${violations.length} violations to archive for ${semester} S.Y. ${schoolYear}`,
+    const clearedResult = await pool.query(
+      `SELECT svl.* FROM student_violation_logs svl
+       WHERE svl.semester = $1
+       AND svl.school_year = $2
+       AND svl.cleared_at IS NOT NULL`,
+      [semester, schoolYear],
     );
 
-    // Check if all violations have signatures
-    const violationsWithoutSignature = violations.filter(v => !v.signature_image || v.signature_image.trim() === '');
-    if (violationsWithoutSignature.length > 0) {
+    const pendingViolations = pendingResult.rows || [];
+    const clearedViolations = clearedResult.rows || [];
+    const violations = [...pendingViolations, ...clearedViolations];
+
+    console.log(
+      `Found ${pendingViolations.length} pending and ${clearedViolations.length} cleared violations to archive for ${semester} S.Y. ${schoolYear}`,
+    );
+
+    // Check if all pending violations have signatures
+    const pendingWithoutSignature = pendingViolations.filter(
+      (v) => !v.signature_image || v.signature_image.trim() === "",
+    );
+    if (pendingWithoutSignature.length > 0) {
       return res.status(400).json({
         status: "error",
-        message: `Cannot archive violations. ${violationsWithoutSignature.length} violation(s) are missing signatures. Please attach signatures to all violations before archiving.`,
+        message: `Cannot archive violations. ${pendingWithoutSignature.length} pending violation(s) are missing signatures. Please attach signatures to all pending violations before archiving.`,
       });
     }
 
     // STEP 2: Move violations to archive table
     if (violations.length > 0) {
-      const archiveInsertPromises = violations.map((violation) =>
-        pool.query(
+      const archiveInsertPromises = violations.map((violation) => {
+        const isUnresolved = violation.cleared_at == null;
+        return pool.query(
           `INSERT INTO student_violation_archives 
            (student_id, violation_catalog_id, violation_label, reported_by, remarks, 
-            signature_image, signature_updated_at, semester, school_year, 
+            signature_image, signature_updated_at, semester, school_year, is_unresolved,
             archived_by_user_id, archived_by_name, original_created_at, original_updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
           [
             violation.student_id,
             violation.violation_catalog_id,
@@ -3528,31 +3544,32 @@ app.post("/api/archive/violations", async (req, res) => {
             violation.signature_updated_at,
             semester,
             schoolYear,
+            isUnresolved,
             req.user?.id || null,
             req.user?.full_name || "System",
             violation.created_at,
             violation.updated_at,
           ],
-        ),
-      );
+        );
+      });
 
       await Promise.all(archiveInsertPromises);
+
+      pendingCount = pendingViolations.length;
+      clearedCount = clearedViolations.length;
       archivedCount = violations.length;
-      console.log(`Inserted ${archivedCount} violations into archive table`);
+      console.log(`Inserted ${archivedCount} violations into archive table (${pendingCount} unresolved, ${clearedCount} cleared)`);
 
       // STEP 3: Delete violations from active table
-      // Delete the same violations we just inserted into the archive table
       await pool.query(
         `DELETE FROM student_violation_logs 
          WHERE semester = $1 
-         AND school_year = $2 
-         AND cleared_at IS NULL`,
+         AND school_year = $2`,
         [semester, schoolYear],
       );
       console.log(`Deleted ${archivedCount} violations from active table`);
 
       // STEP 3B: Refresh violation counts for all affected students
-      // Get unique student IDs from the violations we just archived
       const affectedStudentIds = violations.map((v) => v.student_id);
       const uniqueStudentIds = [...new Set(affectedStudentIds)];
 
@@ -3691,8 +3708,10 @@ app.post("/api/archive/violations", async (req, res) => {
 
     return res.status(200).json({
       status: "ok",
-      message: `Archive completed. ${archivedCount} violations moved to archive. ${promotedCount || 0} students promoted.`,
+      message: `Archive completed. ${archivedCount} violations moved to archive (${pendingCount} unresolved, ${clearedCount} cleared). ${promotedCount || 0} students promoted.`,
       archivedCount,
+      pendingCount,
+      clearedCount,
       nextSemester,
       nextSchoolYear,
       studentPromotedCount: promotedCount,
@@ -3703,6 +3722,107 @@ app.post("/api/archive/violations", async (req, res) => {
     return res.status(503).json({
       status: "error",
       message: `Unable to archive violations (${error.message}).`,
+    });
+  }
+});
+
+// GET unresolved archive school years
+app.get("/api/archive/unresolved-school-years", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `SELECT DISTINCT school_year
+       FROM student_violation_archives
+       WHERE is_unresolved = TRUE
+       ORDER BY school_year DESC`
+    );
+
+    const schoolYears = (result.rows || []).map((row) => row.school_year).filter(Boolean);
+
+    return res.status(200).json({
+      status: "ok",
+      schoolYears,
+    });
+  } catch (error) {
+    console.error("Error fetching unresolved school years:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to fetch unresolved school years (${error.message}).`,
+    });
+  }
+});
+
+// GET unresolved archived violations by school year and semester
+app.get("/api/archive/unresolved/:schoolYear/:semester", async (req, res) => {
+  const { schoolYear, semester } = req.params;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  if (!schoolYear || !semester) {
+    return res.status(400).json({
+      status: "error",
+      message: "School year and semester are required.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `SELECT 
+        sva.id,
+        sva.student_id,
+        sva.violation_catalog_id,
+        sva.violation_label,
+        sva.reported_by,
+        sva.remarks,
+        sva.signature_image,
+        sva.signature_updated_at,
+        sva.semester,
+        sva.school_year,
+        sva.archived_at,
+        sva.archived_by_name,
+        sva.original_created_at,
+        sva.original_updated_at,
+        s.full_name as student_name,
+        s.school_id,
+        s.year_section,
+        v.category as violation_category,
+        v.degree as violation_degree
+       FROM student_violation_archives sva
+       LEFT JOIN "Students" s ON sva.student_id = s.id
+       LEFT JOIN violations v ON sva.violation_catalog_id = v.id
+       WHERE sva.school_year = $1 AND sva.semester = $2 AND sva.is_unresolved = TRUE
+       ORDER BY sva.archived_at DESC, sva.id DESC`,
+      [schoolYear, semester],
+    );
+
+    const violations = result.rows || [];
+
+    return res.status(200).json({
+      status: "ok",
+      violations,
+    });
+  } catch (error) {
+    console.error("Error fetching unresolved violations:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to fetch unresolved violations (${error.message}).`,
     });
   }
 });
@@ -3950,7 +4070,7 @@ app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
 
-    // Query archived violations from the archive table for this semester/year
+    // Query archived violations from the archive table for this semester/year, excluding unresolved
     const result = await pool.query(
       `SELECT 
         sva.id,
@@ -3975,7 +4095,7 @@ app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
        FROM student_violation_archives sva
        LEFT JOIN "Students" s ON sva.student_id = s.id
        LEFT JOIN violations v ON sva.violation_catalog_id = v.id
-       WHERE sva.school_year = $1 AND sva.semester = $2
+       WHERE sva.school_year = $1 AND sva.semester = $2 AND sva.is_unresolved = FALSE
        ORDER BY sva.archived_at DESC, sva.id DESC`,
       [schoolYear, semester],
     );
@@ -4210,7 +4330,7 @@ app.put("/api/archive/users/restore/all", async (req, res) => {
 // PUT update archived violation
 app.put("/api/archive/violations/:id", async (req, res) => {
   const { id } = req.params;
-  const { remarks, reportedBy } = req.body ?? {};
+  const { remarks, reportedBy, isUnresolved } = req.body ?? {};
 
   if (!hasDbConfig()) {
     return res.status(500).json({
@@ -4228,14 +4348,16 @@ app.put("/api/archive/violations/:id", async (req, res) => {
       `UPDATE student_violation_archives
        SET remarks = COALESCE(NULLIF($1, ''), remarks),
            reported_by = COALESCE(NULLIF($2, ''), reported_by),
+           is_unresolved = COALESCE($3, is_unresolved),
            updated_at = NOW()
-       WHERE id = $3
+       WHERE id = $4
        RETURNING id, student_id, violation_label, reported_by, remarks, 
                  signature_image, signature_updated_at, archived_at, 
-                 semester, school_year, original_created_at, original_updated_at`,
+                 semester, school_year, original_created_at, original_updated_at, is_unresolved`,
       [
         String(remarks || "").trim() || null,
         String(reportedBy || "").trim() || null,
+        typeof isUnresolved === 'boolean' ? isUnresolved : null,
         id,
       ],
     );
@@ -4266,6 +4388,53 @@ app.put("/api/archive/violations/:id", async (req, res) => {
     return res.status(503).json({
       status: "error",
       message: `Unable to update archived violation (${error.message}).`,
+    });
+  }
+});
+
+// DELETE archived violation
+app.delete("/api/archive/violations/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database is not configured.",
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `DELETE FROM student_violation_archives WHERE id = $1 RETURNING id`,
+      [id],
+    );
+
+    if (!result.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Archived violation not found.",
+      });
+    }
+
+    await logAuditEvent(req, {
+      action: "DELETE_ARCHIVED_VIOLATION",
+      targetType: "StudentViolation",
+      targetId: id,
+      details: `Deleted archived violation ${id}`,
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      message: "Archived violation deleted.",
+    });
+  } catch (error) {
+    console.error("Error deleting archived violation:", error);
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to delete archived violation (${error.message}).`,
     });
   }
 });

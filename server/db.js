@@ -1168,6 +1168,7 @@ export async function syncStudentViolationLogsDatabase() {
       signature_updated_at TIMESTAMPTZ,
       semester VARCHAR(20) NOT NULL,
       school_year VARCHAR(20) NOT NULL,
+      is_unresolved BOOLEAN NOT NULL DEFAULT TRUE,
       archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       archived_by_user_id BIGINT,
       archived_by_name VARCHAR(255),
@@ -1176,6 +1177,12 @@ export async function syncStudentViolationLogsDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+
+  // Ensure unresolved marker exists on archive table for new Unresolved folder behavior
+  await dbPool.query(`
+    ALTER TABLE student_violation_archives
+    ADD COLUMN IF NOT EXISTS is_unresolved BOOLEAN NOT NULL DEFAULT TRUE
   `);
 
   // Create indexes for archive table

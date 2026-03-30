@@ -133,10 +133,25 @@ const Violations = () => {
     const query = searchQuery.trim().toLowerCase()
     if (!query) return
 
-    const firstMatch = groupedViolations.find((item) => matchViolationToQuery(item, query))
-    if (!firstMatch) return
+    const matches = groupedViolations.filter((item) => matchViolationToQuery(item, query))
+    if (matches.length === 0) return
 
-    const targetCategory = ['First Degree', 'Second Degree'].includes(firstMatch.degree) ? 'minor' : 'major'
+    const minorDegrees = ['First Degree', 'Second Degree']
+    const majorDegrees = ['Third Degree', 'Fourth Degree', 'Fifth Degree', 'Sixth Degree', 'Seventh Degree']
+
+    const hasMinor = matches.some((item) => minorDegrees.includes(item.degree))
+    const hasMajor = matches.some((item) => majorDegrees.includes(item.degree))
+
+    let targetCategory = categoryFilter
+    if (hasMinor && !hasMajor) {
+      targetCategory = 'minor'
+    } else if (hasMajor && !hasMinor) {
+      targetCategory = 'major'
+    } else if (hasMinor && hasMajor) {
+      const firstMatch = matches[0]
+      targetCategory = minorDegrees.includes(firstMatch.degree) ? 'minor' : 'major'
+    }
+
     if (categoryFilter !== targetCategory) {
       setCategoryFilter(targetCategory)
     }
