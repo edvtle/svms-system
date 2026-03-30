@@ -62,6 +62,7 @@ const Archives = () => {
   const [editType, setEditType] = useState("user"); // "user" or "violation"
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [userToRestore, setUserToRestore] = useState(null);
+  const [archiveSuccessMessage, setArchiveSuccessMessage] = useState("");
 
   // School year management states
   const [isDeleteSchoolYearModalOpen, setIsDeleteSchoolYearModalOpen] = useState(false);
@@ -1315,6 +1316,17 @@ const Archives = () => {
       setArchivedViolations((items) => items.filter((item) => item.id !== row.id));
       setAllUnresolvedViolations((items) => items.filter((item) => item.id !== row.id));
 
+      if (data.promotion?.isEligible) {
+        if (data.promotion.promoted) {
+          setArchiveSuccessMessage("Student promotion triggered automatically after clearance.");
+        } else if (data.promotion.graduated) {
+          setArchiveSuccessMessage("Student graduated automatically after all violations cleared.");
+        } else {
+          setArchiveSuccessMessage("Student is eligible and checked for promotion after clearance.");
+        }
+        setTimeout(() => setArchiveSuccessMessage(""), 5000);
+      }
+
       // Keep the user in the unresolved view after clearing.
       const destinationYear = selectedUnresolvedYear || row.school_year || activeFolder;
       const destinationSemester = row.semester || activeSemester;
@@ -1600,6 +1612,12 @@ const Archives = () => {
         <AnimatedContent delay={0.4}>
           <div className="bg-[#23262B] rounded-xl p-6">
           <h3 className="text-lg font-bold mb-4">{tableTitle}</h3>
+
+          {archiveSuccessMessage && (
+            <div className="mb-3 px-3 py-2 text-sm border border-emerald-300 bg-emerald-50 text-emerald-700 rounded">
+              {archiveSuccessMessage}
+            </div>
+          )}
 
           <div className="flex justify-between items-center mb-4">
             <div className="flex gap-2">

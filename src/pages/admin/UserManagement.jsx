@@ -58,7 +58,6 @@ const UserManagement = () => {
   const [selectedSection, setSelectedSection] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState("A-Z");
-  const [violationCountSort, setViolationCountSort] = useState("");
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -137,7 +136,7 @@ const UserManagement = () => {
       const violations = Array.isArray(violationsResult.records) ? violationsResult.records : [];
       const studentDegreeMap = violations.reduce((acc, record) => {
         if (record.student_id == null) return acc;
-        if (record.cleared_at) return acc; 
+        if (record.cleared_at) return acc; // only active violations adjust risk color
 
         const rank = degreeRank[String(record.violation_degree)] || 0;
         acc[record.student_id] = Math.max(acc[record.student_id] || 0, rank);
@@ -414,10 +413,21 @@ const UserManagement = () => {
       // Increment year level by +1 for all except 4th year students
       const studentsToUpdate = studentData.filter((s) => !s.isArchived);
 
+      let promotedCount = 0;
+      let archivedCount = 0;
+      let blockedCount = 0;
+
       for (const student of studentsToUpdate) {
         // Parse year from year_section (e.g., "1 A" -> 1)
         const yearMatch = String(student.yearSection || "").match(/^(\d+)/);
         const currentYear = yearMatch ? parseInt(yearMatch[1]) : 0;
+
+        const hasPendingViolation = Number(student.violationCount || 0) > 0;
+
+        if (hasPendingViolation) {
+          blockedCount += 1;
+          continue; // no promotion or graduation for this student
+        }
 
         if (currentYear === 4) {
           // Archive 4th year students
@@ -434,8 +444,24 @@ const UserManagement = () => {
               yearLevel: 4,
             }),
           });
-        } else if (currentYear > 0 && currentYear < 4) {
-          // Increment year level for freshman/sophomore/junior
+          archivedCount += 1;
+        } else if (currentYear === 3) {
+          // 3rd year student should not be promoted after 2nd sem; they proceed to Summer only
+          // Preserve year level and year section, no +1 promotion here
+          await fetch(`/api/students/${student.id}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuditHeaders(),
+            },
+            body: JSON.stringify({
+              yearLevel: 3,
+              yearSection: student.yearSection,
+            }),
+          });
+          // no promotedCount increment; they can be promoted after Summer.
+        } else if (currentYear === 1 || currentYear === 2) {
+          // Increment year level for freshman/sophomore
           const newYear = currentYear + 1;
           const newYearSection = student.yearSection.replace(/^\d+/, String(newYear));
 
@@ -450,6 +476,7 @@ const UserManagement = () => {
               yearLevel: newYear,
             }),
           });
+          promotedCount += 1;
         }
       }
 
@@ -463,7 +490,7 @@ const UserManagement = () => {
       showArchiveAlert(
         "success",
         "School Year Archived",
-        `${studentsToUpdate.filter((s) => String(s.yearSection || "").match(/^4/)).length} 4th-year students have been archived. ${studentsToUpdate.filter((s) => !String(s.yearSection || "").match(/^4/)).length} students have been promoted to the next year level.`,
+        `${archivedCount} 4th-year students archived. ${promotedCount} students promoted.${blockedCount ? ` ${blockedCount} student(s) were not promoted/graduated due to pending or uncleared violations.` : ""}`,
       );
     } catch (error) {
       showArchiveAlert(
@@ -510,10 +537,17 @@ const UserManagement = () => {
     setIsArchivingUsers(true);
     try {
       let archivedCount = 0;
+      let blockedCount = 0;
 
       for (const userId of selectedUserIds) {
         const userRow = studentData.find((s) => s.id === userId);
         if (!userRow) {
+          continue;
+        }
+
+        const hasPendingViolation = Number(userRow.violationCount || 0) > 0;
+        if (hasPendingViolation) {
+          blockedCount += 1;
           continue;
         }
 
@@ -548,7 +582,7 @@ const UserManagement = () => {
       showArchiveAlert(
         "success",
         "Users Archived",
-        `Successfully archived ${archivedCount} student(s).`,
+        `Successfully archived ${archivedCount} student(s).${blockedCount ? ` ${blockedCount} student(s) were skipped due to pending or uncleared violations.` : ""}`,
       );
     } catch (error) {
       showArchiveAlert(
@@ -621,13 +655,6 @@ const UserManagement = () => {
 
       return true;
     }).sort((a, b) => {
-      if (violationCountSort === "asc" || violationCountSort === "desc") {
-        const diff = Number(a.violationCount || 0) - Number(b.violationCount || 0);
-        if (diff !== 0) {
-          return violationCountSort === "asc" ? diff : -diff;
-        }
-      }
-
       const lastNameA = toText(a.lastName);
       const lastNameB = toText(b.lastName);
       const fullNameA = toText(a.studentName);
@@ -656,7 +683,6 @@ const UserManagement = () => {
     selectedSection,
     searchQuery,
     sortOrder,
-    violationCountSort,
   ]);
 
   const statistics = useMemo(() => {
@@ -1132,7 +1158,6 @@ const UserManagement = () => {
     setSelectedSection("");
     setSearchQuery("");
     setSortOrder("A-Z");
-    setViolationCountSort("");
     setActiveTab("regular");
   };
 
@@ -1300,39 +1325,10 @@ const UserManagement = () => {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="min-w-[170px] justify-between"
-              >
-                {violationCountSort === "asc"
-                  ? "Violations: Asc"
-                  : violationCountSort === "desc"
-                    ? "Violations: Desc"
-                    : "Violation Count"}
-                <ChevronDown className="ml-2 w-4 h-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => setViolationCountSort("")}>
-                Default
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setViolationCountSort("asc")}>
-                Ascending
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setViolationCountSort("desc")}>
-                Descending
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
           {(selectedProgram ||
             selectedYear ||
             selectedSection ||
             sortOrder !== "A-Z" ||
-            violationCountSort ||
             searchQuery ||
             activeTab !== "regular") && (
             <Button
