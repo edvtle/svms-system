@@ -53,9 +53,36 @@ const Archives = () => {
   const [archivedViolations, setArchivedViolations] = useState([]);
   const [allArchivedViolations, setAllArchivedViolations] = useState([]); // For global search
   const [allUnresolvedViolations, setAllUnresolvedViolations] = useState([]); // Global unresolved records
+  const [preservedYearSectionByViolationId, setPreservedYearSectionByViolationId] = useState({});
   const [schoolYears, setSchoolYears] = useState([]);
   const [unresolvedSchoolYears, setUnresolvedSchoolYears] = useState([]);
   const [selectedUnresolvedYear, setSelectedUnresolvedYear] = useState("");
+
+  // Restore preserved year-section mapping from localStorage to prevent lost history during navigation/refresh.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("preservedYearSectionByViolationId");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === "object") {
+          setPreservedYearSectionByViolationId(parsed);
+        }
+      }
+    } catch (err) {
+      console.warn("Unable to restore preserved year section data", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "preservedYearSectionByViolationId",
+        JSON.stringify(preservedYearSectionByViolationId),
+      );
+    } catch (err) {
+      console.warn("Unable to persist preserved year section data", err);
+    }
+  }, [preservedYearSectionByViolationId]);
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
@@ -102,7 +129,23 @@ const Archives = () => {
   useEffect(() => {
     const handleArchiveEvent = (event) => {
       console.log("Archive event received, refreshing school years and violations...", event.detail);
-      
+
+      // For resolved archive actions from general archive button, navigate to that archive year/semester.
+      // If the source is unresolved, keep the current unresolved view on screen.
+      if (event?.detail?.source !== "unresolved" && event?.detail?.schoolYear && event?.detail?.semester) {
+        setActiveFolder(event.detail.schoolYear);
+        setActiveSemester(event.detail.semester);
+        setSelectedUnresolvedYear("");
+      }
+
+      // Merge preserved year_section map if provided
+      if (event?.detail?.preservedYearSections && typeof event.detail.preservedYearSections === "object") {
+        setPreservedYearSectionByViolationId((prev) => ({
+          ...prev,
+          ...event.detail.preservedYearSections,
+        }));
+      }
+
       // Force immediate refresh of school years
       const loadSchoolYears = async () => {
         try {
@@ -635,37 +678,42 @@ const Archives = () => {
           searchableText: `${user.full_name || ""} ${user.school_id || ""} ${user.email || ""} ${user.program || ""} ${user.year_section || ""} ${user.status || ""} ${user.archived_reason || ""}`.toLowerCase(),
         }));
       } else {
-        return archivedViolations.map((violation) => ({
-          id: violation.id,
-          no: "",
-          studentName: (
-            <div>
-              <div className="font-semibold">{violation.student_name}</div>
-              <div className="text-xs text-gray-400">{violation.school_id}</div>
-            </div>
-          ),
-          yearSection: violation.year_section,
-          violation: violation.violation_label,
-          type:
-            violation.violation_category && violation.violation_degree
-              ? `${violation.violation_category} - ${violation.violation_degree}`
-              : "-",
-          reportedBy: violation.reported_by || "-",
-          remarks: violation.remarks || "-",
-          signature: violation.signature_image ? "Signed" : "No Signature",
-          signatureImage: violation.signature_image,
-          date: formatDate(violation.archived_at),
-          archivedAt: violation.archived_at,
-          violationId: violation.id,
-          folder: activeFolder === "unresolved" ? `UNRESOLVED` : `S.Y. ${activeFolder}`,
-          folderKey:
-            activeFolder === "unresolved"
-              ? `unresolved-${selectedUnresolvedYear || violation.school_year || ""}`
-              : activeFolder,
-          status: activeFolder === "unresolved" ? "Unresolved" : "Archived",
-          recordType: "violation",
-          searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
-        }));
+        return archivedViolations.map((violation) => {
+          const preservedYearSection =
+            preservedYearSectionByViolationId[violation.id] || violation.year_section;
+
+          return {
+            id: violation.id,
+            no: "",
+            studentName: (
+              <div>
+                <div className="font-semibold">{violation.student_name}</div>
+                <div className="text-xs text-gray-400">{violation.school_id}</div>
+              </div>
+            ),
+            yearSection: preservedYearSection,
+            violation: violation.violation_label,
+            type:
+              violation.violation_category && violation.violation_degree
+                ? `${violation.violation_category} - ${violation.violation_degree}`
+                : "-",
+            reportedBy: violation.reported_by || "-",
+            remarks: violation.remarks || "-",
+            signature: violation.signature_image ? "Signed" : "No Signature",
+            signatureImage: violation.signature_image,
+            date: formatDate(violation.archived_at),
+            archivedAt: violation.archived_at,
+            violationId: violation.id,
+            folder: activeFolder === "unresolved" ? `UNRESOLVED` : `S.Y. ${activeFolder}`,
+            folderKey:
+              activeFolder === "unresolved"
+                ? `unresolved-${selectedUnresolvedYear || violation.school_year || ""}`
+                : activeFolder,
+            status: activeFolder === "unresolved" ? "Unresolved" : "Archived",
+            recordType: "violation",
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${preservedYearSection || violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+          };
+        });
       }
     } else {
       // Global search - combine all data only if loaded
@@ -1296,6 +1344,15 @@ const Archives = () => {
   const handleClearUnresolved = async (row) => {
     if (!row?.id) return;
 
+    // Preserve the row's immediate year_section before backend may update student year_section on promotion.
+    const originalYearSection = row.year_section || row.yearSection;
+    if (originalYearSection) {
+      setPreservedYearSectionByViolationId((prev) => ({
+        ...prev,
+        [row.id]: originalYearSection,
+      }));
+    }
+
     try {
       setIsLoading(true);
       const response = await fetch(`/api/archive/violations/${row.id}`, {
@@ -1327,20 +1384,30 @@ const Archives = () => {
         setTimeout(() => setArchiveSuccessMessage(""), 5000);
       }
 
-      // Keep the user in the unresolved view after clearing.
+      // preserve year section from archived record before promotion so UI does not show the promoted value in the source archive row
+      const preservedYS = data.preservedYearSection || originalYearSection;
+      if (preservedYS) {
+        setPreservedYearSectionByViolationId((prev) => ({
+          ...prev,
+          [row.id]: preservedYS,
+        }));
+      }
+
+      // Keep user in the unresolved folder view when clearing from unresolved items.
       const destinationYear = selectedUnresolvedYear || row.school_year || activeFolder;
       const destinationSemester = row.semester || activeSemester;
 
-      setIsGlobalSearch(false);
-      // Keep activeFolder as "unresolved" and do not clear selectedUnresolvedYear
-      // so the user remains in the same unresolved context.
-
+      // Notify other components but don't force folder navigation from unresolved clear.
       window.dispatchEvent(
         new CustomEvent("archiveCompleted", {
           detail: {
+            source: "unresolved",
             archivedCount: 1,
             schoolYear: destinationYear,
             semester: destinationSemester,
+            preservedYearSections: preservedYS
+              ? { [row.id]: preservedYS }
+              : {},
           },
         }),
       );

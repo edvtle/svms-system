@@ -2149,6 +2149,26 @@ app.put("/api/student-violations/:id/clear", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
 
+    // Require a signature before a violation can be cleared from the Student Violation tab
+    const existing = await pool.query(
+      `SELECT id, signature_image FROM student_violation_logs WHERE id = $1 LIMIT 1`,
+      [id],
+    );
+
+    const existingRecord = existing.rows?.[0] || null;
+    if (!existingRecord) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Record not found." });
+    }
+
+    if (!existingRecord.signature_image || String(existingRecord.signature_image).trim() === "") {
+      return res.status(400).json({
+        status: "error",
+        message: "Signature is required before marking this violation as cleared.",
+      });
+    }
+
     const result = await pool.query(
       `
       UPDATE student_violation_logs
@@ -2185,8 +2205,10 @@ app.put("/api/student-violations/:id/clear", async (req, res) => {
 
     await refreshStudentViolationCount(pool, updated.student_id);
 
-    // Re-evaluate promotion conditions after clearing a violation from active records.
-    const promotionResult = await checkAndAutoPromoteStudent(pool, updated.student_id);
+    // Note: For Student Violation tab clear action, do NOT auto-promote immediately.
+    // Promotion is handled during archive flow to ensure student records first land in the
+    // correct school year/semester archive view and keep section/year before promotion.
+    const promotionResult = null;
 
     await logAuditEvent(req, {
       action: "CLEAR_STUDENT_VIOLATION_LOG",
@@ -3224,6 +3246,9 @@ app.put("/api/notifications/:id/mark-read", async (req, res) => {
 
 // ==================== ARCHIVE API ====================
 
+// In-memory map to preserve archive record year_section snapshot (no DB schema change required)
+const preservedArchiveYearSectionByViolationId = new Map();
+
 // GET current semester and school year settings
 app.get("/api/archive/current-settings", async (req, res) => {
   if (!hasDbConfig()) {
@@ -3288,7 +3313,7 @@ function computeNextSemesterYear(semester, schoolYear) {
   return { nextSemester, nextSchoolYear };
 }
 
-async function checkAndAutoPromoteStudent(pool, studentId) {
+async function checkAndAutoPromoteStudent(pool, studentId, violationSemester = null, violationSchoolYear = null) {
   if (!studentId) {
     return { isEligible: false, reason: "missing_student_id" };
   }
@@ -3332,15 +3357,18 @@ async function checkAndAutoPromoteStudent(pool, studentId) {
     return { isEligible: false, reason: "already_archived" };
   }
 
-  let yearLevel = Number.isFinite(Number(student.year_level))
-    ? Number(student.year_level)
-    : null;
+  let yearLevel = null;
 
-  if (!Number.isFinite(yearLevel) && student.year_section) {
+  // Prefer year_section as the strongest source to avoid mismatches where year_level is stale
+  if (student.year_section) {
     const match = String(student.year_section || "").trim().match(/^(\d+)/);
     if (match) {
       yearLevel = Number(match[1]);
     }
+  }
+
+  if (!Number.isFinite(yearLevel) && Number.isFinite(Number(student.year_level))) {
+    yearLevel = Number(student.year_level);
   }
 
   const systemSettings = await pool.query(
@@ -3348,49 +3376,39 @@ async function checkAndAutoPromoteStudent(pool, studentId) {
   );
 
   const systemRow = systemSettings.rows?.[0] || {};
-  const studentSemester = String(student.current_semester || systemRow.current_semester || "1ST SEM").trim().toUpperCase();
-  const studentSchoolYear = String(student.current_school_year || systemRow.current_school_year || "2025-2026").trim();
+  const sourceSemester = String(
+    violationSemester || student.current_semester || systemRow.current_semester || "1ST SEM"
+  ).trim().toUpperCase();
+  const sourceSchoolYear = String(
+    violationSchoolYear || student.current_school_year || systemRow.current_school_year || "2025-2026"
+  ).trim();
 
-  const { nextSemester, nextSchoolYear } = computeNextSemesterYear(studentSemester, studentSchoolYear);
+  const { nextSemester, nextSchoolYear } = computeNextSemesterYear(sourceSemester, sourceSchoolYear);
 
   let promoted = false;
   let graduated = false;
   let action = "none";
 
-  // Prevent promotion/graduation unless student has no unresolved violations and is in the relevant final term for the year
-  if (studentSemester === "2ND SEM") {
+  // Promotion rule evaluation and Student update logic
+  // - Archives should retain original year-level (preserved externally in front-end mapping)
+  // - User Management (Students table) updates are applied here according to requirement.
+
+  if (sourceSemester === "2ND SEM") {
     if (yearLevel === 4) {
       await pool.query(
         `UPDATE "Students"
          SET is_archived = TRUE,
              archived_at = COALESCE(archived_at, NOW()),
              status = 'Graduated',
-             year_level = 4,
              current_semester = $1,
              current_school_year = $2
          WHERE id = $3`,
         [nextSemester, nextSchoolYear, studentId],
       );
-      graduated = true;
       action = "graduated";
-    } else if (yearLevel === 1 || yearLevel === 2) {
-      const nextYear = yearLevel + 1;
-      const nextYearSection = student.year_section
-        ? student.year_section.replace(/^(\d+)/, String(nextYear))
-        : null;
-      await pool.query(
-        `UPDATE "Students"
-         SET year_level = $1,
-             year_section = COALESCE($2, year_section),
-             current_semester = $3,
-             current_school_year = $4
-         WHERE id = $5`,
-        [nextYear, nextYearSection, nextSemester, nextSchoolYear, studentId],
-      );
-      promoted = true;
-      action = "promoted";
+      graduated = true;
     } else if (yearLevel === 3) {
-      // 3rd year students enter Summer term; do not promote to 4th until SUMMER evaluation.
+      // 3rd year students do not graduate after 2nd sem; they proceed to Summer.
       await pool.query(
         `UPDATE "Students"
          SET current_semester = $1,
@@ -3398,14 +3416,13 @@ async function checkAndAutoPromoteStudent(pool, studentId) {
          WHERE id = $3`,
         [nextSemester, nextSchoolYear, studentId],
       );
-      action = "termAdvanced";
-    }
-  } else if (studentSemester === "SUMMER") {
-    if (yearLevel === 1 || yearLevel === 2) {
+      action = "summer_eligible";
+    } else if (yearLevel === 1 || yearLevel === 2) {
       const nextYear = yearLevel + 1;
       const nextYearSection = student.year_section
         ? student.year_section.replace(/^(\d+)/, String(nextYear))
         : null;
+
       await pool.query(
         `UPDATE "Students"
          SET year_level = $1,
@@ -3415,12 +3432,24 @@ async function checkAndAutoPromoteStudent(pool, studentId) {
          WHERE id = $5`,
         [nextYear, nextYearSection, nextSemester, nextSchoolYear, studentId],
       );
-      promoted = true;
       action = "promoted";
-    } else if (yearLevel === 3) {
+      promoted = true;
+    } else {
+      await pool.query(
+        `UPDATE "Students"
+         SET current_semester = $1,
+             current_school_year = $2
+         WHERE id = $3`,
+        [nextSemester, nextSchoolYear, studentId],
+      );
+      action = "term_advanced";
+    }
+  } else if (sourceSemester === "SUMMER") {
+    if (yearLevel === 3) {
       const nextYearSection = student.year_section
         ? student.year_section.replace(/^(\d+)/, "4")
         : null;
+
       await pool.query(
         `UPDATE "Students"
          SET year_level = 4,
@@ -3430,24 +3459,33 @@ async function checkAndAutoPromoteStudent(pool, studentId) {
          WHERE id = $4`,
         [nextYearSection, nextSemester, nextSchoolYear, studentId],
       );
-      promoted = true;
       action = "promoted";
+      promoted = true;
     } else if (yearLevel === 4) {
       await pool.query(
         `UPDATE "Students"
          SET is_archived = TRUE,
              archived_at = COALESCE(archived_at, NOW()),
              status = 'Graduated',
-             year_level = 4,
              current_semester = $1,
              current_school_year = $2
          WHERE id = $3`,
         [nextSemester, nextSchoolYear, studentId],
       );
-      graduated = true;
       action = "graduated";
+      graduated = true;
+    } else {
+      await pool.query(
+        `UPDATE "Students"
+         SET current_semester = $1,
+             current_school_year = $2
+         WHERE id = $3`,
+        [nextSemester, nextSchoolYear, studentId],
+      );
+      action = "term_advanced";
     }
   }
+
 
   return {
     isEligible: true,
@@ -3456,8 +3494,8 @@ async function checkAndAutoPromoteStudent(pool, studentId) {
     graduated,
     currentSemester: nextSemester,
     currentSchoolYear: nextSchoolYear,
-    previousSemester: studentSemester,
-    previousSchoolYear: studentSchoolYear,
+    previousSemester: sourceSemester,
+    previousSchoolYear: sourceSchoolYear,
     unresolvedCount: 0,
   };
 }
@@ -3714,8 +3752,10 @@ app.post("/api/archive/violations", async (req, res) => {
 
     // STEP 1: Get all violations for the given semester that need to be archived
     // Separate pending/unresolved and cleared violations
+    // Also include student.year_section to preserve the original year/section snapshot before any promotion update.
     const pendingResult = await pool.query(
-      `SELECT svl.* FROM student_violation_logs svl
+      `SELECT svl.*, s.year_section FROM student_violation_logs svl
+       LEFT JOIN "Students" s ON svl.student_id = s.id
        WHERE svl.semester = $1
        AND svl.school_year = $2
        AND svl.cleared_at IS NULL`,
@@ -3723,7 +3763,8 @@ app.post("/api/archive/violations", async (req, res) => {
     );
 
     const clearedResult = await pool.query(
-      `SELECT svl.* FROM student_violation_logs svl
+      `SELECT svl.*, s.year_section FROM student_violation_logs svl
+       LEFT JOIN "Students" s ON svl.student_id = s.id
        WHERE svl.semester = $1
        AND svl.school_year = $2
        AND svl.cleared_at IS NOT NULL`,
@@ -3738,7 +3779,7 @@ app.post("/api/archive/violations", async (req, res) => {
       `Found ${pendingViolations.length} pending and ${clearedViolations.length} cleared violations to archive for ${semester} S.Y. ${schoolYear}`,
     );
 
-    // Check if all pending violations have signatures
+    // Check if all pending and cleared violations have signatures
     const pendingWithoutSignature = pendingViolations.filter(
       (v) => !v.signature_image || v.signature_image.trim() === "",
     );
@@ -3749,7 +3790,19 @@ app.post("/api/archive/violations", async (req, res) => {
       });
     }
 
+    const clearedWithoutSignature = clearedViolations.filter(
+      (v) => !v.signature_image || v.signature_image.trim() === "",
+    );
+    if (clearedWithoutSignature.length > 0) {
+      return res.status(400).json({
+        status: "error",
+        message: `Cannot archive violations. ${clearedWithoutSignature.length} cleared violation(s) are missing signatures. Please attach signatures to all cleared violations before archiving.`,
+      });
+    }
+
     // STEP 2: Move violations to archive table
+    // preserve year_section of each archived row for UI display before student promotion (especially 2nd sem -> 3rd sem cases)
+    let preservedYearSections = {};
     if (violations.length > 0) {
       const archiveInsertPromises = violations.map((violation) => {
         const isUnresolved = violation.cleared_at == null;
@@ -3758,7 +3811,8 @@ app.post("/api/archive/violations", async (req, res) => {
            (student_id, violation_catalog_id, violation_label, reported_by, remarks, 
             signature_image, signature_updated_at, semester, school_year, is_unresolved,
             archived_by_user_id, archived_by_name, original_created_at, original_updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+           RETURNING id`,
           [
             violation.student_id,
             violation.violation_catalog_id,
@@ -3778,7 +3832,17 @@ app.post("/api/archive/violations", async (req, res) => {
         );
       });
 
-      await Promise.all(archiveInsertPromises);
+      const insertedResults = await Promise.all(archiveInsertPromises);
+      insertedResults.forEach((insertResult, idx) => {
+        const rowId = insertResult.rows?.[0]?.id;
+        if (rowId) {
+          const rowYearSection = violations[idx]?.year_section || null;
+          preservedYearSections[rowId] = rowYearSection;
+          if (rowYearSection) {
+            preservedArchiveYearSectionByViolationId.set(rowId, rowYearSection);
+          }
+        }
+      });
 
       pendingCount = pendingViolations.length;
       clearedCount = clearedViolations.length;
@@ -3852,7 +3916,6 @@ app.post("/api/archive/violations", async (req, res) => {
 
     if (normalizedSemester === "2ND SEM") {
       for (const student of students) {
-        // Prefer year_section (actual visible year) as source-of-truth.
         let parsedYearSection = null;
         if (student.year_section) {
           const match = String(student.year_section).trim().match(/^(\d+)/);
@@ -3871,76 +3934,50 @@ app.post("/api/archive/violations", async (req, res) => {
 
         const studentHasPending = hasPendingOrUncleared(student.id);
 
-        if (yearLevel === 4) {
-          if (studentHasPending) {
-            blockedStudentCount++;
-            await pool.query(
-              `UPDATE "Students"
-               SET current_semester = $1,
-                   current_school_year = $2
-               WHERE id = $3`,
-              [nextSemester, nextSchoolYear, student.id],
-            );
-          } else {
-            await pool.query(
-              `UPDATE "Students"
-               SET is_archived = true,
-                   archived_at = NOW(),
-                   status = 'Graduated',
-                   year_level = 4,
-                   current_semester = $1,
-                   current_school_year = $2
-               WHERE id = $3`,
-              [nextSemester, nextSchoolYear, student.id],
-            );
-            archivedStudentCount++;
-          }
-        } else if (yearLevel === 1 || yearLevel === 2) {
-          if (studentHasPending) {
-            blockedStudentCount++;
-            await pool.query(
-              `UPDATE "Students"
-               SET current_semester = $1,
-                   current_school_year = $2
-               WHERE id = $3`,
-              [nextSemester, nextSchoolYear, student.id],
-            );
-          } else {
-            const nextYear = yearLevel + 1;
-            const nextYearSection = student.year_section
-              ? student.year_section.replace(/^(\d+)/, String(nextYear))
-              : null;
+        // Always advance term for student regardless of pending status
+        await pool.query(
+          `UPDATE "Students"
+           SET current_semester = $1,
+               current_school_year = $2
+           WHERE id = $3`,
+          [nextSemester, nextSchoolYear, student.id],
+        );
 
-            await pool.query(
-              `UPDATE "Students"
-               SET year_level = $1,
-                   year_section = COALESCE($2, year_section),
-                   current_semester = $3,
-                   current_school_year = $4
-               WHERE id = $5`,
-              [nextYear, nextYearSection, nextSemester, nextSchoolYear, student.id],
-            );
-            promotedCount++;
-          }
+        if (studentHasPending) {
+          blockedStudentCount++;
+          continue;
+        }
+
+        if (yearLevel === 1 || yearLevel === 2) {
+          const nextYear = yearLevel + 1;
+          const nextYearSection = student.year_section
+            ? student.year_section.replace(/^(\d+)/, String(nextYear))
+            : null;
+
+          await pool.query(
+            `UPDATE "Students"
+             SET year_level = $1,
+                 year_section = COALESCE($2, year_section)
+             WHERE id = $3`,
+            [nextYear, nextYearSection, student.id],
+          );
+          promotedCount++;
         } else if (yearLevel === 3) {
+          // 3rd year stays as 3rd year after 2nd sem; moving to summer.
+          // No promotion to 4th or graduation here.
+        } else if (yearLevel === 4) {
           await pool.query(
             `UPDATE "Students"
-             SET current_semester = $1,
-                 current_school_year = $2
-             WHERE id = $3`,
-            [nextSemester, nextSchoolYear, student.id],
+             SET is_archived = TRUE,
+                 archived_at = COALESCE(archived_at, NOW()),
+                 status = 'Graduated'
+             WHERE id = $1`,
+            [student.id],
           );
-        } else {
-          await pool.query(
-            `UPDATE "Students"
-             SET current_semester = $1,
-                 current_school_year = $2
-             WHERE id = $3`,
-            [nextSemester, nextSchoolYear, student.id],
-          );
+          archivedStudentCount++;
         }
       }
-      console.log(`Archived ${archivedStudentCount} 4th year students with Graduated status`);
+      console.log(`Processed 2ND SEM archive promotion conditions`);
     } else if (normalizedSemester === "SUMMER") {
       for (const student of students) {
         let parsedYearSection = null;
@@ -3961,52 +3998,48 @@ app.post("/api/archive/violations", async (req, res) => {
 
         const studentHasPending = hasPendingOrUncleared(student.id);
 
-        if (yearLevel === 3) {
-          if (studentHasPending) {
-            blockedStudentCount++;
-            await pool.query(
-              `UPDATE "Students"
-               SET current_semester = $1,
-                   current_school_year = $2
-               WHERE id = $3`,
-              [nextSemester, nextSchoolYear, student.id],
-            );
-          } else {
-            const nextYearSection = student.year_section
-              ? student.year_section.replace(/^(\d+)/, "4")
-              : null;
+        // Advance semester/year for all students
+        await pool.query(
+          `UPDATE "Students"
+           SET current_semester = $1,
+               current_school_year = $2
+           WHERE id = $3`,
+          [nextSemester, nextSchoolYear, student.id],
+        );
 
-            await pool.query(
-              `UPDATE "Students"
-               SET year_level = 4,
-                   year_section = COALESCE($1, year_section),
-                   current_semester = $2,
-                   current_school_year = $3
-               WHERE id = $4`,
-              [nextYearSection, nextSemester, nextSchoolYear, student.id],
-            );
-            promotedCount++;
-          }
+        if (studentHasPending) {
+          blockedStudentCount++;
+          continue;
+        }
+
+        if (yearLevel === 3) {
+          const nextYearSection = student.year_section
+            ? student.year_section.replace(/^(\d+)/, "4")
+            : null;
+
+          await pool.query(
+            `UPDATE "Students"
+             SET year_level = 4,
+                 year_section = COALESCE($1, year_section)
+             WHERE id = $2`,
+            [nextYearSection, student.id],
+          );
+          promotedCount++;
         } else if (yearLevel === 4) {
           await pool.query(
             `UPDATE "Students"
-             SET current_semester = $1,
-                 current_school_year = $2
-             WHERE id = $3`,
-            [nextSemester, nextSchoolYear, student.id],
+             SET is_archived = TRUE,
+                 archived_at = COALESCE(archived_at, NOW()),
+                 status = 'Graduated'
+             WHERE id = $1`,
+            [student.id],
           );
-        } else {
-          await pool.query(
-            `UPDATE "Students"
-             SET current_semester = $1,
-                 current_school_year = $2
-             WHERE id = $3`,
-            [nextSemester, nextSchoolYear, student.id],
-          );
+          archivedStudentCount++;
         }
       }
+      console.log(`Processed SUMMER archive promotion conditions`);
     } else {
-      // If archiving 1st semester, update semester/year only
+      // If archiving 1st semester, update semester/year only for all students
       for (const student of students) {
         await pool.query(
           `UPDATE "Students"
@@ -4068,6 +4101,7 @@ app.post("/api/archive/violations", async (req, res) => {
       studentPromotedCount: promotedCount,
       studentBlockedCount: blockedStudentCount,
       totalStudentsAffected: students.length,
+      preservedYearSections,
     });
   } catch (error) {
     console.error("Archive error:", error);
@@ -4164,7 +4198,10 @@ app.get("/api/archive/unresolved/:schoolYear/:semester", async (req, res) => {
       [schoolYear, semester],
     );
 
-    const violations = result.rows || [];
+    const violations = (result.rows || []).map((row) => ({
+      ...row,
+      year_section: preservedArchiveYearSectionByViolationId.get(row.id) || row.year_section || row.student_year_section || null,
+    }));
 
     return res.status(200).json({
       status: "ok",
@@ -4452,7 +4489,10 @@ app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
       [schoolYear, semester],
     );
 
-    const violations = result.rows || [];
+    const violations = (result.rows || []).map((row) => ({
+      ...row,
+      year_section: preservedArchiveYearSectionByViolationId.get(row.id) || row.year_section || row.student_year_section || null,
+    }));
 
     return res.status(200).json({
       status: "ok",
@@ -4701,6 +4741,17 @@ app.put("/api/archive/violations/:id", async (req, res) => {
       [id],
     );
     const wasUnresolved = existingRecord.rows?.[0]?.is_unresolved;
+    const studentId = existingRecord.rows?.[0]?.student_id;
+
+    // Preserve the student year section before any possible promotion update
+    let preservedYearSection = null;
+    if (studentId) {
+      const studentSnapshot = await pool.query(
+        `SELECT year_section FROM "Students" WHERE id = $1 LIMIT 1`,
+        [studentId],
+      );
+      preservedYearSection = studentSnapshot.rows?.[0]?.year_section || null;
+    }
 
     // Update archived violation in the archive table
     const result = await pool.query(
@@ -4741,12 +4792,18 @@ app.put("/api/archive/violations/:id", async (req, res) => {
     // Only trigger promotion logic when the record is explicitly marked as resolved from unresolved.
     let promotionResult = null;
     if (wasUnresolved && typeof isUnresolved === 'boolean' && isUnresolved === false) {
-      promotionResult = await checkAndAutoPromoteStudent(pool, updatedViolation.student_id);
+      promotionResult = await checkAndAutoPromoteStudent(
+        pool,
+        updatedViolation.student_id,
+        updatedViolation.semester,
+        updatedViolation.school_year,
+      );
     }
 
     const response = {
       status: "ok",
       violation: updatedViolation,
+      preservedYearSection,
     };
 
     if (promotionResult) {

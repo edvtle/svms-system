@@ -77,6 +77,7 @@ const StudentViolation = () => {
   const [records, setRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [signatureSuccessModal, setSignatureSuccessModal] = useState(false);
+  const [isSignatureSaving, setIsSignatureSaving] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState("excel");
   const [isExporting, setIsExporting] = useState(false);
@@ -85,6 +86,8 @@ const StudentViolation = () => {
   const [currentSchoolYear, setCurrentSchoolYear] = useState("");
   const [archiveSuccessMessage, setArchiveSuccessMessage] = useState("");
   const [showEditSemesterModal, setShowEditSemesterModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorModalMessage, setErrorModalMessage] = useState("");
 
   const [searchTerm, setSearchTerm] = useState("");
   const [sortOrder, setSortOrder] = useState("A-Z");
@@ -185,10 +188,15 @@ const StudentViolation = () => {
       }
       mergeRecord(result.record);
     } catch (error) {
-      alert(error.message || "Unable to clear record.");
+      const message = error?.message || "Unable to clear record.";
+      if (message.toLowerCase().includes("signature is required")) {
+        setErrorModalMessage(message);
+        setShowErrorModal(true);
+      } else {
+        alert(message);
+      }
     }
   };
-
   const openConfirmModal = (type, row) => {
     setConfirmAction({ type, row });
   };
@@ -251,8 +259,12 @@ const StudentViolation = () => {
     
     // Trigger events to notify Archives tab
     window.localStorage.setItem("archiveRefresh", Date.now().toString());
-    window.dispatchEvent(new CustomEvent("archiveCompleted", { detail: archiveData }));
-    
+    window.dispatchEvent(new CustomEvent("archiveCompleted", { detail: {
+      ...archiveData,
+      preservedYearSections: archiveData.preservedYearSections || {},
+      source: "archive", // used by Archives tab to route properly
+    }}));
+
     // Small delay to ensure database is fully updated, then refetch to confirm clearance
     setTimeout(() => {
       fetchStudentViolations({ silent: true }).catch(err => {
@@ -360,6 +372,9 @@ const StudentViolation = () => {
   const handleSignatureSave = async (signatureImage) => {
     if (!signatureTarget?.id) return;
 
+    setIsSignatureSaving(true);
+    setShowSignatureModal(false); // close right away for quick feedback
+
     try {
       const response = await fetch(
         `/api/student-violations/${signatureTarget.id}/signature`,
@@ -382,12 +397,13 @@ const StudentViolation = () => {
         prev ? { ...prev, signature_image: signatureImage } : prev,
       );
       setSignatureTarget(null);
-      setShowSignatureModal(false);
       setSignatureSuccessModal(true);
     } catch (error) {
       setSignatureTarget(null);
-      setShowSignatureModal(false);
-      alert(error.message || "Unable to save signature.");
+      setErrorModalMessage(error.message || "Unable to save signature.");
+      setShowErrorModal(true);
+    } finally {
+      setIsSignatureSaving(false);
     }
   };
 
@@ -1476,6 +1492,28 @@ const StudentViolation = () => {
         isUnclearing={isEditUnclearing}
         onUpdateSignature={handleEditSignatureUpdate}
       />
+
+      <Modal
+        isOpen={showErrorModal}
+        onClose={() => setShowErrorModal(false)}
+        title={<span className="font-black font-inter">Signature Required</span>}
+        size="md"
+        showCloseButton={true}
+      >
+        <div className="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3 mb-4">
+          <p className="text-sm font-medium text-red-200">{errorModalMessage}</p>
+        </div>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => setShowErrorModal(false)}
+            className="px-6 py-2.5"
+          >
+            OK
+          </Button>
+        </ModalFooter>
+      </Modal>
 
       <Modal
         isOpen={Boolean(confirmAction)}
