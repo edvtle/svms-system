@@ -300,6 +300,8 @@ const Navbar = () => {
                             } else {
                               navigate('/student/violations')
                             }
+                          } else if (metadataType === 'admin_alert') {
+                            navigate(`/student/notifications?highlight=${note.id}`)
                           } else if (
                             metadataType === 'violation_added' ||
                             metadataType === 'violation_updated' ||
@@ -310,6 +312,8 @@ const Navbar = () => {
                             } else {
                               navigate('/student/offenses')
                             }
+                          } else {
+                            navigate(`/student/notifications?highlight=${note.id}`)
                           }
                           setShowActions(false)
                         }}

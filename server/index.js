@@ -1417,14 +1417,20 @@ app.put("/api/students/:id", async (req, res) => {
     }
 
     if (existingYearLevel == null && student?.year_section) {
-      const sectionYearMatch = String(student.year_section || "").trim().match(/^\s*(\d+)/);
+      const sectionYearMatch = String(student.year_section || "")
+        .trim()
+        .match(/^\s*(\d+)/);
       if (sectionYearMatch) {
         existingYearLevel = Number(sectionYearMatch[1]);
       }
     }
 
     // If archiving a 4th year student, automatically set status to "Graduated" (only if no specific reason provided)
-    if (isArchived === true && existingYearLevel === 4 && !archivedReason?.trim()) {
+    if (
+      isArchived === true &&
+      existingYearLevel === 4 &&
+      !archivedReason?.trim()
+    ) {
       normalizedStatus = "Graduated";
     }
 
@@ -1434,7 +1440,8 @@ app.put("/api/students/:id", async (req, res) => {
     if (isArchived === true && archivedReason && archivedReason.trim()) {
       normalizedArchivedReason = archivedReason.trim();
       // Store the current status as original status before archiving
-      normalizedOriginalStatus = student?.status || normalizedStatus || "Regular";
+      normalizedOriginalStatus =
+        student?.status || normalizedStatus || "Regular";
       // Keep the status unchanged - store reason separately
       // The reason will be used for display in Archives page
     }
@@ -1644,6 +1651,151 @@ app.delete("/api/students/:id", async (req, res) => {
     return res.status(503).json({
       status: "error",
       message: `Unable to delete student (${error.message}).`,
+    });
+  }
+});
+
+app.post("/api/students/alerts", async (req, res) => {
+  const { studentIds, alertType, message } = req.body ?? {};
+
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    return res.status(400).json({
+      status: "error",
+      message: "Please select at least one student first.",
+    });
+  }
+
+  const normalizedAlertType = String(alertType || "").trim();
+  const normalizedMessage = String(message || "").trim();
+
+  if (!normalizedAlertType) {
+    return res.status(400).json({
+      status: "error",
+      message: "Alert type is required.",
+    });
+  }
+
+  if (!normalizedMessage) {
+    return res.status(400).json({
+      status: "error",
+      message: "Alert message is required.",
+    });
+  }
+
+  if (!hasDbConfig()) {
+    return res.status(500).json({
+      status: "error",
+      message: "Database environment variables are missing.",
+      missing: getMissingDbVars(),
+    });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+    const normalizedStudentIds = Array.from(
+      new Set(
+        studentIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    );
+
+    if (normalizedStudentIds.length === 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "Please select at least one student first.",
+      });
+    }
+
+    const insertedNotifications = [];
+    const skippedStudents = [];
+
+    for (const studentId of normalizedStudentIds) {
+      const studentLookup = await pool.query(
+        `
+        SELECT id, user_id, school_id, full_name, program, year_section, violation_count
+        FROM "Students"
+        WHERE id = $1
+        LIMIT 1
+        `,
+        [studentId],
+      );
+
+      const student = studentLookup.rows?.[0];
+      if (!student?.user_id) {
+        skippedStudents.push({
+          studentId,
+          reason: "Student account not found.",
+        });
+        continue;
+      }
+
+      const activeViolationCount = Number(student.violation_count || 0);
+      const metadata = {
+        type: "admin_alert",
+        alertType: normalizedAlertType,
+        adminMessage: normalizedMessage,
+        studentId: Number(student.id),
+        schoolId: student.school_id || null,
+        studentName: student.full_name || null,
+        program: student.program || null,
+        yearSection: student.year_section || null,
+        activeViolationCount,
+        sentAt: new Date().toISOString(),
+      };
+
+      const insertResult = await pool.query(
+        `
+        INSERT INTO notifications (student_user_id, title, description, metadata)
+        VALUES ($1, $2, $3, $4::jsonb)
+        RETURNING id, created_at
+        `,
+        [
+          Number(student.user_id),
+          `${normalizedAlertType} from Admin`,
+          normalizedMessage,
+          JSON.stringify(metadata),
+        ],
+      );
+
+      insertedNotifications.push({
+        notificationId: Number(insertResult.rows?.[0]?.id),
+        createdAt: insertResult.rows?.[0]?.created_at || null,
+        studentId: Number(student.id),
+      });
+    }
+
+    if (insertedNotifications.length === 0) {
+      return res.status(404).json({
+        status: "error",
+        message: "No notifications were sent. Please verify selected students.",
+        skippedStudents,
+      });
+    }
+
+    await logAuditEvent(req, {
+      action: "SEND_STUDENT_ALERT",
+      targetType: "student_notification",
+      details: `Sent ${normalizedAlertType} alert to ${insertedNotifications.length} student(s).`,
+      metadata: {
+        alertType: normalizedAlertType,
+        messageLength: normalizedMessage.length,
+        recipients: insertedNotifications.map((entry) => entry.studentId),
+        skippedStudents,
+      },
+    });
+
+    return res.status(201).json({
+      status: "ok",
+      sentCount: insertedNotifications.length,
+      notifications: insertedNotifications,
+      skippedStudents,
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to send alerts (${error.message}).`,
     });
   }
 });
@@ -2162,10 +2314,14 @@ app.put("/api/student-violations/:id/clear", async (req, res) => {
         .json({ status: "error", message: "Record not found." });
     }
 
-    if (!existingRecord.signature_image || String(existingRecord.signature_image).trim() === "") {
+    if (
+      !existingRecord.signature_image ||
+      String(existingRecord.signature_image).trim() === ""
+    ) {
       return res.status(400).json({
         status: "error",
-        message: "Signature is required before marking this violation as cleared.",
+        message:
+          "Signature is required before marking this violation as cleared.",
       });
     }
 
@@ -2225,7 +2381,11 @@ app.put("/api/student-violations/:id/clear", async (req, res) => {
 
     return res
       .status(200)
-      .json({ status: "ok", record: fullRecord || updated, promotion: promotionResult });
+      .json({
+        status: "ok",
+        record: fullRecord || updated,
+        promotion: promotionResult,
+      });
   } catch (error) {
     return res.status(503).json({
       status: "error",
@@ -3290,7 +3450,9 @@ app.get("/api/archive/current-settings", async (req, res) => {
 });
 
 function computeNextSemesterYear(semester, schoolYear) {
-  const normalizedSemester = String(semester || "1ST SEM").trim().toUpperCase();
+  const normalizedSemester = String(semester || "1ST SEM")
+    .trim()
+    .toUpperCase();
   let nextSemester = "2ND SEM";
   let nextSchoolYear = String(schoolYear || "2025-2026").trim();
 
@@ -3313,7 +3475,12 @@ function computeNextSemesterYear(semester, schoolYear) {
   return { nextSemester, nextSchoolYear };
 }
 
-async function checkAndAutoPromoteStudent(pool, studentId, violationSemester = null, violationSchoolYear = null) {
+async function checkAndAutoPromoteStudent(
+  pool,
+  studentId,
+  violationSemester = null,
+  violationSchoolYear = null,
+) {
   if (!studentId) {
     return { isEligible: false, reason: "missing_student_id" };
   }
@@ -3332,7 +3499,9 @@ async function checkAndAutoPromoteStudent(pool, studentId, violationSemester = n
     [studentId],
   );
 
-  const unresolvedArchiveCount = Number(unresolvedArchiveResult.rows?.[0]?.count || 0);
+  const unresolvedArchiveCount = Number(
+    unresolvedArchiveResult.rows?.[0]?.count || 0,
+  );
   const totalUnresolved = unresolvedActiveCount + unresolvedArchiveCount;
 
   if (totalUnresolved > 0) {
@@ -3361,13 +3530,18 @@ async function checkAndAutoPromoteStudent(pool, studentId, violationSemester = n
 
   // Prefer year_section as the strongest source to avoid mismatches where year_level is stale
   if (student.year_section) {
-    const match = String(student.year_section || "").trim().match(/^(\d+)/);
+    const match = String(student.year_section || "")
+      .trim()
+      .match(/^(\d+)/);
     if (match) {
       yearLevel = Number(match[1]);
     }
   }
 
-  if (!Number.isFinite(yearLevel) && Number.isFinite(Number(student.year_level))) {
+  if (
+    !Number.isFinite(yearLevel) &&
+    Number.isFinite(Number(student.year_level))
+  ) {
     yearLevel = Number(student.year_level);
   }
 
@@ -3377,13 +3551,24 @@ async function checkAndAutoPromoteStudent(pool, studentId, violationSemester = n
 
   const systemRow = systemSettings.rows?.[0] || {};
   const sourceSemester = String(
-    violationSemester || student.current_semester || systemRow.current_semester || "1ST SEM"
-  ).trim().toUpperCase();
+    violationSemester ||
+      student.current_semester ||
+      systemRow.current_semester ||
+      "1ST SEM",
+  )
+    .trim()
+    .toUpperCase();
   const sourceSchoolYear = String(
-    violationSchoolYear || student.current_school_year || systemRow.current_school_year || "2025-2026"
+    violationSchoolYear ||
+      student.current_school_year ||
+      systemRow.current_school_year ||
+      "2025-2026",
   ).trim();
 
-  const { nextSemester, nextSchoolYear } = computeNextSemesterYear(sourceSemester, sourceSchoolYear);
+  const { nextSemester, nextSchoolYear } = computeNextSemesterYear(
+    sourceSemester,
+    sourceSchoolYear,
+  );
 
   let promoted = false;
   let graduated = false;
@@ -3485,7 +3670,6 @@ async function checkAndAutoPromoteStudent(pool, studentId, violationSemester = n
       action = "term_advanced";
     }
   }
-
 
   return {
     isEligible: true,
@@ -3599,7 +3783,9 @@ app.get("/api/archive/check-signatures", async (req, res) => {
     );
 
     const violations = violationsResult.rows || [];
-    const violationsWithoutSignature = violations.filter(v => !v.signature_image || v.signature_image.trim() === '');
+    const violationsWithoutSignature = violations.filter(
+      (v) => !v.signature_image || v.signature_image.trim() === "",
+    );
 
     return res.status(200).json({
       status: "ok",
@@ -3847,7 +4033,9 @@ app.post("/api/archive/violations", async (req, res) => {
       pendingCount = pendingViolations.length;
       clearedCount = clearedViolations.length;
       archivedCount = violations.length;
-      console.log(`Inserted ${archivedCount} violations into archive table (${pendingCount} unresolved, ${clearedCount} cleared)`);
+      console.log(
+        `Inserted ${archivedCount} violations into archive table (${pendingCount} unresolved, ${clearedCount} cleared)`,
+      );
 
       // STEP 3: Delete violations from active table
       await pool.query(
@@ -3918,7 +4106,9 @@ app.post("/api/archive/violations", async (req, res) => {
       for (const student of students) {
         let parsedYearSection = null;
         if (student.year_section) {
-          const match = String(student.year_section).trim().match(/^(\d+)/);
+          const match = String(student.year_section)
+            .trim()
+            .match(/^(\d+)/);
           if (match) {
             parsedYearSection = Number(match[1]);
           }
@@ -3982,7 +4172,9 @@ app.post("/api/archive/violations", async (req, res) => {
       for (const student of students) {
         let parsedYearSection = null;
         if (student.year_section) {
-          const match = String(student.year_section).trim().match(/^(\d+)/);
+          const match = String(student.year_section)
+            .trim()
+            .match(/^(\d+)/);
           if (match) {
             parsedYearSection = Number(match[1]);
           }
@@ -4129,10 +4321,12 @@ app.get("/api/archive/unresolved-school-years", async (req, res) => {
       `SELECT DISTINCT school_year
        FROM student_violation_archives
        WHERE is_unresolved = TRUE
-       ORDER BY school_year DESC`
+       ORDER BY school_year DESC`,
     );
 
-    const schoolYears = (result.rows || []).map((row) => row.school_year).filter(Boolean);
+    const schoolYears = (result.rows || [])
+      .map((row) => row.school_year)
+      .filter(Boolean);
 
     return res.status(200).json({
       status: "ok",
@@ -4200,7 +4394,11 @@ app.get("/api/archive/unresolved/:schoolYear/:semester", async (req, res) => {
 
     const violations = (result.rows || []).map((row) => ({
       ...row,
-      year_section: preservedArchiveYearSectionByViolationId.get(row.id) || row.year_section || row.student_year_section || null,
+      year_section:
+        preservedArchiveYearSectionByViolationId.get(row.id) ||
+        row.year_section ||
+        row.student_year_section ||
+        null,
     }));
 
     return res.status(200).json({
@@ -4314,7 +4512,7 @@ app.delete("/api/archive/school-years/:schoolYear", async (req, res) => {
     // Check if school year exists and has violations
     const checkResult = await pool.query(
       `SELECT COUNT(*) as count FROM student_violation_archives WHERE school_year = $1`,
-      [schoolYear]
+      [schoolYear],
     );
 
     const violationCount = parseInt(checkResult.rows[0].count);
@@ -4329,7 +4527,7 @@ app.delete("/api/archive/school-years/:schoolYear", async (req, res) => {
     // Delete all archived violations for this school year
     await pool.query(
       `DELETE FROM student_violation_archives WHERE school_year = $1`,
-      [schoolYear]
+      [schoolYear],
     );
 
     // Log the audit event
@@ -4386,7 +4584,7 @@ app.put("/api/archive/school-years/:oldSchoolYear", async (req, res) => {
     // Check if old school year exists
     const checkOldResult = await pool.query(
       `SELECT COUNT(*) as count FROM student_violation_archives WHERE school_year = $1`,
-      [oldSchoolYear]
+      [oldSchoolYear],
     );
 
     if (parseInt(checkOldResult.rows[0].count) === 0) {
@@ -4399,7 +4597,7 @@ app.put("/api/archive/school-years/:oldSchoolYear", async (req, res) => {
     // Check if new school year already exists
     const checkNewResult = await pool.query(
       `SELECT COUNT(*) as count FROM student_violation_archives WHERE school_year = $1`,
-      [newSchoolYear]
+      [newSchoolYear],
     );
 
     if (parseInt(checkNewResult.rows[0].count) > 0) {
@@ -4412,7 +4610,7 @@ app.put("/api/archive/school-years/:oldSchoolYear", async (req, res) => {
     // Update all archived violations for this school year
     const updateResult = await pool.query(
       `UPDATE student_violation_archives SET school_year = $1 WHERE school_year = $2`,
-      [newSchoolYear, oldSchoolYear]
+      [newSchoolYear, oldSchoolYear],
     );
 
     // Log the audit event
@@ -4491,7 +4689,11 @@ app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
 
     const violations = (result.rows || []).map((row) => ({
       ...row,
-      year_section: preservedArchiveYearSectionByViolationId.get(row.id) || row.year_section || row.student_year_section || null,
+      year_section:
+        preservedArchiveYearSectionByViolationId.get(row.id) ||
+        row.year_section ||
+        row.student_year_section ||
+        null,
     }));
 
     return res.status(200).json({
@@ -4767,7 +4969,7 @@ app.put("/api/archive/violations/:id", async (req, res) => {
       [
         String(remarks || "").trim() || null,
         String(reportedBy || "").trim() || null,
-        typeof isUnresolved === 'boolean' ? isUnresolved : null,
+        typeof isUnresolved === "boolean" ? isUnresolved : null,
         id,
       ],
     );
@@ -4791,7 +4993,11 @@ app.put("/api/archive/violations/:id", async (req, res) => {
 
     // Only trigger promotion logic when the record is explicitly marked as resolved from unresolved.
     let promotionResult = null;
-    if (wasUnresolved && typeof isUnresolved === 'boolean' && isUnresolved === false) {
+    if (
+      wasUnresolved &&
+      typeof isUnresolved === "boolean" &&
+      isUnresolved === false
+    ) {
       promotionResult = await checkAndAutoPromoteStudent(
         pool,
         updatedViolation.student_id,

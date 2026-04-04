@@ -32,6 +32,14 @@ import { fetchMultiple } from "@/lib/fetchHelper";
 const EXPORT_HEADER_IMAGE_PATH = "/plpasig_header.png";
 const EXCEL_HEADER_IMAGE_WIDTH_PX = 560;
 const EXCEL_HEADER_IMAGE_HEIGHT_PX = 82;
+const ALERT_TYPE_OPTIONS = [
+  "Warning",
+  "Reminder",
+  "Violation",
+  "Notice",
+  "At-Risk Alert",
+  "Custom",
+];
 
 const blobToDataUrl = (blob) =>
   new Promise((resolve, reject) => {
@@ -56,6 +64,7 @@ const UserManagement = () => {
   const [selectedProgram, setSelectedProgram] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedSection, setSelectedSection] = useState("");
+  const [selectedViolationFilter, setSelectedViolationFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState("A-Z");
 
@@ -89,6 +98,18 @@ const UserManagement = () => {
   const [archiveAlertModal, setArchiveAlertModal] = useState({
     isOpen: false,
     type: "info",
+    title: "",
+    message: "",
+  });
+  const [showSendAlertModal, setShowSendAlertModal] = useState(false);
+  const [isSendingAlert, setIsSendingAlert] = useState(false);
+  const [alertType, setAlertType] = useState("");
+  const [customAlertType, setCustomAlertType] = useState("");
+  const [alertMessage, setAlertMessage] = useState("");
+  const [alertValidationMessage, setAlertValidationMessage] = useState("");
+  const [alertResultModal, setAlertResultModal] = useState({
+    isOpen: false,
+    type: "success",
     title: "",
     message: "",
   });
@@ -595,6 +616,111 @@ const UserManagement = () => {
     }
   };
 
+  const selectedStudentsForAlert = useMemo(
+    () => studentData.filter((student) => selectedUserIds.has(student.id)),
+    [studentData, selectedUserIds],
+  );
+
+  const resetAlertForm = () => {
+    setAlertType("");
+    setCustomAlertType("");
+    setAlertMessage("");
+    setAlertValidationMessage("");
+  };
+
+  const handleOpenAlertModal = () => {
+    if (selectedUserIds.size === 0) {
+      showArchiveAlert(
+        "warning",
+        "No Students Selected",
+        "Please select at least one student first.",
+      );
+      return;
+    }
+
+    setAlertValidationMessage("");
+    setShowSendAlertModal(true);
+  };
+
+  const handleSendAlert = async () => {
+    if (selectedStudentsForAlert.length === 0) {
+      setAlertValidationMessage("Please select at least one student first.");
+      return;
+    }
+
+    if (!String(alertType || "").trim()) {
+      setAlertValidationMessage("Please select an alert type.");
+      return;
+    }
+
+    if (
+      String(alertType || "").trim() === "Custom" &&
+      !String(customAlertType || "").trim()
+    ) {
+      setAlertValidationMessage("Please enter a custom alert type.");
+      return;
+    }
+
+    if (!String(alertMessage || "").trim()) {
+      setAlertValidationMessage("Please enter an alert message.");
+      return;
+    }
+
+    const resolvedAlertType =
+      String(alertType || "").trim() === "Custom"
+        ? String(customAlertType || "").trim()
+        : String(alertType || "").trim();
+
+    setIsSendingAlert(true);
+    setAlertValidationMessage("");
+
+    try {
+      const response = await fetch("/api/students/alerts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+        body: JSON.stringify({
+          studentIds: selectedStudentsForAlert.map((student) => student.id),
+          alertType: resolvedAlertType,
+          message: String(alertMessage || "").trim(),
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.message || "Unable to send alert.");
+      }
+
+      const sentCount = Number(data?.sentCount || 0);
+      const skippedCount = Array.isArray(data?.skippedStudents)
+        ? data.skippedStudents.length
+        : 0;
+
+      setShowSendAlertModal(false);
+      resetAlertForm();
+      setAlertResultModal({
+        isOpen: true,
+        type: "success",
+        title: "Alert Sent",
+        message:
+          skippedCount > 0
+            ? `Alert sent to ${sentCount} student(s). ${skippedCount} student(s) were skipped.`
+            : "Alert successfully sent to selected student(s).",
+      });
+    } catch (error) {
+      setAlertResultModal({
+        isOpen: true,
+        type: "error",
+        title: "Send Failed",
+        message: error?.message || "Unable to send alert.",
+      });
+    } finally {
+      setIsSendingAlert(false);
+    }
+  };
+
   // Filters
   const filteredStudents = useMemo(() => {
     const toText = (value) => String(value || "").toLowerCase();
@@ -636,6 +762,15 @@ const UserManagement = () => {
       if (selectedSection) {
         const studentSection = parsedYearSection.section;
         if (studentSection !== selectedSection.toLowerCase()) return false;
+      }
+
+      // Violation count filter
+      if (selectedViolationFilter === "with") {
+        if (Number(student.violationCount || 0) <= 0) return false;
+      }
+
+      if (selectedViolationFilter === "none") {
+        if (Number(student.violationCount || 0) > 0) return false;
       }
 
       // Search query
@@ -681,6 +816,7 @@ const UserManagement = () => {
     selectedProgram,
     selectedYear,
     selectedSection,
+    selectedViolationFilter,
     searchQuery,
     sortOrder,
   ]);
@@ -1156,6 +1292,7 @@ const UserManagement = () => {
     setSelectedProgram("");
     setSelectedYear("");
     setSelectedSection("");
+    setSelectedViolationFilter("");
     setSearchQuery("");
     setSortOrder("A-Z");
     setActiveTab("regular");
@@ -1325,9 +1462,39 @@ const UserManagement = () => {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Violation Count Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="min-w-[160px] justify-between"
+              >
+                {selectedViolationFilter === "with"
+                  ? "With Violations"
+                  : selectedViolationFilter === "none"
+                    ? "No Violations"
+                    : "All Violation Count"}
+                <ChevronDown className="ml-2 w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setSelectedViolationFilter("")}>
+                All Violation Count
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSelectedViolationFilter("with")}>
+                With Violations
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSelectedViolationFilter("none")}>
+                No Violations
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {(selectedProgram ||
             selectedYear ||
             selectedSection ||
+            selectedViolationFilter ||
             sortOrder !== "A-Z" ||
             searchQuery ||
             activeTab !== "regular") && (
@@ -1396,6 +1563,16 @@ const UserManagement = () => {
                 Clear All
               </Button>
             )}
+            <Button
+              variant="secondary"
+              size="sm"
+              className="gap-2 bg-orange-600/30 hover:bg-orange-600/50 border-orange-600/50 border"
+              onClick={handleOpenAlertModal}
+              disabled={selectedUserIds.size === 0 || isLoading}
+            >
+              <AlertCircle className="w-4 h-4" />
+              Alert {selectedUserIds.size > 0 && `(${selectedUserIds.size})`}
+            </Button>
             <Button
               variant="secondary"
               size="sm"
@@ -1719,6 +1896,150 @@ const UserManagement = () => {
         </ModalFooter>
       </Modal>
 
+      <Modal
+        isOpen={showSendAlertModal}
+        onClose={() => {
+          if (!isSendingAlert) {
+            setShowSendAlertModal(false);
+            setAlertValidationMessage("");
+          }
+        }}
+        title={<span className="font-black font-inter">Send Alert</span>}
+        size="lg"
+        showCloseButton={!isSendingAlert}
+      >
+        <div className="rounded-lg border border-orange-400/25 bg-orange-500/10 px-4 py-3 mb-4">
+          <p className="text-sm text-orange-200 font-medium mb-1">Alert Recipients</p>
+          <p className="text-xs text-orange-100 leading-relaxed">
+            {selectedStudentsForAlert.length} student(s) will receive this alert notification.
+          </p>
+        </div>
+
+        <div className="mb-4">
+          <p className="text-sm text-gray-300 font-semibold mb-2">Selected Students</p>
+          <div className="max-h-44 overflow-y-auto rounded-lg border border-white/20 bg-white/5">
+            <table className="w-full text-xs">
+              <thead className="bg-white/10 text-gray-200">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold">Student Name</th>
+                  <th className="px-3 py-2 text-left font-semibold">School ID</th>
+                  <th className="px-3 py-2 text-left font-semibold">Program</th>
+                  <th className="px-3 py-2 text-left font-semibold">Year/Section</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedStudentsForAlert.map((student) => (
+                  <tr key={student.id} className="border-t border-white/10 text-gray-300">
+                    <td className="px-3 py-2">{student.studentName}</td>
+                    <td className="px-3 py-2">{student.schoolId}</td>
+                    <td className="px-3 py-2">{student.program}</td>
+                    <td className="px-3 py-2">{student.yearSection}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-sm text-gray-300 font-semibold mb-2">Alert Type</label>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={isSendingAlert}
+                className="w-full justify-between bg-white/5 border-white/20 text-white hover:bg-white/10 h-11"
+              >
+                {alertType || "Select alert type"}
+                <ChevronDown className="w-4 h-4 text-cyan-300" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-[#1f232b] border border-white/15 text-white">
+              <DropdownMenuItem
+                onClick={() => {
+                  setAlertType("");
+                  setCustomAlertType("");
+                }}
+                className="text-gray-200 data-[highlighted]:bg-white/10 data-[highlighted]:text-white"
+              >
+                Select alert type
+              </DropdownMenuItem>
+              {ALERT_TYPE_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option}
+                  onClick={() => {
+                    setAlertType(option);
+                    if (option !== "Custom") {
+                      setCustomAlertType("");
+                    }
+                  }}
+                  className="text-gray-200 data-[highlighted]:bg-white/10 data-[highlighted]:text-white"
+                >
+                  {option}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {alertType === "Custom" && (
+          <div className="mb-4">
+            <label className="block text-sm text-gray-300 font-semibold mb-2">Custom Alert Type</label>
+            <input
+              type="text"
+              value={customAlertType}
+              onChange={(event) => setCustomAlertType(event.target.value)}
+              disabled={isSendingAlert}
+              placeholder="Enter custom alert type"
+              className="w-full backdrop-blur-md border border-white/20 rounded-lg px-4 py-3 text-sm text-white bg-white/5 placeholder-gray-400 focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all disabled:opacity-50"
+            />
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm text-gray-300 font-semibold mb-2">Message / Description</label>
+          <textarea
+            value={alertMessage}
+            onChange={(event) => setAlertMessage(event.target.value)}
+            disabled={isSendingAlert}
+            rows={5}
+            placeholder="Type the message that will be sent to selected student(s)."
+            className="w-full resize-none backdrop-blur-md border border-white/20 rounded-lg px-4 py-3 text-sm text-white bg-white/5 placeholder-gray-400 focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all disabled:opacity-50"
+          />
+        </div>
+
+        {alertValidationMessage && (
+          <div className="mt-4 rounded-lg border border-red-400/25 bg-red-500/10 px-4 py-3">
+            <p className="text-sm font-medium text-red-300">{alertValidationMessage}</p>
+          </div>
+        )}
+
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setShowSendAlertModal(false);
+              setAlertValidationMessage("");
+            }}
+            disabled={isSendingAlert}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleSendAlert}
+            disabled={isSendingAlert}
+            className="px-6 py-2.5"
+          >
+            {isSendingAlert ? "Sending..." : "Send Alert"}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
       {/* Archive Selected Users Modal */}
       <Modal
         isOpen={showArchiveUsersModal}
@@ -1850,6 +2171,61 @@ const UserManagement = () => {
             variant="primary"
             onClick={() =>
               setArchiveAlertModal((prev) => ({
+                ...prev,
+                isOpen: false,
+              }))
+            }
+            className="px-6 py-2.5"
+          >
+            OK
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        isOpen={alertResultModal.isOpen}
+        onClose={() =>
+          setAlertResultModal((prev) => ({
+            ...prev,
+            isOpen: false,
+          }))
+        }
+        title={
+          <span className="font-black font-inter flex items-center gap-2">
+            {alertResultModal.type === "success" ? (
+              <CheckCircle className="w-5 h-5 text-green-400" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-red-400" />
+            )}
+            {alertResultModal.title || "Alert"}
+          </span>
+        }
+        size="sm"
+        showCloseButton
+      >
+        <div
+          className={`rounded-lg px-4 py-3 mb-4 border ${
+            alertResultModal.type === "success"
+              ? "border-green-400/25 bg-green-500/10"
+              : "border-red-400/25 bg-red-500/10"
+          }`}
+        >
+          <p
+            className={`text-sm font-medium ${
+              alertResultModal.type === "success"
+                ? "text-green-300"
+                : "text-red-300"
+            }`}
+          >
+            {alertResultModal.message}
+          </p>
+        </div>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() =>
+              setAlertResultModal((prev) => ({
                 ...prev,
                 isOpen: false,
               }))
