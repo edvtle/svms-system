@@ -15,6 +15,8 @@ import Modal, { ModalFooter } from "@/components/ui/Modal";
 import EditArchiveModal from "@/components/modals/EditArchiveModal";
 import { getAuditHeaders } from "@/lib/auditHeaders";
 
+const EXPORT_HEADER_IMAGE_PATH = '/plpasig_header.png';
+
 const semesterTabs = [
   { key: "1ST SEM", label: "1st Semester" },
   { key: "2ND SEM", label: "2nd Semester" },
@@ -37,6 +39,96 @@ const formatDate = (dateString) => {
   } catch (err) {
     console.warn("Date format error:", dateString, err);
     return "-";
+  }
+};
+
+// Helper functions for export functionality
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const getDataUrlDimensions = (dataUrl) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+    };
+    img.onerror = () => reject(new Error('Unable to load image dimensions.'));
+    img.src = dataUrl;
+  });
+
+// Convert signature image to base64 data URL for exports
+const getSignatureImageData = async (signatureSrc) => {
+  if (!signatureSrc) return null;
+
+  try {
+    // If it's already a data URL, return it
+    if (signatureSrc.startsWith('data:')) {
+      return signatureSrc;
+    }
+
+    // If it's a regular URL, fetch it
+    const response = await fetch(signatureSrc);
+    if (!response.ok) return null;
+
+    const blob = await response.blob();
+    return await blobToDataUrl(blob);
+  } catch (error) {
+    console.warn('Failed to load signature image:', error);
+    return null;
+  }
+};
+
+// Resolve header image for exports
+const resolveHeaderImage = async () => {
+  try {
+    const response = await fetch(EXPORT_HEADER_IMAGE_PATH);
+    if (!response.ok) {
+      throw new Error(`Header image not found: ${EXPORT_HEADER_IMAGE_PATH}`);
+    }
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    const dimensions = await getDataUrlDimensions(dataUrl);
+    return { dataUrl, dimensions };
+  } catch (error) {
+    console.warn('Failed to load header image:', error);
+    return { dataUrl: null, dimensions: null };
+  }
+};
+
+const formatExportGeneratedDate = (date) => {
+  const parsedDate = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return '-';
+  }
+  const month = parsedDate.toLocaleString(undefined, { month: 'long' }).toUpperCase();
+  const day = parsedDate.getDate();
+  const year = parsedDate.getFullYear();
+  const time = parsedDate.toLocaleString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  return `${month} ${day}, ${year}, ${time}`;
+};
+
+const formatDateForFileName = (dateString) => {
+  if (!dateString) return 'Unknown_Date';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Unknown_Date';
+    
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  } catch (err) {
+    return 'Unknown_Date';
   }
 };
 
@@ -98,6 +190,12 @@ const Archives = () => {
   const [schoolYearToRename, setSchoolYearToRename] = useState(null);
   const [newSchoolYearName, setNewSchoolYearName] = useState("");
   const [isSchoolYearActionLoading, setIsSchoolYearActionLoading] = useState(false);
+
+  // Download/Export states
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState('excel');
+  const [downloadAllModalOpen, setDownloadAllModalOpen] = useState(false);
+  const [downloadAllFormat, setDownloadAllFormat] = useState('excel');
 
   // Load archived users on mount
   useEffect(() => {
@@ -658,6 +756,7 @@ const Archives = () => {
               <div className="text-xs text-gray-400">{user.school_id}</div>
             </div>
           ),
+          school_id: user.school_id || user.schoolId || '',
           email: user.email,
           program: user.program,
           yearSection: user.year_section,
@@ -737,6 +836,7 @@ const Archives = () => {
               <div className="text-xs text-gray-400">{user.school_id}</div>
             </div>
           ),
+          school_id: user.school_id || user.schoolId || '',
           email: user.email,
           program: user.program,
           yearSection: user.year_section,
@@ -1459,6 +1559,577 @@ const Archives = () => {
     }
   };
 
+  // Export functionality
+  const formatDownloadFileName = (folderType, schoolYear = '', semester = '', isAllRecords = false) => {
+    const sanitize = (text) =>
+      String(text || '')
+        .replace(/[\\/:*?"<>|]/g, '')
+        .trim();
+
+    const dateSegment = formatDateForFileName(new Date());
+    const ext = 'xlsx'; // Default to excel for now, will be overridden by format param
+
+    if (folderType === 'users') {
+      return `Archived_Users_${dateSegment}.${ext}`;
+    } else if (folderType === 'unresolved') {
+      const yearSegment = schoolYear ? `SY${schoolYear}` : 'AllYears';
+      const semesterSegment = semester ? semester.replace(' ', '') : '';
+      return `Unresolved_Violations_${yearSegment}_${semesterSegment}_${dateSegment}.${ext}`;
+    } else {
+      // Archived violations by school year
+      const yearSegment = schoolYear ? `SY${schoolYear}` : 'UnknownYear';
+      const semesterSegment = semester ? semester.replace(' ', '') : '';
+      return `Archived_Violations_${yearSegment}_${semesterSegment}_${dateSegment}.${ext}`;
+    }
+  };
+
+  const getExportTitles = () => {
+    const isUsersFolder = activeFolder === 'users';
+    const isUnresolvedFolder = activeFolder === 'unresolved';
+    const reportTitle = isUsersFolder
+      ? 'ARCHIVED USERS REPORT'
+      : isUnresolvedFolder
+      ? 'UNRESOLVED VIOLATIONS REPORT'
+      : 'ARCHIVED VIOLATIONS REPORT';
+
+    const yearLine = isUsersFolder
+      ? ''
+      : isUnresolvedFolder
+      ? selectedUnresolvedYear
+        ? `S.Y. ${selectedUnresolvedYear}`
+        : ''
+      : activeFolder
+      ? `S.Y. ${activeFolder}`
+      : '';
+
+    const semesterLine =
+      !isUsersFolder && activeSemester ? `(${activeSemester})` : '';
+
+    const exportLabel = isUsersFolder
+      ? 'Archived Users'
+      : isUnresolvedFolder
+      ? 'Unresolved Violations'
+      : 'Archived Violations';
+
+    return { reportTitle, yearLine, semesterLine, exportLabel };
+  };
+
+  const createDownload = async (format) => {
+    if (filteredData.length === 0) {
+      alert('No data to export.');
+      return;
+    }
+
+    const filename = formatDownloadFileName(
+      activeFolder,
+      activeFolder === 'unresolved' ? selectedUnresolvedYear : activeFolder,
+      activeSemester
+    ).replace('.xlsx', format === 'pdf' ? '.pdf' : '.xlsx');
+
+    const { reportTitle, yearLine, semesterLine, exportLabel } = getExportTitles();
+
+    // Prepare data based on folder type
+    let sheetData = [];
+    let title = reportTitle;
+    let headers = [];
+
+    if (activeFolder === 'users') {
+      title = 'ARCHIVED USERS REPORT';
+      headers = ['No', 'Student No.', 'Full Name', 'Email', 'Program', 'Year/Section', 'Status', 'Violation Count', 'Archived Date'];
+      sheetData = filteredData.map((item, index) => {
+        const statusValue =
+          item.archivedReason ||
+          (typeof item.status === 'string'
+            ? item.status
+            : item.status?.toString?.() || '') ||
+          '';
+
+        const studentNo = (item.school_id || item.schoolId || '').toString().trim();
+        const fullName = item.full_name || '';
+
+        return {
+          'No': index + 1,
+          'Student No.': studentNo,
+          'Full Name': fullName,
+          'Email': item.email || '',
+          'Program': item.program || '',
+          'Year/Section': item.yearSection || '',
+          'Status': statusValue,
+          'Violation Count': item.violationCount || 0,
+          'Archived Date': item.archivedDate || '',
+        };
+      });
+    } else {
+      // Violations (both archived and unresolved)
+      title = activeFolder === 'unresolved' ? 'UNRESOLVED VIOLATIONS REPORT' : 'ARCHIVED VIOLATIONS REPORT';
+      headers = ['No', 'Date', 'Student Name', 'Year/Section', 'Violation', 'Type', 'Reported by', 'Remarks', 'Signature', 'Status'];
+      sheetData = filteredData.map((item, index) => ({
+        'No': index + 1,
+        'Date': item.date || '-',
+        'Student Name': item.studentName?.props?.children?.[0]?.props?.children || item.studentName || '-',
+        'Year/Section': item.yearSection || '-',
+        'Violation': item.violation || '-',
+        'Type': item.type || '-',
+        'Reported by': item.reportedBy || '-',
+        'Remarks': item.remarks || '-',
+        'Signature': item.signatureImage ? 'Signed' : 'No Signature',
+        'Status': item.status || '-',
+      }));
+    }
+
+    if (format === 'excel') {
+      try {
+        const [{ Workbook }, headerImage] = await Promise.all([
+          import('exceljs'),
+          resolveHeaderImage(),
+        ]);
+
+        const workbook = new Workbook();
+        const sheet = workbook.addWorksheet('Archive Report', {
+          views: [{ state: 'frozen', ySplit: 11 }],
+        });
+
+        // Set column widths
+        const columnWidths = activeFolder === 'users'
+          ? [10, 18, 35, 35, 20, 20, 15, 15, 18]
+          : [10, 18, 35, 20, 40, 24, 20, 44, 22, 16];
+        
+        sheet.columns = headers.map((header, index) => ({
+          key: header,
+          width: columnWidths[index] || 20,
+        }));
+
+        const headerCellEnd = String.fromCharCode(65 + headers.length - 1);
+        sheet.mergeCells(`A1:${headerCellEnd}3`);
+
+        if (activeFolder === 'users') {
+          // Users folder: title row 5 and generated row 6
+          sheet.mergeCells(`A5:${headerCellEnd}5`);
+          sheet.mergeCells(`A6:${headerCellEnd}6`);
+        } else {
+          // Violations: full layout with year and semester
+          sheet.mergeCells(`A4:${headerCellEnd}4`);
+          sheet.mergeCells(`A5:${headerCellEnd}5`);
+          sheet.mergeCells(`A6:${headerCellEnd}6`);
+          sheet.mergeCells(`A7:${headerCellEnd}7`);
+        }
+        
+        sheet.pageSetup = {
+          orientation: activeFolder === 'users' ? 'portrait' : 'landscape',
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          paperSize: 'Letter',
+        };
+        sheet.printOptions = {
+          horizontalCentered: true,
+          verticalCentered: false,
+        };
+        
+        sheet.getRow(1).height = 26;
+        sheet.getRow(2).height = 26;
+        sheet.getRow(3).height = 26;
+        
+        if (activeFolder === 'users') {
+          sheet.getRow(4).height = 10;
+          sheet.getRow(5).height = 28;
+          sheet.getRow(6).height = 18;
+          sheet.getRow(7).height = 0.1;
+          sheet.getRow(8).height = 0.1;
+          sheet.getRow(9).height = 0.1;
+          sheet.getRow(10).height = 0.1;
+          sheet.getRow(11).height = 24;
+        } else {
+          sheet.getRow(4).height = 28;
+          sheet.getRow(5).height = 20;
+          sheet.getRow(6).height = 20;
+          sheet.getRow(7).height = 20;
+          sheet.getRow(8).height = 0.1;
+          sheet.getRow(9).height = 0.1;
+          sheet.getRow(10).height = 0.1;
+          sheet.getRow(11).height = 24;
+        }
+
+        // Add header image if available
+        if (headerImage.dataUrl && headerImage.dimensions) {
+          const headerRegionStartCol = 1;
+          const headerRegionEndCol = headers.length;
+          const headerRegionWidthPx = Array.from(
+            { length: headerRegionEndCol - headerRegionStartCol + 1 },
+            (_, index) => {
+              const width = sheet.getColumn(headerRegionStartCol + index).width || 10;
+              return Number(width) * 7.5;
+            },
+          ).reduce((total, width) => total + width, 0);
+          const headerRegionStartPx = Array.from({ length: headerRegionStartCol - 1 }, (_, index) => {
+            const width = sheet.getColumn(index + 1).width || 10;
+            return Number(width) * 7.5;
+          }).reduce((total, width) => total + width, 0);
+          const headerRegionHeightPx = [1, 2, 3].reduce(
+            (total, rowNumber) => total + (Number(sheet.getRow(rowNumber).height || 15) * 1.333),
+            0,
+          );
+          const imageScale = Math.min(
+            (headerRegionWidthPx - 24) / headerImage.dimensions.width,
+            (headerRegionHeightPx - 6) / headerImage.dimensions.height,
+          );
+          const imageWidthPx = Math.max(8, Math.round(headerImage.dimensions.width * imageScale));
+          const imageHeightPx = Math.max(8, Math.round(headerImage.dimensions.height * imageScale));
+          const leftOffsetPx = headerRegionStartPx + Math.max(0, (headerRegionWidthPx - imageWidthPx) / 2) + (activeFolder === 'users' ? 62 : 0);
+          const topOffsetPx = (headerRegionHeightPx - imageHeightPx) / 2;
+
+          const toColCoordinate = (pixelOffset) => {
+            let accumulatedPx = 0;
+            for (let i = 1; i <= headers.length; i += 1) {
+              const colWidth = sheet.getColumn(i).width || 15;
+              const colPx = colWidth * 7.5;
+              if (accumulatedPx + colPx >= pixelOffset) {
+                const offsetInCol = pixelOffset - accumulatedPx;
+                return (i - 1) + offsetInCol / colPx;
+              }
+              accumulatedPx += colPx;
+            }
+            return headers.length - 1;
+          };
+
+          const toRowCoordinate = (pixelOffset) => {
+            let accumulatedPx = 0;
+            for (let i = 1; i <= 3; i += 1) {
+              const rowPx = Number(sheet.getRow(i).height || 15) * 1.333;
+              if (accumulatedPx + rowPx >= pixelOffset) {
+                const offsetInRow = pixelOffset - accumulatedPx;
+                return (i - 1) + offsetInRow / rowPx;
+              }
+              accumulatedPx += rowPx;
+            }
+            return 2;
+          };
+
+          const imageId = workbook.addImage({ base64: headerImage.dataUrl, extension: 'png' });
+          sheet.addImage(imageId, {
+            tl: {
+              col: toColCoordinate(leftOffsetPx),
+              row: toRowCoordinate(topOffsetPx),
+            },
+            ext: {
+              width: imageWidthPx,
+              height: imageHeightPx,
+            },
+          });
+        }
+
+        // Title and subtitle
+        if (activeFolder === 'users') {
+          // Users folder: title in A5 and generated date in A6
+          const titleCell = sheet.getCell('A5');
+          titleCell.value = title;
+          titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: 'FF000000' } };
+          titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+          const generatedCell = sheet.getCell('A6');
+          const generatedDateRaw = new Date();
+          const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
+          const day = generatedDateRaw.getDate();
+          const year = generatedDateRaw.getFullYear();
+          const time = generatedDateRaw.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+          generatedCell.value = `Generated: ${month} ${day}, ${year}, ${time}`;
+          generatedCell.font = { name: 'Calibri', size: 11, color: { argb: 'FF4B5563' } };
+          generatedCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        } else {
+          // Violations layout: title in A4, year in A5, semester in A6, generated in A7
+          const titleCell = sheet.getCell('A4');
+          titleCell.value = title;
+          titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: 'FF000000' } };
+          titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+          const yearCell = sheet.getCell('A5');
+          yearCell.value = yearLine || '';
+          yearCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF1F2937' } };
+          yearCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+          const semesterCell = sheet.getCell('A6');
+          semesterCell.value = semesterLine || '';
+          semesterCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF1F2937' } };
+          semesterCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+          const generatedCell = sheet.getCell('A7');
+          const generatedDateRaw = new Date();
+          const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
+          const day = generatedDateRaw.getDate();
+          const year = generatedDateRaw.getFullYear();
+          const time = generatedDateRaw.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+          generatedCell.value = `Generated: ${month} ${day}, ${year}, ${time}`;
+          generatedCell.font = { name: 'Calibri', size: 11, color: { argb: 'FF4B5563' } };
+          generatedCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        }
+
+        // Header row
+        const headerRow = sheet.getRow(11);
+        headerRow.values = headers;
+        headerRow.height = 24;
+        headerRow.eachCell((cell) => {
+          cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF0F172A' },
+          };
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          };
+        });
+
+        // Data rows
+        const dataRowStart = 12;
+        sheetData.forEach((row, index) => {
+          const excelRow = sheet.getRow(dataRowStart + index);
+          excelRow.values = Object.values(row);
+          excelRow.height = 28;
+
+          excelRow.eachCell((cell, cellNum) => {
+            cell.font = { name: 'Calibri', size: 11, color: { argb: 'FF1F2937' } };
+            // Center align No column and Status column
+            if (cellNum === 1 || (activeFolder !== 'users' && cellNum === 10) || (activeFolder === 'users' && cellNum === 7)) {
+              cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            } else {
+              cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+            }
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+              left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+              bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+              right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            };
+          });
+        });
+
+        // Add signature images for violations
+        if (activeFolder !== 'users') {
+          filteredData.forEach((item, index) => {
+            if (item.signatureImage) {
+              const signatureImageData = item.signatureImage;
+              const signatureColIndex = 9; // Column I (0-indexed as 8, but 1-indexed as 9)
+              const signatureRowIndex = dataRowStart + index;
+
+              const colWidthPx = sheet.getColumn(signatureColIndex).width * 7.5;
+              const rowHeightPx = sheet.getRow(signatureRowIndex).height * 1.333;
+
+              const maxWidth = colWidthPx * 0.8;
+              const maxHeight = rowHeightPx * 0.8;
+              const sigWidth = Math.min(maxWidth, 80);
+              const sigHeight = Math.min(maxHeight, 24);
+
+              const sigLeftOffset = (colWidthPx - sigWidth) / 2;
+              const sigTopOffset = (rowHeightPx - sigHeight) / 2;
+
+              const toColCoordinateForSig = (pixelOffset) => {
+                let remaining = pixelOffset;
+                const colWidth = sheet.getColumn(signatureColIndex).width || 15;
+                const colPx = colWidth * 7.5;
+                if (remaining <= colPx) {
+                  return (signatureColIndex - 1) + remaining / colPx;
+                }
+                return signatureColIndex - 1;
+              };
+
+              const toRowCoordinateForSig = (pixelOffset) => {
+                let remaining = pixelOffset;
+                const rowPx = Number(sheet.getRow(signatureRowIndex).height || 15) * 1.333;
+                if (remaining <= rowPx) {
+                  return (signatureRowIndex - 1) + remaining / rowPx;
+                }
+                return signatureRowIndex - 1;
+              };
+
+              const signatureImageId = workbook.addImage({ base64: signatureImageData, extension: 'png' });
+              sheet.addImage(signatureImageId, {
+                tl: {
+                  col: toColCoordinateForSig(sigLeftOffset),
+                  row: toRowCoordinateForSig(sigTopOffset),
+                },
+                ext: {
+                  width: sigWidth,
+                  height: sigHeight,
+                },
+              });
+
+              // Clear the text in the signature cell since we have an image
+              const signatureCell = sheet.getCell(`${String.fromCharCode(65 + signatureColIndex - 1)}${signatureRowIndex}`);
+              signatureCell.value = '';
+            }
+          });
+        }
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error('Excel export failed', error);
+        alert('Unable to generate Excel download.');
+      }
+    } else if (format === 'pdf') {
+      try {
+        const [{ jsPDF }, { default: autoTable }, headerImage] = await Promise.all([
+          import('jspdf'),
+          import('jspdf-autotable'),
+          resolveHeaderImage(),
+        ]);
+
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const tableMarginLeft = 10;
+        const tableMarginRight = 10;
+        const tableWidth = pageWidth - tableMarginLeft - tableMarginRight;
+        const tableCenterX = tableMarginLeft + tableWidth / 2;
+        let startY = 20;
+
+        // Add header image if available
+        if (headerImage.dataUrl && headerImage.dimensions) {
+          const headerWidth = tableWidth;
+          const headerHeight = (headerImage.dimensions.height * headerWidth) / headerImage.dimensions.width;
+          const headerX = tableMarginLeft;
+          doc.addImage(headerImage.dataUrl, 'PNG', headerX, 10, headerWidth, headerHeight);
+          startY = 10 + headerHeight + 8;
+        }
+
+        const generatedDateRaw = new Date();
+        const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
+        const day = generatedDateRaw.getDate();
+        const year = generatedDateRaw.getFullYear();
+        const time = generatedDateRaw.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+        const generatedAt = `Generated: ${month} ${day}, ${year}, ${time}`;
+
+        const titleLines = [title, yearLine, semesterLine].filter(Boolean);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(18);
+        let currentY = startY + 5;
+        titleLines.forEach((line, index) => {
+          doc.setFont('helvetica', index === 0 ? 'bold' : 'normal');
+          doc.setFontSize(index === 0 ? 18 : 12);
+          doc.text(line, tableCenterX, currentY, { align: 'center' });
+          currentY += index === 0 ? 8 : 7;
+        });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(11);
+        doc.text(generatedAt, tableCenterX, currentY + 2, { align: 'center' });
+
+        const rawColumnWidths = activeFolder === 'users'
+          ? [12, 24, 35, 35, 22, 18, 20, 18, 18]
+          : [12, 22, 35, 20, 40, 28, 25, 50, 25, 18];
+        const totalRawWidth = rawColumnWidths.reduce((sum, width) => sum + width, 0);
+        const scaledColumnWidths = rawColumnWidths.map((width) => (width * tableWidth) / totalRawWidth);
+        const tableStartY = currentY + 10;
+
+        // Custom renderer for signature column
+        const didDrawCell = (data) => {
+          if (data.section === 'body' && activeFolder !== 'users') {
+            const signatureColumnIndex = 8; // Signature column index
+            if (data.column.index === signatureColumnIndex) {
+              const item = filteredData[data.row.index];
+              if (item.signatureImage) {
+                const cellWidth = data.cell.width;
+                const cellHeight = data.cell.height;
+                const x = data.cell.x + 1;
+                const y = data.cell.y + 1;
+
+                const maxWidth = cellWidth - 2;
+                const maxHeight = cellHeight - 2;
+                const scale = Math.min(maxWidth / 80, maxHeight / 24, 1);
+                const sigWidth = 80 * scale;
+                const sigHeight = 24 * scale;
+
+                const sigX = x + (maxWidth - sigWidth) / 2;
+                const sigY = y + (maxHeight - sigHeight) / 2;
+
+                doc.addImage(item.signatureImage, 'PNG', sigX, sigY, sigWidth, sigHeight);
+              }
+            }
+          }
+        };
+
+        const bodyData = sheetData.map(row => Object.values(row));
+
+        autoTable(doc, {
+          startY: tableStartY,
+          head: [headers],
+          body: bodyData,
+          theme: 'grid',
+          styles: {
+            fontSize: 8,
+            cellPadding: 2,
+            textColor: [31, 41, 55],
+            halign: 'left',
+            valign: 'middle',
+          },
+          headStyles: {
+            fillColor: [15, 23, 42],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            halign: 'center',
+          },
+          alternateRowStyles: {
+            fillColor: [248, 250, 252],
+          },
+          margin: { left: tableMarginLeft, right: tableMarginRight },
+          tableWidth: tableWidth,
+          columnStyles: activeFolder === 'users' ? {
+            0: { cellWidth: scaledColumnWidths[0], halign: 'center' },
+            1: { cellWidth: scaledColumnWidths[1], halign: 'center' },
+            2: { cellWidth: scaledColumnWidths[2] },
+            3: { cellWidth: scaledColumnWidths[3] },
+            4: { cellWidth: scaledColumnWidths[4] },
+            5: { cellWidth: scaledColumnWidths[5] },
+            6: { cellWidth: scaledColumnWidths[6], halign: 'center' },
+            7: { cellWidth: scaledColumnWidths[7], halign: 'center' },
+            8: { cellWidth: scaledColumnWidths[8], halign: 'center' },
+          } : {
+            0: { cellWidth: scaledColumnWidths[0], halign: 'center' },
+            1: { cellWidth: scaledColumnWidths[1] },
+            2: { cellWidth: scaledColumnWidths[2] },
+            3: { cellWidth: scaledColumnWidths[3] },
+            4: { cellWidth: scaledColumnWidths[4] },
+            5: { cellWidth: scaledColumnWidths[5] },
+            6: { cellWidth: scaledColumnWidths[6] },
+            7: { cellWidth: scaledColumnWidths[7] },
+            8: { cellWidth: scaledColumnWidths[8], halign: 'center' },
+            9: { cellWidth: scaledColumnWidths[9] },
+          },
+          didDrawCell,
+        });
+
+        doc.save(filename);
+      } catch (error) {
+        console.error('PDF export failed', error);
+        alert('Unable to generate PDF download.');
+      }
+    }
+  };
+
+  const confirmDownload = () => {
+    createDownload(downloadFormat);
+    setDownloadModalOpen(false);
+  };
+
+  const confirmDownloadAll = () => {
+    createDownload(downloadAllFormat);
+    setDownloadAllModalOpen(false);
+  };
+
+  const { exportLabel } = getExportTitles();
+
   return (
     <div className="text-white">
       <AnimatedContent>
@@ -1742,7 +2413,7 @@ const Archives = () => {
               variant="secondary"
               size="sm"
               className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
-              disabled
+              onClick={() => setDownloadModalOpen(true)}
             >
               <Download className="w-4 h-4" /> Export
             </Button>
@@ -1814,6 +2485,49 @@ const Archives = () => {
         </div>
       </AnimatedContent>
       )}
+
+      <Modal
+        isOpen={downloadModalOpen}
+        onClose={() => setDownloadModalOpen(false)}
+        title="Export Archive Report"
+        size="sm"
+      >
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm text-gray-200">Choose a format for exporting the current table view.</p>
+          </div>
+          <div className="border border-gray-400 rounded px-3 py-2">
+            <label className="text-xs text-gray-300">Rows to export: {filteredData.length}</label>
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-white">Format</div>
+            <select
+              value={downloadFormat}
+              onChange={(e) => setDownloadFormat(e.target.value)}
+              className="w-full rounded-lg border border-gray-500/30 bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
+            >
+              <option value="excel">Excel (.xlsx)</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </div>
+        </div>
+        <ModalFooter>
+          <button
+            type="button"
+            className="rounded-lg border border-white/20 px-4 py-2 text-sm text-white hover:bg-white/10"
+            onClick={() => setDownloadModalOpen(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200"
+            onClick={confirmDownload}
+          >
+            Export
+          </button>
+        </ModalFooter>
+      </Modal>
 
       {/* Edit Modal */}
       {isEditOpen && selectedRow && (
