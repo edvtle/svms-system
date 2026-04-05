@@ -1090,6 +1090,58 @@ export async function syncNotificationsDatabase() {
   return { synced: true };
 }
 
+export async function syncPasswordResetDatabase() {
+  if (!hasDbConfig()) {
+    throw new Error(
+      `Missing required environment variables: ${getMissingDbVars().join(", ")}`,
+    );
+  }
+
+  const dbPool = getDbPool();
+
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS password_reset_sessions (
+      email VARCHAR(255) PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash VARCHAR(128) NOT NULL,
+      verified BOOLEAN NOT NULL DEFAULT FALSE,
+      reset_token_hash VARCHAR(128),
+      expires_at TIMESTAMPTZ NOT NULL,
+      resend_available_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await dbPool.query(`
+    CREATE INDEX IF NOT EXISTS password_reset_sessions_expires_at_idx
+    ON password_reset_sessions (expires_at)
+  `);
+
+  await dbPool.query(`
+    CREATE OR REPLACE FUNCTION set_password_reset_sessions_updated_at()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      NEW.updated_at = NOW();
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql SET search_path = public
+  `);
+
+  await dbPool.query(`
+    DROP TRIGGER IF EXISTS trg_password_reset_sessions_updated_at ON password_reset_sessions
+  `);
+
+  await dbPool.query(`
+    CREATE TRIGGER trg_password_reset_sessions_updated_at
+    BEFORE UPDATE ON password_reset_sessions
+    FOR EACH ROW
+    EXECUTE FUNCTION set_password_reset_sessions_updated_at()
+  `);
+
+  return { synced: true };
+}
+
 export async function syncStudentViolationLogsDatabase() {
   if (!hasDbConfig()) {
     throw new Error(

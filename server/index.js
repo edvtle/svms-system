@@ -5,7 +5,6 @@ import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
 import nodemailer from "nodemailer";
 import multer from "multer";
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -21,6 +20,7 @@ import {
   syncAuditLogsDatabase,
   syncViolationsDatabase,
   syncNotificationsDatabase,
+  syncPasswordResetDatabase,
   syncStudentViolationLogsDatabase,
 } from "./db.js";
 import { encryptImagePath, decryptImagePath } from "./encryption.js";
@@ -34,7 +34,53 @@ const FORGOT_CODE_EXPIRY_MS = 10 * 60 * 1000;
 const FORGOT_RESEND_COOLDOWN_MS = 15 * 1000;
 const AUDIT_LOG_RETENTION_DAYS = 15;
 const AUDIT_LOG_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const forgotPasswordStore = new Map();
+const isServerlessRuntime =
+  process.env.VERCEL === "1" ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.NODE_ENV === "serverless";
+
+function hashSecret(value) {
+  return crypto
+    .createHash("sha256")
+    .update(String(value || ""))
+    .digest("hex");
+}
+
+function isPersistedLogoPath(value) {
+  const normalized = String(value || "").trim();
+  return (
+    normalized.startsWith("/uploads/") ||
+    normalized.startsWith("data:image/") ||
+    /^https?:\/\//i.test(normalized)
+  );
+}
+
+async function getPasswordResetSession(pool, email) {
+  const lookup = await pool.query(
+    `
+    SELECT
+      email,
+      user_id,
+      code_hash,
+      verified,
+      reset_token_hash,
+      expires_at,
+      resend_available_at
+    FROM password_reset_sessions
+    WHERE email = $1
+    LIMIT 1
+    `,
+    [email],
+  );
+
+  return lookup.rows?.[0] || null;
+}
+
+async function removePasswordResetSession(pool, email) {
+  await pool.query(`DELETE FROM password_reset_sessions WHERE email = $1`, [
+    email,
+  ]);
+}
 
 function getAuditActor(req) {
   const actorUserIdRaw = req.get("x-actor-user-id");
@@ -308,27 +354,10 @@ function generateTemporaryPassword() {
   return crypto.randomBytes(6).toString("base64url");
 }
 
-// Ensure uploads directory exists
 const uploadsDir = path.join(path.dirname(__filename), "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Multer configuration for file uploads with diskStorage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    const name = path.basename(file.originalname, ext);
-    cb(null, `${name}-${uniqueSuffix}${ext}`);
-  },
-});
 
 const upload = multer({
-  storage: storage,
+  storage: multer.memoryStorage(),
   fileFilter: (_req, file, cb) => {
     // Accept any image MIME type
     if (file.mimetype.startsWith("image/")) {
@@ -551,18 +580,19 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
 
-    const existingSession = forgotPasswordStore.get(normalizedEmail);
+    const existingSession = await getPasswordResetSession(
+      pool,
+      normalizedEmail,
+    );
     const now = Date.now();
-    if (
-      existingSession?.resendAvailableAt &&
-      existingSession.resendAvailableAt > now
-    ) {
+    const existingResendAt = existingSession?.resend_available_at
+      ? new Date(existingSession.resend_available_at).getTime()
+      : 0;
+    if (Number.isFinite(existingResendAt) && existingResendAt > now) {
       return res.status(429).json({
         status: "error",
         message: "Please wait before requesting another code.",
-        retryAfterSeconds: Math.ceil(
-          (existingSession.resendAvailableAt - now) / 1000,
-        ),
+        retryAfterSeconds: Math.ceil((existingResendAt - now) / 1000),
       });
     }
 
@@ -575,6 +605,12 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
     }
 
     const code = String(Math.floor(100000 + Math.random() * 900000));
+    const codeHash = hashSecret(code);
+    const expiresAtIso = new Date(now + FORGOT_CODE_EXPIRY_MS).toISOString();
+    const resendAvailableAtIso = new Date(
+      now + FORGOT_RESEND_COOLDOWN_MS,
+    ).toISOString();
+
     const delivery = await sendForgotPasswordCodeEmail({
       toEmail: normalizedEmail,
       code,
@@ -587,14 +623,29 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
       });
     }
 
-    forgotPasswordStore.set(normalizedEmail, {
-      userId: user.id,
-      code,
-      verified: false,
-      resetToken: null,
-      expiresAt: now + FORGOT_CODE_EXPIRY_MS,
-      resendAvailableAt: now + FORGOT_RESEND_COOLDOWN_MS,
-    });
+    await pool.query(
+      `
+      INSERT INTO password_reset_sessions (
+        email,
+        user_id,
+        code_hash,
+        verified,
+        reset_token_hash,
+        expires_at,
+        resend_available_at
+      )
+      VALUES ($1, $2, $3, FALSE, NULL, $4::timestamptz, $5::timestamptz)
+      ON CONFLICT (email)
+      DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        code_hash = EXCLUDED.code_hash,
+        verified = FALSE,
+        reset_token_hash = NULL,
+        expires_at = EXCLUDED.expires_at,
+        resend_available_at = EXCLUDED.resend_available_at
+      `,
+      [normalizedEmail, user.id, codeHash, expiresAtIso, resendAvailableAtIso],
+    );
 
     return res.status(200).json({
       status: "ok",
@@ -623,41 +674,68 @@ app.post("/api/auth/forgot-password/verify", async (req, res) => {
     });
   }
 
-  const session = forgotPasswordStore.get(normalizedEmail);
-  if (!session) {
-    return res.status(400).json({
+  if (!hasDbConfig()) {
+    return res.status(500).json({
       status: "error",
-      message: "No verification request found for this email.",
+      message: "Database environment variables are missing.",
+      missing: getMissingDbVars(),
     });
   }
 
-  if (session.expiresAt < Date.now()) {
-    forgotPasswordStore.delete(normalizedEmail);
-    return res.status(400).json({
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+    const session = await getPasswordResetSession(pool, normalizedEmail);
+
+    if (!session) {
+      return res.status(400).json({
+        status: "error",
+        message: "No verification request found for this email.",
+      });
+    }
+
+    const expiresAt = new Date(session.expires_at).getTime();
+    if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) {
+      await removePasswordResetSession(pool, normalizedEmail);
+      return res.status(400).json({
+        status: "error",
+        message: "Verification code expired. Please request a new one.",
+      });
+    }
+
+    const incomingCodeHash = hashSecret(normalizedCode);
+    if (incomingCodeHash !== session.code_hash) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid verification code.",
+      });
+    }
+
+    const resetToken = crypto.randomBytes(24).toString("hex");
+    const resetTokenHash = hashSecret(resetToken);
+
+    await pool.query(
+      `
+      UPDATE password_reset_sessions
+      SET
+        verified = TRUE,
+        reset_token_hash = $1
+      WHERE email = $2
+      `,
+      [resetTokenHash, normalizedEmail],
+    );
+
+    return res.status(200).json({
+      status: "ok",
+      message: "Code verified.",
+      resetToken,
+    });
+  } catch (error) {
+    return res.status(503).json({
       status: "error",
-      message: "Verification code expired. Please request a new one.",
+      message: `Unable to verify code (${error.message}).`,
     });
   }
-
-  if (session.code !== normalizedCode) {
-    return res.status(400).json({
-      status: "error",
-      message: "Invalid verification code.",
-    });
-  }
-
-  const resetToken = crypto.randomBytes(24).toString("hex");
-  forgotPasswordStore.set(normalizedEmail, {
-    ...session,
-    verified: true,
-    resetToken,
-  });
-
-  return res.status(200).json({
-    status: "ok",
-    message: "Code verified.",
-    resetToken,
-  });
 });
 
 app.post("/api/auth/forgot-password/reset", async (req, res) => {
@@ -695,25 +773,32 @@ app.post("/api/auth/forgot-password/reset", async (req, res) => {
     });
   }
 
-  const session = forgotPasswordStore.get(normalizedEmail);
-  if (!session || !session.verified || session.resetToken !== resetToken) {
-    return res.status(401).json({
-      status: "error",
-      message: "Verification is required before resetting password.",
-    });
-  }
-
-  if (session.expiresAt < Date.now()) {
-    forgotPasswordStore.delete(normalizedEmail);
-    return res.status(400).json({
-      status: "error",
-      message: "Reset session expired. Please request a new code.",
-    });
-  }
-
   try {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
+    const session = await getPasswordResetSession(pool, normalizedEmail);
+    const incomingResetTokenHash = hashSecret(resetToken);
+
+    if (
+      !session ||
+      !session.verified ||
+      session.reset_token_hash !== incomingResetTokenHash
+    ) {
+      return res.status(401).json({
+        status: "error",
+        message: "Verification is required before resetting password.",
+      });
+    }
+
+    const expiresAt = new Date(session.expires_at).getTime();
+    if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) {
+      await removePasswordResetSession(pool, normalizedEmail);
+      return res.status(400).json({
+        status: "error",
+        message: "Reset session expired. Please request a new code.",
+      });
+    }
+
     const passwordHash = await bcrypt.hash(String(newPassword), 12);
 
     const updateResult = await pool.query(
@@ -723,7 +808,7 @@ app.post("/api/auth/forgot-password/reset", async (req, res) => {
       WHERE id = $2
       RETURNING id
       `,
-      [passwordHash, session.userId],
+      [passwordHash, session.user_id],
     );
 
     if (!updateResult.rows?.[0]) {
@@ -733,7 +818,7 @@ app.post("/api/auth/forgot-password/reset", async (req, res) => {
       });
     }
 
-    forgotPasswordStore.delete(normalizedEmail);
+    await removePasswordResetSession(pool, normalizedEmail);
 
     return res.status(200).json({
       status: "ok",
@@ -2379,13 +2464,11 @@ app.put("/api/student-violations/:id/clear", async (req, res) => {
 
     const fullRecord = await getFullViolationRecord(pool, updated.id);
 
-    return res
-      .status(200)
-      .json({
-        status: "ok",
-        record: fullRecord || updated,
-        promotion: promotionResult,
-      });
+    return res.status(200).json({
+      status: "ok",
+      record: fullRecord || updated,
+      promotion: promotionResult,
+    });
   } catch (error) {
     return res.status(503).json({
       status: "error",
@@ -2560,13 +2643,10 @@ app.get("/api/settings", async (req, res) => {
     const settings = result.rows[0];
     let decryptedLogoPath = null;
     if (settings.logo_path) {
-      // try to decrypt; if result looks like a valid uploads path we use it.
+      // Try to decrypt legacy encrypted values and accept modern persisted URL/data formats.
       const tried = decryptImagePath(settings.logo_path);
-      if (tried && tried.startsWith("/uploads")) {
+      if (isPersistedLogoPath(tried)) {
         decryptedLogoPath = tried;
-        // if the stored value wasn't already the encrypted form of the path,
-        // replace it so future fetches don't need to decrypt again. this also
-        // upgrades any records that were accidentally saved unencrypted.
         const shouldReencrypt = settings.logo_path !== encryptImagePath(tried);
         if (shouldReencrypt) {
           await pool.query(
@@ -2574,9 +2654,9 @@ app.get("/api/settings", async (req, res) => {
             [encryptImagePath(tried), settings.id],
           );
         }
+      } else if (isPersistedLogoPath(settings.logo_path)) {
+        decryptedLogoPath = settings.logo_path;
       } else {
-        // decryption failed (old key issue) or the stored value wasn't an
-        // uploads path at all; null out so UI doesn't try to render it.
         decryptedLogoPath = null;
       }
     }
@@ -2640,7 +2720,7 @@ app.post("/api/settings", async (req, res) => {
     let decryptedLogoPath = null;
     if (settings.logo_path) {
       const tried = decryptImagePath(settings.logo_path);
-      if (tried && tried.startsWith("/uploads")) {
+      if (isPersistedLogoPath(tried)) {
         decryptedLogoPath = tried;
         const shouldReencrypt = settings.logo_path !== encryptImagePath(tried);
         if (shouldReencrypt) {
@@ -2649,6 +2729,8 @@ app.post("/api/settings", async (req, res) => {
             [encryptImagePath(tried), settings.id],
           );
         }
+      } else if (isPersistedLogoPath(settings.logo_path)) {
+        decryptedLogoPath = settings.logo_path;
       } else {
         decryptedLogoPath = null;
       }
@@ -2721,8 +2803,7 @@ app.post(
       await ensureAuthDatabaseReady();
       const pool = getDbPool();
 
-      // Construct the logo path and encrypt it for the database
-      const logoPath = `/uploads/${req.file.filename}`;
+      const logoPath = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
       const encryptedPath = encryptImagePath(logoPath);
 
       const result = await pool.query(
@@ -5073,17 +5154,19 @@ app.delete("/api/archive/violations/:id", async (req, res) => {
   }
 });
 
-// In production, serve the built frontend from the same Express app.
-app.use("/uploads", express.static(uploadsDir));
-app.use(express.static(distPath));
+if (!isServerlessRuntime) {
+  // In non-serverless mode, keep serving local assets and SPA fallback from Express.
+  app.use("/uploads", express.static(uploadsDir));
+  app.use(express.static(distPath));
 
-app.get("/{*path}", (req, res, next) => {
-  if (req.path.startsWith("/api/")) {
-    return next();
-  }
+  app.get("/{*path}", (req, res, next) => {
+    if (req.path.startsWith("/api/")) {
+      return next();
+    }
 
-  return res.sendFile(path.join(distPath, "index.html"));
-});
+    return res.sendFile(path.join(distPath, "index.html"));
+  });
+}
 
 let server;
 let authSyncPromise = null;
@@ -5106,6 +5189,7 @@ async function ensureAuthDatabaseReady() {
       await Promise.all([
         syncStudentsFromUsers(),
         syncNotificationsDatabase(),
+        syncPasswordResetDatabase(),
         syncStudentViolationLogsDatabase(),
       ]);
     })();
@@ -5169,12 +5253,24 @@ async function shutdown(signal) {
   });
 }
 
-process.on("SIGINT", () => {
-  shutdown("SIGINT");
-});
+if (!isServerlessRuntime) {
+  process.on("SIGINT", () => {
+    shutdown("SIGINT");
+  });
 
-process.on("SIGTERM", () => {
-  shutdown("SIGTERM");
-});
+  process.on("SIGTERM", () => {
+    shutdown("SIGTERM");
+  });
 
-startServer();
+  startServer();
+} else if (hasDbConfig()) {
+  // Warm schema on cold starts without creating long-running loops.
+  ensureAuthDatabaseReady().catch((error) => {
+    console.error(
+      "Failed to synchronize auth database on serverless cold start.",
+    );
+    console.error(error.message);
+  });
+}
+
+export default app;

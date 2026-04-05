@@ -121,3 +121,28 @@ Run Electron against built frontend:
 ```bash
 npm run desktop:start
 ```
+
+## Vercel Deployment (Student Web Access)
+
+This repository is now structured to run on Vercel with:
+
+- static frontend from `dist`
+- serverless API handler at `api/index.js`
+- rewrite of `/api/*` to the Express app, and SPA fallback to `index.html`
+
+### What Was Changed For Serverless Constraints
+
+- Local uploads: logo uploads now use in-memory upload parsing and persist the image as encrypted text (`data:image/...`) in PostgreSQL (`SystemSettings.logo_path`). This removes dependence on local filesystem writes.
+- In-memory forgot-password state: forgot-password sessions now persist in PostgreSQL table `password_reset_sessions` so verification survives cold starts and multi-instance scaling.
+- Long-running Express behavior: startup listeners/timers (`app.listen`, `setInterval`, signal handlers) only run in local/non-serverless mode. On Vercel, the app is exported as a handler and initialized per serverless runtime.
+
+### Required Environment Variables On Vercel
+
+- Database: `SUPABASE_DB_URL` (or `DATABASE_URL`) OR all `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`
+- Email (forgot password and credential delivery): `SMTP_USER`, `SMTP_PASS`, optional `SMTP_FROM`
+- Encryption key used by `server/encryption.js` (same key as local)
+
+### Notes
+
+- Existing old logo paths that point to `/uploads/...` may not exist on Vercel. Re-uploading the logo from Settings stores it in DB-backed format that works in serverless.
+- Student-side frontend API calls can remain relative (`/api/...`) and will work on Vercel with the provided rewrite configuration.
