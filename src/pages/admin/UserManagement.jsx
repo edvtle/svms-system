@@ -2049,36 +2049,59 @@ const UserManagement = () => {
           }
         }}
         title={<span className="font-black font-inter">Archive Selected Users</span>}
-        size="md"
+        size="2xl"
         showCloseButton={!isArchivingUsers}
       >
-        <div className="rounded-lg border border-orange-400/25 bg-orange-500/10 px-4 py-3 mb-4">
+        <div className="rounded-lg border border-orange-400/25 bg-orange-500/10 px-4 py-3 mb-3">
           <p className="text-sm text-orange-200 font-medium mb-2">⚠️ Archive Action</p>
           <p className="text-xs text-orange-100 leading-relaxed">
-            {selectedUserIds.size} student(s) will be moved to the archive folder. They will no longer appear in the regular student list but can be viewed in the archive tab.
+            {selectedUserIds.size} student(s) will be moved to the archive folder. They will no longer appear in the User Management but can be viewed in the archive tab.
           </p>
         </div>
 
-        <div className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-4 py-3 mb-4">
+        <div className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-4 py-3 mb-3">
           <p className="text-xs text-blue-200">
-            <span className="font-semibold">Note:</span> Archived users' data remains in the database and can be restored if needed.
+            <span className="font-semibold">Note:</span> Archived users' data remains in the database.
           </p>
         </div>
 
-        <div className="mb-4">
+        <div className="mb-3">
           <p className="text-sm text-gray-300 font-semibold mb-3">Selected Students:</p>
-          <div className="max-h-40 overflow-y-auto rounded-lg border border-white/20 bg-white/5 px-3 py-2">
-            {filteredStudents
-              .filter((s) => selectedUserIds.has(s.id))
-              .map((student) => (
-                <div key={student.id} className="py-1 text-xs text-gray-300 border-b border-white/10 last:border-0">
-                  {student.studentName} ({student.schoolId})
-                </div>
-              ))}
-          </div>
+          {selectedStudentsForAlert.length === 0 ? (
+            <div className="rounded-lg border border-white/20 bg-white/5 px-3 py-3 text-xs text-gray-300">
+              No students selected.
+            </div>
+          ) : (
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-white/20 bg-white/5 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
+              <table className="w-full text-xs text-gray-200 table-fixed">
+                <thead className="bg-white/10 text-gray-300 sticky top-0">
+                  <tr>
+                    <th className="px-1.5 py-1.5 text-left font-semibold whitespace-nowrap w-1/3">Student Name</th>
+                    <th className="px-1.5 py-1.5 text-left font-semibold whitespace-nowrap w-1/6">School ID</th>
+                    <th className="px-1.5 py-1.5 text-left font-semibold whitespace-nowrap w-1/6">Program</th>
+                    <th className="px-1.5 py-1.5 text-left font-semibold whitespace-nowrap w-1/6">Year/Section</th>
+                    <th className="px-1.5 py-1.5 text-left font-semibold whitespace-nowrap w-1/6">Status</th>
+                    <th className="px-1.5 py-1.5 text-left font-semibold whitespace-nowrap w-1/6">Violations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedStudentsForAlert.map((student) => (
+                    <tr key={student.id} className="border-t border-white/10 text-gray-200">
+                      <td className="px-1.5 py-1.5 whitespace-nowrap">{student.studentName}</td>
+                      <td className="px-1.5 py-1.5 whitespace-nowrap">{student.schoolId}</td>
+                      <td className="px-1.5 py-1.5 whitespace-nowrap">{student.program}</td>
+                      <td className="px-1.5 py-1.5 whitespace-nowrap">{student.yearSection}</td>
+                      <td className="px-1.5 py-1.5 whitespace-nowrap">{student.status}</td>
+                      <td className="px-1.5 py-1.5 whitespace-nowrap text-center">{student.violationCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        <div className="mb-4">
+        <div className="mb-3">
           <label className="block text-sm text-gray-300 font-semibold mb-2">
             Archive Reason (Optional)
           </label>
@@ -2087,7 +2110,7 @@ const UserManagement = () => {
             value={archiveReason}
             onChange={(e) => setArchiveReason(e.target.value)}
             placeholder="e.g., LOA (Leave of Absence), Transferred, etc."
-            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-xs text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={isArchivingUsers}
           />
           <p className="text-xs text-gray-400 mt-1">
@@ -2110,7 +2133,7 @@ const UserManagement = () => {
             variant="danger"
             onClick={handleArchiveUsers}
             disabled={isArchivingUsers || selectedUserIds.size === 0}
-            className="px-6 py-2.5"
+            className="px-6 py-2.5 bg-white text-black"
           >
             {isArchivingUsers ? "Archiving..." : "Archive Selected Users"}
           </Button>
