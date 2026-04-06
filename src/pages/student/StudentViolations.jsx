@@ -654,7 +654,6 @@ if (format === 'pdf') {
 			No: index + 1,
 			Date: formatDisplayDate(record.created_at || record.date),
 			Violation: record.violation_label || record.violation_name || '-',
-			Type: normalizeType(record),
 			'Reported by': record.reported_by || '-',
 			Remarks: record.remarks || '-',
 			Signature: record.signature || record.signature_image || record.signatureImage || '',
@@ -684,16 +683,15 @@ if (format === 'pdf') {
 					{ key: 'No', width: 10 },
 					{ key: 'Date', width: 18 },
 					{ key: 'Violation', width: 40 },
-					{ key: 'Type', width: 24 },
-					{ key: 'Reported by', width: 20 },
+					{ key: 'Reported by', width: 24 },
 					{ key: 'Remarks', width: 44 },
 					{ key: 'Signature', width: 22 },
 					{ key: 'Status', width: 16 },
 				];
 
-		sheet.mergeCells('D1:F3');
-		sheet.mergeCells('D4:F4');
-		sheet.mergeCells('D5:F5');
+		sheet.mergeCells('C1:E3');
+		sheet.mergeCells('C4:E4');
+		sheet.mergeCells('C5:E5');
 		sheet.pageSetup = {
 			orientation: 'landscape',
 			fitToPage: true,
@@ -708,7 +706,7 @@ if (format === 'pdf') {
 
 		// Add header image if available
 		if (dataUrl && dimensions) {
-			const headerRegionWidthPx = [4, 5, 6].reduce(
+			const headerRegionWidthPx = [3, 4, 5].reduce(
 				(total, colIndex) => total + (Number(sheet.getColumn(colIndex).width || 10) * 7.5),
 				0,
 			);
@@ -730,7 +728,7 @@ if (format === 'pdf') {
 			const toColCoordinate = (pixelOffset) => {
 				let colIndex = 0;
 				let accumulatedPx = 0;
-					for (let i = 4; i <= 6; i += 1) {
+					for (let i = 3; i <= 5; i += 1) {
 						const colWidth = sheet.getColumn(i).width || 15;
 						const colPx = colWidth * 7.5;
 						if (accumulatedPx + colPx >= pixelOffset) {
@@ -770,12 +768,12 @@ if (format === 'pdf') {
 					},
 				});
 
-const titleCell = sheet.getCell('D4');
+const titleCell = sheet.getCell('C4');
 			titleCell.value = 'STUDENT VIOLATION REPORT';
 			titleCell.font = { name: 'Calibri', size: 20, bold: true, color: { argb: 'FF000000' } };
 			titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
-		const subtitleCell = sheet.getCell('D5');
+		const subtitleCell = sheet.getCell('C5');
 			const generatedDateRaw = new Date();
 			const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
 			const day = generatedDateRaw.getDate();
@@ -822,8 +820,8 @@ const titleCell = sheet.getCell('D4');
 								fgColor: { argb: 'FFF8FAFC' },
 							};
 						}
-						// Center align No, Type, and Status columns
-						if ([1, 4, 8].includes(cellNum)) {
+						// Center align No and Signature columns
+						if ([1, 6].includes(cellNum)) {
 							cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 						} else {
 							cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
@@ -839,7 +837,7 @@ const titleCell = sheet.getCell('D4');
 					// Add signature image if available for this row
 					if (signatureImages[index]) {
 						const signatureImageId = workbook.addImage({ base64: signatureImages[index], extension: 'png' });
-						const signatureColIndex = 7; // Column G (0-indexed as 6, but 1-indexed as 7)
+						const signatureColIndex = 6; // Column F (0-indexed as 5, but 1-indexed as 6)
 						const signatureRowIndex = dataRowStart + index;
 
 						// Calculate position for signature image (centered in the cell)
@@ -893,40 +891,40 @@ const titleCell = sheet.getCell('D4');
 					}
 				});
 
-				// Add footer with student name and year/section in lower right
+				// Add footer with student name and year/section aligned with last table column
 				const footerRowNumber = dataRowStart + sheetData.length + 2;
 				const footerRow = sheet.getRow(footerRowNumber);
 				footerRow.height = 32;
 				
-				// Merge footer cells across last 2 columns (G-H) for right alignment
-				sheet.mergeCells(`G${footerRowNumber}:H${footerRowNumber}`);
+				// Merge only the last column (G) for centering
+				sheet.mergeCells(`G${footerRowNumber}`);
 				const studentNameCell = sheet.getCell(`G${footerRowNumber}`);
 				studentNameCell.value = `${studentInfo.lastName.charAt(0).toUpperCase() + studentInfo.lastName.slice(1).toLowerCase()}, ${studentInfo.firstName.charAt(0).toUpperCase() + studentInfo.firstName.slice(1).toLowerCase()}`.trim();
 				studentNameCell.font = { name: 'Calibri', size: 11, bold: true };
-				studentNameCell.alignment = { horizontal: 'right', vertical: 'middle' };
+				studentNameCell.alignment = { horizontal: 'center', vertical: 'middle' };
 				
-				// Year/Section in footer (next row, also in last columns)
-				sheet.mergeCells(`G${footerRowNumber + 1}:H${footerRowNumber + 1}`);
+				// Year/Section in footer (next row, also in last column)
+				sheet.mergeCells(`G${footerRowNumber + 1}`);
 				const yearSectionCell = sheet.getCell(`G${footerRowNumber + 1}`);
 				yearSectionCell.value = studentInfo.yearSection || '';
 				yearSectionCell.font = { name: 'Calibri', size: 11, bold: true };
-				yearSectionCell.alignment = { horizontal: 'right', vertical: 'top' };
+				yearSectionCell.alignment = { horizontal: 'center', vertical: 'top' };
 			} else {
 				// Fallback if header image not available
-sheet.mergeCells('D1:F3');
-		sheet.mergeCells('D4:F4');
-		sheet.mergeCells('D5:F5');
+sheet.mergeCells('C1:E3');
+		sheet.mergeCells('C4:E4');
+		sheet.mergeCells('C5:E5');
 		sheet.getRow(1).height = 40;
 		sheet.getRow(2).height = 40;
 		sheet.getRow(3).height = 40;
 		sheet.getRow(4).height = 35;
 		sheet.getRow(5).height = 28;
-		const titleCell = sheet.getCell('D4');
+		const titleCell = sheet.getCell('C4');
 		titleCell.value = 'STUDENT VIOLATION REPORT';
 		titleCell.font = { name: 'Calibri', size: 20, bold: true, color: { argb: 'FF000000' } };
 		titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
-		const subtitleCell = sheet.getCell('D5');
+		const subtitleCell = sheet.getCell('C5');
 				const generatedDateRaw = new Date();
 				const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
 				const day = generatedDateRaw.getDate();
@@ -970,8 +968,8 @@ sheet.mergeCells('D1:F3');
 								fgColor: { argb: 'FFF8FAFC' },
 							};
 						}
-						// Center align No, Type, and Status columns
-						if ([1, 4, 8].includes(cellNum)) {
+						// Center align No and Signature columns
+						if ([1, 6].includes(cellNum)) {
 							cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 						} else {
 							cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
@@ -1041,24 +1039,24 @@ sheet.mergeCells('D1:F3');
 					}
 				});
 
-				// Add footer with student name and year/section in lower right
+				// Add footer with student name and year/section aligned with last table column
 				const footerRowNumber = currentRowNumber + sheetData.length + 3;
 				const footerRow = sheet.getRow(footerRowNumber);
 				footerRow.height = 32;
 				
-				// Merge footer cells across last 2 columns (G-H) for right alignment
-				sheet.mergeCells(`G${footerRowNumber}:H${footerRowNumber}`);
+				// Merge only the last column (G) for centering
+				sheet.mergeCells(`G${footerRowNumber}`);
 				const footerStudentNameCell = sheet.getCell(`G${footerRowNumber}`);
 				footerStudentNameCell.value = `${studentInfo.lastName.charAt(0).toUpperCase() + studentInfo.lastName.slice(1).toLowerCase()}, ${studentInfo.firstName.charAt(0).toUpperCase() + studentInfo.firstName.slice(1).toLowerCase()}`.trim();
 				footerStudentNameCell.font = { name: 'Calibri', size: 11, bold: true };
-				footerStudentNameCell.alignment = { horizontal: 'right', vertical: 'middle' };
+				footerStudentNameCell.alignment = { horizontal: 'center', vertical: 'middle' };
 				
-				// Year/Section in footer (next row, also in last columns)
-				sheet.mergeCells(`G${footerRowNumber + 1}:H${footerRowNumber + 1}`);
+				// Year/Section in footer (next row, also in last column)
+				sheet.mergeCells(`G${footerRowNumber + 1}`);
 				const footerYearSectionCell = sheet.getCell(`G${footerRowNumber + 1}`);
 				footerYearSectionCell.value = studentInfo.yearSection || '';
 				footerYearSectionCell.font = { name: 'Calibri', size: 11, bold: true };
-				footerYearSectionCell.alignment = { horizontal: 'right', vertical: 'top' };
+				footerYearSectionCell.alignment = { horizontal: 'center', vertical: 'top' };
 			}
 
 			const buffer = await workbook.xlsx.writeBuffer();
@@ -1092,8 +1090,8 @@ sheet.mergeCells('D1:F3');
 				]);
 				const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 				const pageWidth = doc.internal.pageSize.getWidth();
-				const tableMarginLeft = 10;
-				const tableMarginRight = 10;
+				const tableMarginLeft = 5;
+				const tableMarginRight = 5;
 				const tableWidth = pageWidth - tableMarginLeft - tableMarginRight;
 				const tableCenterX = tableMarginLeft + tableWidth / 2;
 			let startY = 20;
@@ -1127,14 +1125,13 @@ sheet.mergeCells('D1:F3');
 				index + 1,
 				formatDisplayDate(record.created_at || record.date),
 				record.violation_label || record.violation_name || '-',
-				normalizeType(record),
 				record.reported_by || '-',
 				record.remarks || '-',
 				'', // Empty text for signature column since we'll add image
 				record.cleared_at ? 'Cleared' : 'Active' || '-',
 			]);
 				const didDrawCell = (data) => {
-					if (data.section === 'body' && data.column.index === 6 && signatureImages[data.row.index]) { // Signature column (0-indexed)
+					if (data.section === 'body' && data.column.index === 5 && signatureImages[data.row.index]) { // Signature column (0-indexed)
 						const cellWidth = data.cell.width;
 						const cellHeight = data.cell.height;
 						const x = data.cell.x + 1;
@@ -1156,7 +1153,7 @@ sheet.mergeCells('D1:F3');
 
 				autoTable(doc, {
 					startY: tableStartY,
-					head: [['No.', 'Date', 'Violation', 'Type', 'Reported by', 'Remarks', 'Signature', 'Status']],
+					head: [['No.', 'Date', 'Violation', 'Reported by', 'Remarks', 'Signature', 'Status']],
 					body: body,
 					theme: 'grid',
 					styles: {
@@ -1178,12 +1175,11 @@ sheet.mergeCells('D1:F3');
 					columnStyles: {
 						0: { cellWidth: 16.5, halign: 'center' },
 						1: { cellWidth: 30 },
-						2: { cellWidth: 55 },
-						3: { cellWidth: 36 },
-						4: { cellWidth: 27.5 },
-						5: { cellWidth: 60 },
-						6: { cellWidth: 30, halign: 'center' },
-						7: { cellWidth: 22 },
+						2: { cellWidth: 60 },
+						3: { cellWidth: 27.5 },
+						4: { cellWidth: 75 },
+						5: { cellWidth: 30, halign: 'center' },
+						6: { cellWidth: 40 },
 					},
 					margin: { left: tableMarginLeft, right: tableMarginRight },
 					didDrawCell,
@@ -1194,7 +1190,7 @@ sheet.mergeCells('D1:F3');
 				const footerY = pageHeight - 15;
 				
 				// Calculate the position of the last column (Status column)
-				const columnWidths = [16.5, 30, 55, 36, 27.5, 60, 30, 22]; // Column widths in mm
+				const columnWidths = [16.5, 30, 60, 27.5, 75, 30, 40]; // Column widths in mm
 				const totalTableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
 				const lastColumnStart = tableMarginLeft + totalTableWidth - columnWidths[columnWidths.length - 1];
 				const lastColumnEnd = tableMarginLeft + totalTableWidth;
@@ -1202,9 +1198,10 @@ sheet.mergeCells('D1:F3');
 				doc.setFont('helvetica', 'bold');
 				doc.setFontSize(10);
 				const studentName = `${studentInfo.lastName.toUpperCase()}, ${studentInfo.firstName.toUpperCase()}`.trim();
-				doc.text(studentName, lastColumnEnd, footerY, { align: 'right' });
+				const lastColumnCenter = lastColumnStart + (columnWidths[columnWidths.length - 1] / 2);
+				doc.text(studentName, lastColumnCenter, footerY, { align: 'center' });
 				doc.setFontSize(9);
-				doc.text(studentInfo.yearSection || '', lastColumnEnd, footerY + 5, { align: 'right' });
+				doc.text(studentInfo.yearSection || '', lastColumnCenter, footerY + 5, { align: 'center' });
 
 				doc.save(filename);
 			} catch (error) {
@@ -1229,7 +1226,6 @@ sheet.mergeCells('D1:F3');
 			{ key: 'no', label: 'No.', width: 'w-12' },
 			{ key: 'date', label: 'Date Logged', width: 'w-40' },
 			{ key: 'violation', label: 'Violation', width: 'w-[30rem]' },
-			{ key: 'type', label: 'Type', width: 'w-64' },
 			{ key: 'reportedBy', label: 'Reported by', width: 'w-40' },
 			{ key: 'remarks', label: 'Remarks' },
 			{
@@ -1337,7 +1333,6 @@ sheet.mergeCells('D1:F3');
 				no: index + 1,
 				date: displayDate,
 				violation: row.violation_label || row.violation_name || '-',
-				type: normalizeType(row),
 				reportedBy: row.reported_by || '-',
 				remarks: row.remarks || '-',
 				signature: row.signature_image || row.signatureImage || '',
