@@ -39,6 +39,147 @@ const sql = connectionString
 
 export default sql;
 
+const AUTH_SCHEMA_VERSION = 1;
+const AUTH_SCHEMA_STATE_KEY = "auth_schema_version";
+
+async function ensureSchemaStateTable(dbPool) {
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      state_key VARCHAR(100) PRIMARY KEY,
+      state_value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function getSchemaStateValue(dbPool, stateKey) {
+  const result = await dbPool.query(
+    `SELECT state_value FROM app_state WHERE state_key = $1 LIMIT 1`,
+    [stateKey],
+  );
+
+  return result.rows?.[0]?.state_value || null;
+}
+
+async function setSchemaStateValue(dbPool, stateKey, stateValue) {
+  await dbPool.query(
+    `
+    INSERT INTO app_state (state_key, state_value)
+    VALUES ($1, $2)
+    ON CONFLICT (state_key) DO UPDATE SET
+      state_value = EXCLUDED.state_value,
+      updated_at = NOW()
+    `,
+    [stateKey, String(stateValue)],
+  );
+}
+
+export async function isAuthSchemaCurrent() {
+  if (!hasDbConfig()) {
+    return false;
+  }
+
+  const dbPool = getDbPool();
+  await ensureSchemaStateTable(dbPool);
+
+  const cachedSchemaVersion = await getSchemaStateValue(
+    dbPool,
+    AUTH_SCHEMA_STATE_KEY,
+  );
+
+  return Number(cachedSchemaVersion) === AUTH_SCHEMA_VERSION;
+}
+
+async function syncAuthSeedAccounts(dbPool, seedAccounts) {
+  // Remove old dummy users from legacy prototype login.
+  await dbPool.query(
+    `
+    DELETE FROM users
+    WHERE username IN ($1, $2)
+    `,
+    ["admin", "student"],
+  );
+
+  for (const account of seedAccounts) {
+    const defaultFirst = account.role === "admin" ? "Admin" : "Student";
+    const defaultLast = "User";
+    const fullName = `${defaultFirst} ${defaultLast}`;
+
+    const existingUserResult = await dbPool.query(
+      `
+      SELECT id, role
+      FROM users
+      WHERE username = $1
+      LIMIT 1
+      `,
+      [account.username],
+    );
+
+    let seededUser = existingUserResult.rows?.[0] || null;
+
+    if (!seededUser) {
+      const passwordHash = await bcrypt.hash(account.password, 12);
+      const userInsertResult = await dbPool.query(
+        `
+        INSERT INTO users (username, password_hash, role, first_name, last_name)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, username, role
+        `,
+        [
+          account.username,
+          passwordHash,
+          account.role,
+          defaultFirst,
+          defaultLast,
+        ],
+      );
+      seededUser = userInsertResult.rows?.[0] || null;
+    } else if (seededUser.role !== account.role) {
+      const roleUpdateResult = await dbPool.query(
+        `
+        UPDATE users
+        SET role = $2, is_active = TRUE
+        WHERE id = $1
+        RETURNING id, username, role
+        `,
+        [seededUser.id, account.role],
+      );
+      seededUser = roleUpdateResult.rows?.[0] || seededUser;
+    }
+
+    if (account.role === "admin" && seededUser) {
+      await dbPool.query(
+        `
+        INSERT INTO "Admins" (user_id, email, first_name, last_name, full_name)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (user_id) DO UPDATE SET
+          email = EXCLUDED.email,
+          first_name = EXCLUDED.first_name,
+          last_name = EXCLUDED.last_name,
+          full_name = EXCLUDED.full_name
+        `,
+        [seededUser.id, account.email, defaultFirst, defaultLast, fullName],
+      );
+    }
+  }
+
+  // ensure that every user with role=admin has an Admins row
+  await dbPool.query(`
+    INSERT INTO "Admins" (user_id, email, first_name, last_name, full_name)
+    SELECT
+      u.id,
+      COALESCE(NULLIF(u.username, ''), u.id::text) || '@svms.local',
+      COALESCE(NULLIF(u.first_name, ''), 'Admin'),
+      COALESCE(NULLIF(u.last_name, ''), ''),
+      TRIM(COALESCE(NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), ''), u.username, 'Admin'))
+    FROM users u
+    WHERE u.role = 'admin'
+      AND NOT EXISTS (
+        SELECT 1 FROM "Admins" a WHERE a.user_id = u.id
+      )
+  `);
+}
+
 function getSeedUserFromEnv(prefix, role) {
   const email = process.env[`${prefix}_EMAIL`];
   const username = process.env[`${prefix}_USERNAME`];
@@ -121,7 +262,7 @@ export async function closeDbPool() {
 }
 
 export async function syncAuthDatabase(options = {}) {
-  const { seedAccounts = [] } = options;
+  const { seedAccounts = [], skipSchemaCheck = false } = options;
 
   if (!hasDbConfig()) {
     throw new Error(
@@ -130,6 +271,37 @@ export async function syncAuthDatabase(options = {}) {
   }
 
   const dbPool = getDbPool();
+
+  if (skipSchemaCheck) {
+    await syncAuthSeedAccounts(dbPool, seedAccounts);
+    return {
+      synced: true,
+      accounts: seedAccounts.map(({ email, username, role }) => ({
+        email,
+        username,
+        role,
+      })),
+    };
+  }
+
+  await ensureSchemaStateTable(dbPool);
+
+  const cachedSchemaVersion = await getSchemaStateValue(
+    dbPool,
+    AUTH_SCHEMA_STATE_KEY,
+  );
+
+  if (Number(cachedSchemaVersion) === AUTH_SCHEMA_VERSION) {
+    await syncAuthSeedAccounts(dbPool, seedAccounts);
+    return {
+      synced: true,
+      accounts: seedAccounts.map(({ email, username, role }) => ({
+        email,
+        username,
+        role,
+      })),
+    };
+  }
 
   await dbPool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -263,15 +435,6 @@ export async function syncAuthDatabase(options = {}) {
     $$;
   `);
 
-  // Remove old dummy users from legacy prototype login.
-  await dbPool.query(
-    `
-    DELETE FROM users
-    WHERE username IN ($1, $2)
-    `,
-    ["admin", "student"],
-  );
-
   // Best-effort migration path: if legacy users.email exists, copy admin emails before dropping.
   await dbPool.query(`
     DO $$
@@ -301,84 +464,9 @@ export async function syncAuthDatabase(options = {}) {
     $$;
   `);
 
-  for (const account of seedAccounts) {
-    const defaultFirst = account.role === "admin" ? "Admin" : "Student";
-    const defaultLast = "User";
-    const fullName = `${defaultFirst} ${defaultLast}`;
+  await syncAuthSeedAccounts(dbPool, seedAccounts);
 
-    const existingUserResult = await dbPool.query(
-      `
-      SELECT id, role
-      FROM users
-      WHERE username = $1
-      LIMIT 1
-      `,
-      [account.username],
-    );
-
-    let seededUser = existingUserResult.rows?.[0] || null;
-
-    if (!seededUser) {
-      const passwordHash = await bcrypt.hash(account.password, 12);
-      const userInsertResult = await dbPool.query(
-        `
-        INSERT INTO users (username, password_hash, role, first_name, last_name)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, username, role
-        `,
-        [
-          account.username,
-          passwordHash,
-          account.role,
-          defaultFirst,
-          defaultLast,
-        ],
-      );
-      seededUser = userInsertResult.rows?.[0] || null;
-    } else if (seededUser.role !== account.role) {
-      const roleUpdateResult = await dbPool.query(
-        `
-        UPDATE users
-        SET role = $2, is_active = TRUE
-        WHERE id = $1
-        RETURNING id, username, role
-        `,
-        [seededUser.id, account.role],
-      );
-      seededUser = roleUpdateResult.rows?.[0] || seededUser;
-    }
-
-    if (account.role === "admin" && seededUser) {
-      await dbPool.query(
-        `
-        INSERT INTO "Admins" (user_id, email, first_name, last_name, full_name)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (user_id) DO UPDATE SET
-          email = EXCLUDED.email,
-          first_name = EXCLUDED.first_name,
-          last_name = EXCLUDED.last_name,
-          full_name = EXCLUDED.full_name
-        `,
-        [seededUser.id, account.email, defaultFirst, defaultLast, fullName],
-      );
-    }
-  }
-
-  // ensure that every user with role=admin has an Admins row
-  await dbPool.query(`
-    INSERT INTO "Admins" (user_id, email, first_name, last_name, full_name)
-    SELECT
-      u.id,
-      COALESCE(NULLIF(u.username, ''), u.id::text) || '@svms.local',
-      COALESCE(NULLIF(u.first_name, ''), 'Admin'),
-      COALESCE(NULLIF(u.last_name, ''), ''),
-      TRIM(COALESCE(NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), ''), u.username, 'Admin'))
-    FROM users u
-    WHERE u.role = 'admin'
-      AND NOT EXISTS (
-        SELECT 1 FROM "Admins" a WHERE a.user_id = u.id
-      )
-  `);
+  await setSchemaStateValue(dbPool, AUTH_SCHEMA_STATE_KEY, AUTH_SCHEMA_VERSION);
 
   return {
     synced: true,

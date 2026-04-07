@@ -132,6 +132,22 @@ const formatDateForFileName = (dateString) => {
   }
 };
 
+const formatProgramYearSection = (program, yearSection) => {
+  const programText = String(program || '').trim();
+  const yearSectionText = String(yearSection || '').trim();
+
+  if (programText && yearSectionText) {
+    const normalizedPrefix = `${programText.toLowerCase()}-`;
+    if (yearSectionText.toLowerCase().startsWith(normalizedPrefix)) {
+      return yearSectionText;
+    }
+
+    return `${programText}-${yearSectionText}`;
+  }
+
+  return programText || yearSectionText || '';
+};
+
 const Archives = () => {
   const [activeFolder, setActiveFolder] = useState("users");
   const [activeSemester, setActiveSemester] = useState("1ST SEM");
@@ -780,6 +796,10 @@ const Archives = () => {
         return archivedViolations.map((violation) => {
           const preservedYearSection =
             preservedYearSectionByViolationId[violation.id] || violation.year_section;
+          const combinedYearSection = formatProgramYearSection(
+            violation.program,
+            preservedYearSection,
+          );
 
           return {
             id: violation.id,
@@ -790,7 +810,8 @@ const Archives = () => {
                 <div className="text-xs text-gray-400">{violation.school_id}</div>
               </div>
             ),
-            yearSection: preservedYearSection,
+            yearSection: combinedYearSection,
+            program: violation.program || '',
             violation: violation.violation_label,
             type:
               violation.violation_category && violation.violation_degree
@@ -810,7 +831,7 @@ const Archives = () => {
                 : activeFolder,
             status: activeFolder === "unresolved" ? "Unresolved" : "Archived",
             recordType: "violation",
-            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${preservedYearSection || violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${combinedYearSection || preservedYearSection || violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
           };
         });
       }
@@ -876,7 +897,8 @@ const Archives = () => {
                 <div className="text-xs text-gray-400">{violation.school_id}</div>
               </div>
             ),
-            yearSection: violation.year_section,
+            yearSection: formatProgramYearSection(violation.program, violation.year_section),
+            program: violation.program || '',
             violation: violation.violation_label,
             type:
               violation.violation_category && violation.violation_degree
@@ -893,7 +915,7 @@ const Archives = () => {
             folderKey: violation.school_year,
             recordType: "violation",
             // Add searchable text for global search
-            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${formatProgramYearSection(violation.program, violation.year_section) || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
           });
         });
       }
@@ -915,7 +937,8 @@ const Archives = () => {
                 <div className="text-xs text-gray-400">{violation.school_id}</div>
               </div>
             ),
-            yearSection: violation.year_section,
+            yearSection: formatProgramYearSection(violation.program, violation.year_section),
+            program: violation.program || '',
             violation: violation.violation_label,
             type:
               violation.violation_category && violation.violation_degree
@@ -935,7 +958,7 @@ const Archives = () => {
             isUnresolved: true,
             schoolYear: violation.school_year,
             // Add searchable text for global search
-            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${formatProgramYearSection(violation.program, violation.year_section) || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
           });
         });
       }
@@ -1190,7 +1213,7 @@ const Archives = () => {
           },
           {
             key: "yearSection",
-            label: "Year/Section",
+            label: "Program-Year/Section",
           },
           {
             key: "status",
@@ -1356,7 +1379,7 @@ const Archives = () => {
         },
         {
           key: "yearSection",
-          label: "Year/Section",
+          label: "Program-Year/Section",
         },
         {
           key: "violation",
@@ -1446,10 +1469,11 @@ const Archives = () => {
 
     // Preserve the row's immediate year_section before backend may update student year_section on promotion.
     const originalYearSection = row.year_section || row.yearSection;
+    const originalProgram = row.program || '';
     if (originalYearSection) {
       setPreservedYearSectionByViolationId((prev) => ({
         ...prev,
-        [row.id]: originalYearSection,
+        [row.id]: formatProgramYearSection(originalProgram, originalYearSection) || originalYearSection,
       }));
     }
 
@@ -1489,7 +1513,7 @@ const Archives = () => {
       if (preservedYS) {
         setPreservedYearSectionByViolationId((prev) => ({
           ...prev,
-          [row.id]: preservedYS,
+          [row.id]: formatProgramYearSection(originalProgram, preservedYS) || preservedYS,
         }));
       }
 
@@ -1506,7 +1530,7 @@ const Archives = () => {
             schoolYear: destinationYear,
             semester: destinationSemester,
             preservedYearSections: preservedYS
-              ? { [row.id]: preservedYS }
+              ? { [row.id]: formatProgramYearSection(originalProgram, preservedYS) || preservedYS }
               : {},
           },
         }),
@@ -1662,12 +1686,12 @@ const Archives = () => {
     } else {
       // Violations (both archived and unresolved)
       title = activeFolder === 'unresolved' ? 'UNRESOLVED VIOLATIONS REPORT' : 'ARCHIVED VIOLATIONS REPORT';
-      headers = ['No', 'Date', 'Student Name', 'Year/Section', 'Violation', 'Type', 'Reported by', 'Remarks', 'Signature', 'Status'];
+      headers = ['No', 'Date', 'Student Name', 'Program-Year/Section', 'Violation', 'Type', 'Reported by', 'Remarks', 'Signature', 'Status'];
       sheetData = filteredData.map((item, index) => ({
         'No': index + 1,
         'Date': item.date || '-',
         'Student Name': item.studentName?.props?.children?.[0]?.props?.children || item.studentName || '-',
-        'Year/Section': item.yearSection || '-',
+        'Program-Year/Section': item.yearSection || '-',
         'Violation': item.violation || '-',
         'Type': item.type || '-',
         'Reported by': item.reportedBy || '-',

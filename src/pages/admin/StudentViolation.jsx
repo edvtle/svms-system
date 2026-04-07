@@ -63,6 +63,17 @@ const getDataUrlDimensions = (dataUrl) =>
     img.src = dataUrl;
   });
 
+const formatProgramYearSection = (program, yearSection) => {
+  const programText = String(program || "").trim();
+  const yearSectionText = String(yearSection || "").trim();
+
+  if (programText && yearSectionText) {
+    return `${programText}-${yearSectionText}`;
+  }
+
+  return programText || yearSectionText || "";
+};
+
 const StudentViolation = () => {
   const location = useLocation();
   const [showLogModal, setShowLogModal] = useState(false);
@@ -521,6 +532,7 @@ const StudentViolation = () => {
           !query ||
           String(row.full_name || "").toLowerCase().includes(query) ||
           String(row.school_id || "").toLowerCase().includes(query) ||
+          String(row.program || "").toLowerCase().includes(query) ||
           String(row.violation_label || "").toLowerCase().includes(query);
 
         const matchesTab =
@@ -640,7 +652,7 @@ const StudentViolation = () => {
         </span>
       ),
     },
-    { key: "yearSection", label: "Year/Section" },
+    { key: "yearSection", label: "Program - year/section" },
     { key: "violation", label: "Violation" },
     { key: "reportedBy", label: "Reported by" },
     {
@@ -740,7 +752,8 @@ const StudentViolation = () => {
       date: created.toLocaleDateString(),
       studentNameText: row.full_name || "",
       studentIdText: row.school_id || "",
-      yearSection: row.year_section || "",
+      yearSection: formatProgramYearSection(row.program, row.year_section),
+      program: row.program || "",
       violation: row.violation_label || row.violation_name || "",
       reportedBy: row.reported_by || "-",
       remarks: row.remarks || "-",
@@ -763,6 +776,7 @@ const StudentViolation = () => {
         studentName: row.studentNameText || "",
         schoolId: row.studentIdText || "",
         yearSection: row.yearSection || "",
+        program: row.program || "",
         violation: row.violation || "",
         reportedBy: row.reportedBy || "-",
         remarks: row.remarks || "-",
@@ -911,7 +925,7 @@ const StudentViolation = () => {
       "Date",
       "Student Name",
       "School ID",
-      "Year/Section",
+      "Program - year/section",
       "Violation",
       "Reported By",
       "Remarks",
@@ -1064,7 +1078,7 @@ const StudentViolation = () => {
           "Date",
           "Student Name",
           "School ID",
-          "Year/Section",
+          "Program - year/section",
           "Violation",
           "Reported By",
           "Remarks",
@@ -1245,9 +1259,9 @@ const StudentViolation = () => {
         </div>
       </AnimatedContent>
 
-      <div className="grid grid-cols-2 gap-4 mt-6 mb-6 w-full h-full">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-6 mb-6 w-full h-full">
         <AnimatedContent delay={0.05}>
-          <Card className="h-full min-h-[110px] col-span-4 flex flex-col justify-between items-start px-6 py-5 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02]">
+          <Card className="h-full min-h-[110px] xl:col-span-2 flex flex-col justify-between items-start px-6 py-5 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02]">
             <div className="flex w-full justify-between items-center mb-2">
               <span className="text-lg font-black font-inter">Student Analytics</span>
               <span className="text-green-400 font-bold text-sm">+0%</span>
@@ -1258,14 +1272,14 @@ const StudentViolation = () => {
           </Card>
         </AnimatedContent>
 
-        <div className="grid grid-cols-4 gap-4 w-full h-full">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 w-full h-full">
           <AnimatedContent delay={0.1}>
             <StatCard
               title="Warning Students"
               value={metrics.warning}
               percentage={0}
               icon={<TrendingUp />}
-              className="col-span-1 min-w-[200px] h-full w-full"
+              className="h-full w-full"
             />
           </AnimatedContent>
           <AnimatedContent delay={0.15}>
@@ -1274,7 +1288,7 @@ const StudentViolation = () => {
               value={metrics.atRisk}
               percentage={0}
               icon={<TrendingUp />}
-              className="col-span-1 min-w-[200px] h-full w-full"
+              className="h-full w-full"
             />
           </AnimatedContent>
           <AnimatedContent delay={0.2}>
@@ -1283,7 +1297,7 @@ const StudentViolation = () => {
               value={metrics.highRisk}
               percentage={0}
               icon={<TrendingDown />}
-              className="col-span-1 min-w-[200px] h-full w-full"
+              className="h-full w-full"
             />
           </AnimatedContent>
           <AnimatedContent delay={0.25}>
@@ -1292,7 +1306,7 @@ const StudentViolation = () => {
               value={metrics.total}
               percentage={0}
               icon={<TrendingDown />}
-              className="col-span-1 min-w-[200px] h-full w-full"
+              className="h-full w-full"
             />
           </AnimatedContent>
         </div>

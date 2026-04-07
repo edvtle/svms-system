@@ -16,6 +16,17 @@ const initialForm = {
   remarks: "",
 };
 
+const formatProgramYearSection = (program, yearSection) => {
+  const programText = String(program || "").trim();
+  const yearSectionText = String(yearSection || "").trim();
+
+  if (programText && yearSectionText) {
+    return `${programText}-${yearSectionText}`;
+  }
+
+  return programText || yearSectionText || "";
+};
+
 const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
   const [students, setStudents] = useState([]);
   const [allViolations, setAllViolations] = useState([]);
@@ -69,9 +80,13 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
       .filter((student) => {
         const fullName = String(student.full_name || "").toLowerCase();
         const schoolId = String(student.school_id || "").toLowerCase();
+        const program = String(student.program || "").toLowerCase();
         const yearSection = String(student.year_section || "").toLowerCase();
         return (
-          fullName.includes(q) || schoolId.includes(q) || yearSection.includes(q)
+          fullName.includes(q) ||
+          schoolId.includes(q) ||
+          program.includes(q) ||
+          yearSection.includes(q)
         );
       })
       .slice(0, 8);
@@ -81,7 +96,10 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
     return students.find((student) => Number(student.id) === Number(formData.studentId));
   }, [students, formData.studentId]);
 
-  const rightYearSection = matchedStudent?.year_section || "";
+  const rightYearSection = formatProgramYearSection(
+    matchedStudent?.program,
+    matchedStudent?.year_section,
+  );
 
   const selectStudent = (student) => {
     setFormData((prev) => ({
@@ -89,7 +107,7 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
       studentId: String(student.id),
       studentName: student.full_name || "",
       studentNo: student.school_id || "",
-      yearSection: student.year_section || "",
+      yearSection: formatProgramYearSection(student.program, student.year_section),
     }));
     setStudentQuery(student.full_name || "");
     setShowStudentSuggestions(false);
@@ -181,11 +199,10 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
                 setShowStudentSuggestions(true);
               }}
               onFocus={() => setShowStudentSuggestions(true)}
-              placeholder="Name, school ID, or year/section"
               className="w-full backdrop-blur-md border border-white/5 rounded-xl pl-4 pr-40 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] placeholder-gray-500 focus:outline-none focus:border-white/20 transition-all"
             />
             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-cyan-200 font-semibold truncate max-w-[130px] text-right">
-              {rightYearSection || "Year/Section"}
+              {rightYearSection || "Program-Year/Section"}
             </span>
           </div>
 
@@ -200,7 +217,7 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
                 >
                   <div className="text-sm text-white font-semibold">{student.full_name}</div>
                   <div className="text-xs text-gray-300">
-                    {student.school_id} | {student.year_section}
+                    {student.school_id} | {formatProgramYearSection(student.program, student.year_section)}
                   </div>
                 </button>
               ))}
@@ -213,22 +230,19 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
             label={<span className="text-sm font-medium text-white mb-2">Student Name</span>}
             value={formData.studentName}
             readOnly
-            placeholder="Student Name"
           />
           <GlassInput
             label={<span className="text-sm font-medium text-white mb-2">Student No.</span>}
             value={formData.studentNo}
             readOnly
-            placeholder="Student No."
           />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <GlassInput
-            label={<span className="text-sm font-medium text-white mb-2">Year/Section</span>}
+            label={<span className="text-sm font-medium text-white mb-2">Program-Year/Section</span>}
             value={formData.yearSection}
             readOnly
-            placeholder="Year/Section"
           />
 
           <div>
@@ -236,7 +250,6 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
             <input
               value={formData.violationLabel}
               readOnly
-              placeholder="Select from violations list"
               className="w-full backdrop-blur-md border border-white/5 rounded-xl px-4 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] placeholder-gray-500 focus:outline-none mb-2"
             />
             <Button
@@ -257,7 +270,6 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
             onChange={(event) =>
               setFormData((prev) => ({ ...prev, reportedBy: event.target.value }))
             }
-            placeholder="Reported by"
           />
         </div>
 
@@ -270,7 +282,6 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
             onChange={(event) =>
               setFormData((prev) => ({ ...prev, remarks: event.target.value }))
             }
-            placeholder="Remarks"
             rows={4}
             style={{ backgroundColor: "rgba(45, 47, 52, 0.8)" }}
             className="w-full backdrop-blur-md border border-white/5 rounded-xl px-4 py-3 text-[15px] text-white placeholder-gray-500 focus:outline-none focus:border-white/20 transition-all resize-y min-h-[80px]"

@@ -184,11 +184,11 @@ const EditArchiveModal = ({ isOpen, onClose, record, editType = "user", onSave }
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <GlassInput
-                label={<span className="text-sm font-medium text-white mb-2">Year/Section</span>}
+                label={<span className="text-sm font-medium text-white mb-2">Program-Year/Section</span>}
                 name="yearSection"
                 value={formData.yearSection}
                 onChange={handleChange}
-                placeholder="Year/Section"
+                placeholder="Program-Year/Section"
                 disabled
               />
               <GlassInput

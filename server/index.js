@@ -14,6 +14,7 @@ import {
   getMissingDbVars,
   hasDbConfig,
   syncAuthDatabase,
+  isAuthSchemaCurrent,
   syncStudentsFromUsers,
   syncStudentsDatabase,
   syncSystemSettingsDatabase,
@@ -1920,6 +1921,7 @@ async function getFullViolationRecord(pool, id) {
       svl.updated_at,
       s.school_id,
       s.full_name,
+      s.program,
       s.year_section,
       v.category AS violation_category,
       v.degree AS violation_degree,
@@ -1966,6 +1968,7 @@ app.get("/api/student-violations", async (_req, res) => {
         svl.updated_at,
         s.school_id,
         s.full_name,
+        s.program,
         s.year_section,
         v.category AS violation_category,
         v.degree AS violation_degree,
@@ -4462,6 +4465,7 @@ app.get("/api/archive/unresolved/:schoolYear/:semester", async (req, res) => {
         sva.original_updated_at,
         s.full_name as student_name,
         s.school_id,
+        s.program,
         s.year_section,
         v.category as violation_category,
         v.degree as violation_degree
@@ -4757,6 +4761,7 @@ app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
         sva.original_updated_at,
         s.full_name as student_name,
         s.school_id,
+        s.program,
         s.year_section,
         v.category as violation_category,
         v.degree as violation_degree
@@ -5176,6 +5181,16 @@ async function ensureAuthDatabaseReady() {
   if (!authSyncPromise) {
     const seedAccounts = getSeedAccountsFromEnv();
     authSyncPromise = (async () => {
+      const schemaIsCurrent = await isAuthSchemaCurrent();
+
+      if (schemaIsCurrent) {
+        await Promise.all([
+          syncAuthDatabase({ seedAccounts, skipSchemaCheck: true }),
+          syncStudentsFromUsers(),
+        ]);
+        return;
+      }
+
       // Group 1: all independent — create base tables in parallel.
       await Promise.all([
         syncAuthDatabase({ seedAccounts }),

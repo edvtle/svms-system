@@ -176,6 +176,10 @@ const EditViolationModal = ({
             onChange={handleChange}
             placeholder="Select date"
           />
+          <ReadOnlyInput label="Program" value={record?.program} />
+        </div>
+
+        <div className="mb-6">
           <ReadOnlyInput label="Year/Section" value={record?.year_section} />
         </div>
 
