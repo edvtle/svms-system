@@ -10,6 +10,19 @@ export default defineConfig({
     reportCompressedSize: false,
     // Target modern runtime used by current Electron/Chromium and modern browsers.
     target: "es2022",
+    // `exceljs` is legitimately large even when lazy-loaded; keep warnings meaningful.
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+
+          if (id.includes("exceljs")) return "exceljs";
+          if (id.includes("jspdf") || id.includes("html2canvas"))
+            return "pdf-tools";
+        },
+      },
+    },
   },
   server: {
     proxy: {

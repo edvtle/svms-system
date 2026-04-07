@@ -253,357 +253,357 @@ const createDownload = useCallback(async (record, format) => {
 	const filename = formatDownloadFileName(record, format, false, studentInfo);
 
 	if (format === 'excel') {
-    try {
-        const signatureSrc = record.signature || record.signature_image || record.signatureImage || '';
-        const [signatureImageData, { Workbook }, headerImage] = await Promise.all([
-            getSignatureImageData(signatureSrc),
-            import('exceljs'),
-            resolveHeaderImage(),
-        ]);
+	try {
+		const signatureSrc = record.signature || record.signature_image || record.signatureImage || '';
+		const [signatureImageData, { Workbook }, headerImage] = await Promise.all([
+			getSignatureImageData(signatureSrc),
+			import('exceljs'),
+			resolveHeaderImage(),
+		]);
 
-        const workbook = new Workbook();
-        const sheet = workbook.addWorksheet('Violation Slip');
+		const workbook = new Workbook();
+		const sheet = workbook.addWorksheet('Violation Slip');
 
-        sheet.pageSetup = {
-            orientation: 'landscape',
-            fitToPage: true,
-            fitToWidth: 1,
-            fitToHeight: 1,
-            horizontalCentered: true,
-        };
+		sheet.pageSetup = {
+			orientation: 'landscape',
+			fitToPage: true,
+			fitToWidth: 1,
+			fitToHeight: 1,
+			horizontalCentered: true,
+		};
 
-        sheet.columns = [
-            { width: 3 },
-            { width: 18 },
-            { width: 18 },
-            { width: 18 },
-            { width: 18 },
-            { width: 18 },
-            { width: 18 },
-            { width: 18 },
-            { width: 3 },
-        ];
+		sheet.columns = [
+			{ width: 3 },
+			{ width: 18 },
+			{ width: 18 },
+			{ width: 18 },
+			{ width: 18 },
+			{ width: 18 },
+			{ width: 18 },
+			{ width: 18 },
+			{ width: 3 },
+		];
 
-        sheet.getRow(1).height = 18;
-        sheet.getRow(2).height = 18;
-        sheet.getRow(3).height = 18;
-        sheet.getRow(4).height = 18;
-        sheet.getRow(5).height = 18;
-        sheet.getRow(6).height = 18;
-        sheet.getRow(7).height = 18;
-        sheet.getRow(8).height = 28;
-        sheet.getRow(9).height = 20;
-        sheet.getRow(10).height = 16;
-        sheet.getRow(11).height = 18;
-        sheet.getRow(12).height = 18;
-        sheet.getRow(13).height = 18;
-        sheet.getRow(14).height = 18;
-        sheet.getRow(15).height = 18;
-        sheet.getRow(16).height = 22;
-        sheet.getRow(17).height = 24;
-        sheet.getRow(18).height = 8;
-        sheet.getRow(19).height = 18;
-        sheet.getRow(20).height = 24;
-        sheet.getRow(21).height = 24;
-        sheet.getRow(22).height = 8;
-        sheet.getRow(23).height = 28;
-        sheet.getRow(24).height = 18;
-        sheet.getRow(25).height = 18;
-        sheet.getRow(26).height = 10;
-        sheet.getRow(27).height = 10;
-        sheet.getRow(28).height = 18;
-        sheet.getRow(29).height = 18;
-        sheet.getRow(30).height = 18;
-        sheet.getRow(31).height = 18;
+		for (let row = 1; row <= 34; row += 1) {
+			sheet.getRow(row).height = row <= 6 ? 18 : 20;
+		}
 
-        sheet.mergeCells('B1:H5');
-        if (headerImage.dataUrl && headerImage.dimensions) {
-            const headerId = workbook.addImage({ base64: headerImage.dataUrl, extension: 'png' });
-            sheet.addImage(headerId, {
-                tl: { col: 1, row: 0 },
-                br: { col: 8, row: 6 },
-            });
-        }
+		sheet.mergeCells('B1:H5');
+		if (headerImage.dataUrl && headerImage.dimensions) {
+			const headerId = workbook.addImage({ base64: headerImage.dataUrl, extension: 'png' });
+			sheet.addImage(headerId, {
+				tl: { col: 1, row: 0 },
+				br: { col: 8, row: 6 },
+			});
+		}
 
-        sheet.mergeCells('B8:H8');
-        const titleCell = sheet.getCell('B8');
-        titleCell.value = 'NON-COMPLIANCE SLIP (NCS)';
-        titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: 'FF000000' } };
-        titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+		sheet.mergeCells('B7:H7');
+		sheet.getCell('B7').value = 'Student Violation Report';
+		sheet.getCell('B7').font = { name: 'Calibri', size: 15, bold: true, color: { argb: 'FF111827' } };
+		sheet.getCell('B7').alignment = { horizontal: 'center', vertical: 'middle' };
 
-        sheet.mergeCells('B9:H9');
-        const subtitleCell = sheet.getCell('B9');
-        subtitleCell.value = 'Student Violation Report';
-        subtitleCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF4B5563' } };
-        subtitleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+		const violationText = record.violation || record.violation_label || record.violation_name || '-';
+		const rawRemarks = record.remarks || '-';
+		const remarksText = String(rawRemarks).trim() === '-' ? '' : rawRemarks;
+		const reportedBy = record.reportedBy || record.reported_by || '-';
+		const programYearSection = studentInfo.yearSection || '';
+		const studentName = `${studentInfo.lastName || ''}, ${studentInfo.firstName || ''}`
+			.replace(/^,\s*|\s*,\s*$/g, '')
+			.trim() || '-';
 
-        const violationText = record.violation || record.violation_label || record.violation_name || '-';
-        const remarksText = record.remarks || '-';
-        const reportedBy = record.reportedBy || record.reported_by || '-';
-        const programYearSection = studentInfo.yearSection || '';
-        const studentName = `${studentInfo.lastName.charAt(0).toUpperCase() + studentInfo.lastName.slice(1).toLowerCase()}, ${studentInfo.firstName.charAt(0).toUpperCase() + studentInfo.firstName.slice(1).toLowerCase()}`.trim();
+		const applyBorder = (range, style = 'thin') => {
+			const [start, end] = range.split(':');
+			const startCol = start.charCodeAt(0);
+			const endCol = end.charCodeAt(0);
+			const startRow = Number(start.slice(1));
+			const endRow = Number(end.slice(1));
 
-        sheet.mergeCells('B11:D11');
-        sheet.getCell('B11').value = {
-            richText: [
-                { text: 'Date: ', font: { name: 'Calibri', size: 11, bold: true } },
-                { text: formatDisplayDate(record.createdAtRaw || record.date), font: { name: 'Calibri', size: 11 } },
-            ],
-        };
-        sheet.getCell('B11').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+			for (let row = startRow; row <= endRow; row += 1) {
+				for (let col = startCol; col <= endCol; col += 1) {
+					const cell = sheet.getCell(`${String.fromCharCode(col)}${row}`);
+					cell.border = {
+						top: { style },
+						bottom: { style },
+						left: { style },
+						right: { style },
+					};
+				}
+			}
+		};
 
-        sheet.mergeCells('E11:H11');
-        sheet.getCell('E11').value = {
-            richText: [
-                { text: 'Student No: ', font: { name: 'Calibri', size: 11, bold: true } },
-                { text: studentNo, font: { name: 'Calibri', size: 11 } },
-            ],
-        };
-        sheet.getCell('E11').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+		// Main student information box (two-column layout like the sample).
+		sheet.mergeCells('B8:H11');
+		applyBorder('B8:H11');
+		sheet.getCell('E8').border = { left: { style: 'thin' } };
+		sheet.getCell('E9').border = { left: { style: 'thin' } };
+		sheet.getCell('E10').border = { left: { style: 'thin' } };
+		sheet.getCell('E11').border = { left: { style: 'thin' } };
 
-        sheet.mergeCells('B12:H12');
-        sheet.getCell('B12').value = {
-            richText: [
-                { text: 'Name of Student: ', font: { name: 'Calibri', size: 11, bold: true } },
-                { text: studentName, font: { name: 'Calibri', size: 11 } },
-            ],
-        };
-        sheet.getCell('B12').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+		sheet.mergeCells('B9:D9');
+		sheet.getCell('B9').value = {
+			richText: [
+				{ text: 'Date: ', font: { name: 'Calibri', size: 12, bold: true } },
+				{ text: formatDisplayDate(record.createdAtRaw || record.date), font: { name: 'Calibri', size: 12 } },
+			],
+		};
 
-        sheet.mergeCells('B13:H13');
-        sheet.getCell('B13').value = {
-            richText: [
-                { text: 'Program/Year & Sec.: ', font: { name: 'Calibri', size: 11, bold: true } },
-                { text: programYearSection, font: { name: 'Calibri', size: 11 } },
-            ],
-        };
-        sheet.getCell('B13').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+		sheet.mergeCells('E9:H9');
+		sheet.getCell('E9').value = {
+			richText: [
+				{ text: 'Student No: ', font: { name: 'Calibri', size: 12, bold: true } },
+				{ text: studentNo || '-', font: { name: 'Calibri', size: 12 } },
+			],
+		};
 
-        sheet.mergeCells('B15:H15');
-        sheet.getCell('B15').value = 'Violation:';
-        sheet.getCell('B15').font = { name: 'Calibri', size: 11, bold: true };
-        sheet.getCell('B15').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+		sheet.mergeCells('B10:D10');
+		sheet.getCell('B10').value = {
+			richText: [
+				{ text: 'Name: ', font: { name: 'Calibri', size: 12, bold: true } },
+				{ text: studentName, font: { name: 'Calibri', size: 12 } },
+			],
+		};
 
-        sheet.mergeCells('B16:H17');
-        sheet.getCell('B16').value = violationText;
-        sheet.getCell('B16').font = { name: 'Calibri', size: 11 };
-        sheet.getCell('B16').alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+		sheet.mergeCells('E10:H10');
+		sheet.getCell('E10').value = {
+			richText: [
+				{ text: 'Program/Section: ', font: { name: 'Calibri', size: 12, bold: true } },
+				{ text: programYearSection || '-', font: { name: 'Calibri', size: 12 } },
+			],
+		};
 
-        sheet.mergeCells('B19:H19');
-        sheet.getCell('B19').value = 'Remarks:';
-        sheet.getCell('B19').font = { name: 'Calibri', size: 11, bold: true };
-        sheet.getCell('B19').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+		// Violation section.
+		sheet.mergeCells('B13:H13');
+		sheet.getCell('B13').value = 'VIOLATION';
+		sheet.getCell('B13').font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF111827' } };
+		sheet.getCell('B13').fill = {
+			type: 'pattern',
+			pattern: 'solid',
+			fgColor: { argb: 'FFE5E7EB' },
+		};
+		sheet.getCell('B13').alignment = { horizontal: 'left', vertical: 'middle' };
+		applyBorder('B13:H13');
 
-        sheet.mergeCells('B20:H21');
-        sheet.getCell('B20').value = remarksText;
-        sheet.getCell('B20').font = { name: 'Calibri', size: 11 };
-        sheet.getCell('B20').alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+		sheet.mergeCells('B14:H16');
+		sheet.getCell('B14').value = violationText;
+		sheet.getCell('B14').font = { name: 'Calibri', size: 12, color: { argb: 'FF111827' } };
+		sheet.getCell('B14').alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+		applyBorder('B14:H16');
 
-        sheet.mergeCells('B23:D23');
-        sheet.getCell('B23').value = 'Conforme:';
-        sheet.getCell('B23').font = { name: 'Calibri', size: 11, bold: true };
-        sheet.getCell('B23').alignment = { horizontal: 'left', vertical: 'middle' };
+		// Remarks section.
+		sheet.mergeCells('B18:H18');
+		sheet.getCell('B18').value = 'REMARKS';
+		sheet.getCell('B18').font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF111827' } };
+		sheet.getCell('B18').fill = {
+			type: 'pattern',
+			pattern: 'solid',
+			fgColor: { argb: 'FFE5E7EB' },
+		};
+		sheet.getCell('B18').alignment = { horizontal: 'left', vertical: 'middle' };
+		applyBorder('B18:H18');
 
-        sheet.mergeCells('E23:H23');
-        sheet.getCell('E23').value = 'Personnel In-Charge:';
-        sheet.getCell('E23').font = { name: 'Calibri', size: 11, bold: true };
-        sheet.getCell('E23').alignment = { horizontal: 'left', vertical: 'middle' };
+		sheet.mergeCells('B19:H22');
+		sheet.getCell('B19').value = remarksText;
+		sheet.getCell('B19').font = { name: 'Calibri', size: 12, color: { argb: 'FF111827' } };
+		sheet.getCell('B19').alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+		applyBorder('B19:H22');
 
-        sheet.mergeCells('B24:D24');
-        if (signatureImageData) {
-            const signatureImageId = workbook.addImage({ base64: signatureImageData, extension: 'png' });
-            sheet.addImage(signatureImageId, {
-                tl: { col: 1.1, row: 23.3 },
-                ext: { width: 80, height: 18 },
-            });
-        } else {
-            sheet.getCell('B24').value = '[ATTACHED SIGNATURE]';
-            sheet.getCell('B24').font = { name: 'Calibri', size: 10 };
-            sheet.getCell('B24').alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        }
+		sheet.mergeCells('B24:H24');
+		sheet.getCell('B24').value = 'STUDENT COPY';
+		sheet.getCell('B24').font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF4B5563' } };
+		sheet.getCell('B24').alignment = { horizontal: 'center', vertical: 'middle' };
+		sheet.getCell('B24').border = { top: { style: 'thin' } };
 
-        sheet.mergeCells('E24:H24');
-        sheet.getCell('E24').value = reportedBy || '[NAME OF REPORTED BY]';
-        sheet.getCell('E24').font = { name: 'Calibri', size: 11, bold: true, underline: 'single' };
-        sheet.getCell('E24').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+		// Signature area.
+		sheet.mergeCells('B26:D26');
+		sheet.getCell('B26').value = 'Student Signature';
+		sheet.getCell('B26').font = { name: 'Calibri', size: 11, color: { argb: 'FF111827' } };
+		sheet.getCell('B26').alignment = { horizontal: 'left', vertical: 'bottom' };
 
-        sheet.mergeCells('B25:D25');
-        sheet.getCell('B25').value = 'Student Signature';
-        sheet.getCell('B25').font = { name: 'Calibri', size: 10 };
-        sheet.getCell('B25').alignment = { horizontal: 'left', vertical: 'middle' };
+		sheet.mergeCells('E26:H26');
+		sheet.getCell('E26').value = 'Reported By';
+		sheet.getCell('E26').font = { name: 'Calibri', size: 11, color: { argb: 'FF111827' } };
+		sheet.getCell('E26').alignment = { horizontal: 'left', vertical: 'bottom' };
 
-        sheet.mergeCells('E25:H25');
-        sheet.getCell('E25').value = 'Printed Name';
-        sheet.getCell('E25').font = { name: 'Calibri', size: 10 };
-        sheet.getCell('E25').alignment = { horizontal: 'left', vertical: 'middle' };
+		sheet.mergeCells('B27:D27');
+		sheet.mergeCells('E27:H27');
+		sheet.getCell('B27').border = { bottom: { style: 'thin' } };
+		sheet.getCell('E27').border = { bottom: { style: 'thin' } };
 
-        sheet.mergeCells('B28:H28');
-        sheet.getCell('B28').value = ' STUDENT COPY';
-        sheet.getCell('B28').font = { name: 'Calibri', size: 10, bold: true };
-        sheet.getCell('B28').alignment = { horizontal: 'left', vertical: 'middle' };
+		if (signatureImageData) {
+			const signatureImageId = workbook.addImage({ base64: signatureImageData, extension: 'png' });
+			sheet.addImage(signatureImageId, {
+				tl: { col: 1.2, row: 25.6 },
+				ext: { width: 120, height: 26 },
+			});
+		}
 
-        sheet.mergeCells('B29:H29');
-        sheet.getCell('B29').value = ' (Please coordinate in the SSO within 2-3 working days, else sanction will be given)';
-        sheet.getCell('B29').font = { name: 'Calibri', size: 9 };
-        sheet.getCell('B29').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+		sheet.getCell('E27').value = reportedBy || '-';
+		sheet.getCell('E27').font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF111827' } };
+		sheet.getCell('E27').alignment = { horizontal: 'left', vertical: 'bottom' };
 
-        for (let rowIndex = 9; rowIndex <= 29; rowIndex += 1) {
-            sheet.getRow(rowIndex).eachCell((cell) => {
-                if (!cell.font) cell.font = {};
-                cell.font = { ...cell.font, name: 'Calibri', size: 11, color: { argb: 'FF1F2937' } };
-            });
-        }
+		sheet.mergeCells('E28:H28');
+		sheet.getCell('E28').value = 'Printed Name';
+		sheet.getCell('E28').font = { name: 'Calibri', size: 10, color: { argb: 'FF4B5563' } };
+		sheet.getCell('E28').alignment = { horizontal: 'left', vertical: 'top' };
 
-        const buffer = await workbook.xlsx.writeBuffer();
-        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', filename);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    } catch (error) {
-        console.error('Excel export failed', error);
-        alert('Unable to generate Excel download.');
-    }
-    return;
+		const contentCells = ['B9', 'E9', 'B10', 'E10', 'B14', 'B19'];
+		contentCells.forEach((cellRef) => {
+			const cell = sheet.getCell(cellRef);
+			cell.alignment = { ...(cell.alignment || {}), wrapText: true };
+		});
+
+		const buffer = await workbook.xlsx.writeBuffer();
+		const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.setAttribute('download', filename);
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+		URL.revokeObjectURL(url);
+	} catch (error) {
+		console.error('Excel export failed', error);
+		alert('Unable to generate Excel download.');
+	}
+	return;
 }
 if (format === 'pdf') {
-    try {
-        const signatureSrc = record.signature || record.signature_image || record.signatureImage || '';
-        const [signatureImageData, { jsPDF }, headerImage] = await Promise.all([
-            getSignatureImageData(signatureSrc),
-            import('jspdf'),
-            resolveHeaderImage(),
-        ]);
+	try {
+		const signatureSrc = record.signature || record.signature_image || record.signatureImage || '';
+		const [signatureImageData, { jsPDF }, headerImage] = await Promise.all([
+			getSignatureImageData(signatureSrc),
+			import('jspdf'),
+			resolveHeaderImage(),
+		]);
 
-        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 15;
-        const contentWidth = pageWidth - margin * 2;
-        let cursorY = 10;
+		const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+		const pageWidth = doc.internal.pageSize.getWidth();
+		const margin = 14;
+		const contentWidth = pageWidth - margin * 2;
+		let cursorY = 10;
 
-        if (headerImage.dataUrl && headerImage.dimensions) {
-            const imageScale = Math.min(1, contentWidth / headerImage.dimensions.width);
-            const headerWidth = headerImage.dimensions.width * imageScale;
-            const headerHeight = Math.min(headerImage.dimensions.height * imageScale, 50);
-            const headerX = margin + (contentWidth - headerWidth) / 2;
-            doc.addImage(headerImage.dataUrl, 'PNG', headerX, cursorY, headerWidth, headerHeight);
-            cursorY += headerHeight + 8;
-        }
+		if (headerImage.dataUrl && headerImage.dimensions) {
+			const imageScale = Math.min(1, contentWidth / headerImage.dimensions.width);
+			const headerWidth = headerImage.dimensions.width * imageScale;
+			const headerHeight = Math.min(headerImage.dimensions.height * imageScale, 50);
+			const headerX = margin + (contentWidth - headerWidth) / 2;
+			doc.addImage(headerImage.dataUrl, 'PNG', headerX, cursorY, headerWidth, headerHeight);
+			cursorY += headerHeight + 6;
+		}
 
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(18);
-        doc.text('NON-COMPLIANCE SLIP (NCS)', pageWidth / 2, cursorY, { align: 'center' });
-        cursorY += 10;
-        doc.setFontSize(12);
-        doc.text('Student Violation Report', pageWidth / 2, cursorY, { align: 'center' });
-        cursorY += 12;
+		doc.setFont('helvetica', 'bold');
+		doc.setFontSize(14);
+		doc.text('Student Violation Report', pageWidth / 2, cursorY + 2, { align: 'center' });
+		cursorY += 8;
 
-        const violationText = record.violation || record.violation_label || record.violation_name || '-';
-        const remarksText = record.remarks || '-';
-        const reportedBy = record.reportedBy || record.reported_by || '-';
-        const programYearSection = studentInfo.yearSection || '';
-        const studentName = `${studentInfo.lastName.charAt(0).toUpperCase() + studentInfo.lastName.slice(1).toLowerCase()}, ${studentInfo.firstName.charAt(0).toUpperCase() + studentInfo.firstName.slice(1).toLowerCase()}`.trim();
+		const violationText = record.violation || record.violation_label || record.violation_name || '-';
+		const rawRemarks = record.remarks || '-';
+		const remarksText = String(rawRemarks).trim() === '-' ? '' : rawRemarks;
+		const reportedBy = record.reportedBy || record.reported_by || '-';
+		const programYearSection = studentInfo.yearSection || '-';
+		const studentName = `${studentInfo.lastName || ''}, ${studentInfo.firstName || ''}`
+			.replace(/^,\s*|\s*,\s*$/g, '')
+			.trim() || '-';
 
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.text('Date:', margin, cursorY);
-        doc.setFont('helvetica', 'normal');
-        doc.text(formatDisplayDate(record.createdAtRaw || record.date), margin + 18, cursorY);
+		const drawLabelValue = (x, y, label, value, maxWidth = 62) => {
+			doc.setFont('helvetica', 'bold');
+			doc.setFontSize(11);
+			doc.text(label, x, y);
+			const offset = doc.getTextWidth(label) + 2;
+			doc.setFont('helvetica', 'normal');
+			doc.text(String(value || '-'), x + offset, y, { maxWidth });
+		};
 
-        doc.setFont('helvetica', 'bold');
-        const studentNoLabel = 'Student No:';
-        doc.text(studentNoLabel, pageWidth - margin - doc.getTextWidth(studentNo) - 24, cursorY);
-        doc.setFont('helvetica', 'normal');
-        doc.text(studentNo, pageWidth - margin, cursorY, { align: 'right' });
-        cursorY += 7;
+		// Student info box.
+		const infoY = cursorY;
+		const infoH = 24;
+		const midX = margin + contentWidth / 2;
+		doc.setDrawColor(203, 213, 225);
+		doc.setLineWidth(0.3);
+		doc.rect(margin, infoY, contentWidth, infoH);
+		doc.line(midX, infoY + 4, midX, infoY + infoH - 4);
+		doc.line(margin + 4, infoY + 12, midX - 4, infoY + 12);
+		doc.line(midX + 4, infoY + 12, margin + contentWidth - 4, infoY + 12);
 
-        doc.setFont('helvetica', 'bold');
-        doc.text('Name of Student:', margin, cursorY);
-        doc.setFont('helvetica', 'normal');
-        doc.text(studentName, margin + 42, cursorY, { maxWidth: contentWidth - 42 });
-        cursorY += 7;
+		drawLabelValue(margin + 6, infoY + 8, 'Date:', formatDisplayDate(record.createdAtRaw || record.date), 54);
+		drawLabelValue(midX + 6, infoY + 8, 'Student No:', studentNo || '-', 54);
+		drawLabelValue(margin + 6, infoY + 19, 'Name:', studentName, 54);
+		drawLabelValue(midX + 6, infoY + 19, 'Program/Section:', programYearSection, 54);
+		cursorY = infoY + infoH + 8;
 
-        doc.setFont('helvetica', 'bold');
-        doc.text('Program/Year & Sec.:', margin, cursorY);
-        doc.setFont('helvetica', 'normal');
-        doc.text(programYearSection, margin + 60, cursorY, { maxWidth: contentWidth - 60 });
-        cursorY += 14;
+		// VIOLATION section.
+		const sectionHeaderH = 8;
+		doc.setFillColor(229, 231, 235);
+		doc.rect(margin, cursorY, contentWidth, sectionHeaderH, 'F');
+		doc.rect(margin, cursorY, contentWidth, sectionHeaderH);
+		doc.setFont('helvetica', 'bold');
+		doc.setFontSize(11);
+		doc.text('VIOLATION', margin + 6, cursorY + 5.5);
 
-        doc.setFont('helvetica', 'bold');
-        doc.text('Violation:', margin, cursorY);
-        doc.setFont('helvetica', 'normal');
-        cursorY += 6;
-        const violationLines = doc.splitTextToSize(violationText, contentWidth);
-        doc.text(violationLines, margin, cursorY);
-        cursorY += violationLines.length * 5 + 6;
+		const violationLines = doc.splitTextToSize(String(violationText), contentWidth - 12);
+		const violationBodyH = Math.max(14, violationLines.length * 5 + 5);
+		doc.rect(margin, cursorY + sectionHeaderH, contentWidth, violationBodyH);
+		doc.setFont('helvetica', 'normal');
+		doc.setFontSize(12);
+		doc.text(violationLines, margin + 6, cursorY + sectionHeaderH + 7);
+		cursorY += sectionHeaderH + violationBodyH + 6;
 
-        doc.setFont('helvetica', 'bold');
-        doc.text('Remarks:', margin, cursorY);
-        doc.setFont('helvetica', 'normal');
-        cursorY += 6;
-        const remarksLines = doc.splitTextToSize(remarksText, contentWidth);
-        doc.text(remarksLines, margin, cursorY);
-        cursorY += remarksLines.length * 5 + 12;
+		// REMARKS section.
+		doc.setFillColor(229, 231, 235);
+		doc.rect(margin, cursorY, contentWidth, sectionHeaderH, 'F');
+		doc.rect(margin, cursorY, contentWidth, sectionHeaderH);
+		doc.setFont('helvetica', 'bold');
+		doc.setFontSize(11);
+		doc.text('REMARKS', margin + 6, cursorY + 5.5);
 
-        const leftColX = margin;
-        const rightColX = pageWidth / 2 + 2;
-        const colWidth = contentWidth / 2 - 4;
+		const remarksLines = doc.splitTextToSize(String(remarksText), contentWidth - 12);
+		const remarksBodyH = Math.max(20, remarksLines.length * 5 + 9);
+		doc.rect(margin, cursorY + sectionHeaderH, contentWidth, remarksBodyH);
+		doc.setFont('helvetica', 'normal');
+		doc.setFontSize(12);
+		doc.text(remarksLines, margin + 6, cursorY + sectionHeaderH + 7);
+		cursorY += sectionHeaderH + remarksBodyH + 8;
 
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.text('Conforme:', leftColX, cursorY);
-        doc.text('Personnel In-Charge:', rightColX, cursorY);
-        cursorY += 6;
+		doc.setDrawColor(203, 213, 225);
+		doc.line(margin, cursorY, margin + contentWidth, cursorY);
+		cursorY += 7;
 
-        const signatureHeight = 20;
-        const signatureWidth = 65;
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
+		doc.setFont('helvetica', 'bold');
+		doc.setFontSize(11);
+		doc.setTextColor(75, 85, 99);
+		doc.text('STUDENT COPY', pageWidth / 2, cursorY, { align: 'center' });
+		doc.setTextColor(0, 0, 0);
+		cursorY += 8;
 
-        if (signatureImageData) {
-            doc.addImage(signatureImageData, 'PNG', leftColX, cursorY, signatureWidth, signatureHeight);
-        } else {
-            doc.setFont('helvetica', 'italic');
-            doc.setFontSize(9);
-            doc.text('[ATTACHED SIGNATURE]', leftColX + signatureWidth / 2, cursorY + signatureHeight / 2, { align: 'center' });
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(10);
-        }
+		const leftColX = margin + 6;
+		const rightColX = margin + contentWidth / 2 + 6;
+		const signLineY = cursorY + 16;
 
-        const signatureLabelY = cursorY + signatureHeight + 8;
-        doc.setFont('helvetica', 'bold');
-        const reportedByText = reportedBy || '[NAME OF REPORTED BY]';
-        const reportedByY = signatureLabelY - 6;
-        doc.text(reportedByText, rightColX, reportedByY, { maxWidth: colWidth });
-        const reportedByWidth = doc.getTextWidth(reportedByText);
-        const underlineY = reportedByY + 2;
-        doc.line(rightColX, underlineY, rightColX + reportedByWidth, underlineY);
+		doc.setFont('helvetica', 'normal');
+		doc.setFontSize(11);
+		doc.text('Student Signature', leftColX, cursorY + 3);
+		doc.text('Reported By', rightColX, cursorY + 3);
 
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.text('Student Signature', leftColX, signatureLabelY);
-        doc.text('Printed Name', rightColX, signatureLabelY);
+		if (signatureImageData) {
+			doc.addImage(signatureImageData, 'PNG', leftColX, cursorY + 5, 46, 12);
+		}
 
-        const footerY = pageHeight - 24;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.text('STUDENT COPY', pageWidth - margin, footerY, { align: 'right' });
+		doc.line(leftColX, signLineY, leftColX + 68, signLineY);
+		doc.line(rightColX, signLineY, rightColX + 68, signLineY);
 
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6);
-        const disclaimerLines = doc.splitTextToSize('(Please coordinate in the SSO within 2-3 working days, else sanction will be given)', contentWidth / 2);
-        doc.text(disclaimerLines, pageWidth - margin, footerY + 4, { align: 'right' });
+		doc.setFont('helvetica', 'bold');
+		doc.setFontSize(12);
+		doc.text(reportedBy || '-', rightColX, signLineY - 2, { maxWidth: 68 });
+		doc.setFont('helvetica', 'normal');
+		doc.setFontSize(10);
+		doc.text('Printed Name', rightColX, signLineY + 6);
 
-        doc.save(filename);
-    } catch (error) {
-        console.error('PDF export failed', error);
-        alert('Unable to generate PDF download.');
-    }
+		doc.save(filename);
+	} catch (error) {
+		console.error('PDF export failed', error);
+		alert('Unable to generate PDF download.');
+	}
 }
 }, [formatDownloadFileName, getStudentInfo, resolveHeaderImage]);
 

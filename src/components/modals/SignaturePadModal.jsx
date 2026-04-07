@@ -7,39 +7,62 @@ const CANVAS_HEIGHT = 220;
 
 function SignaturePadModal({ isOpen, onClose, onSave }) {
   const canvasRef = useRef(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false);
+  const lastPointRef = useRef(null);
+  const lastMidPointRef = useRef(null);
   const [hasSignature, setHasSignature] = useState(false);
+
+  const setupCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+
+    const logicalWidth = Math.max(canvas.clientWidth || CANVAS_WIDTH, 1);
+    const logicalHeight = Math.max(canvas.clientHeight || CANVAS_HEIGHT, 1);
+    const dpr = Math.max(window.devicePixelRatio || 1, 1);
+    canvas.width = Math.floor(logicalWidth * dpr);
+    canvas.height = Math.floor(logicalHeight * dpr);
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+    ctx.strokeStyle = "#111827";
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    return ctx;
+  };
 
   useEffect(() => {
     if (!isOpen) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "#111827";
-    ctx.lineWidth = 2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+    setupCanvas();
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+    lastMidPointRef.current = null;
+    setHasSignature(false);
   }, [isOpen]);
 
   const getPosition = (event) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
 
-    if (event.touches?.[0]) {
-      return {
-        x: event.touches[0].clientX - rect.left,
-        y: event.touches[0].clientY - rect.top,
-      };
-    }
+    const point = event.touches?.[0]
+      ? { x: event.touches[0].clientX, y: event.touches[0].clientY }
+      : { x: event.clientX, y: event.clientY };
 
     return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
+      x: point.x - rect.left,
+      y: point.y - rect.top,
     };
   };
+
+  const midpoint = (a, b) => ({
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  });
 
   const startDrawing = (event) => {
     event.preventDefault();
@@ -48,13 +71,20 @@ function SignaturePadModal({ isOpen, onClose, onSave }) {
     if (!ctx) return;
 
     const pos = getPosition(event);
+    const dotSize = ctx.lineWidth / 2;
     ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    setIsDrawing(true);
+    ctx.arc(pos.x, pos.y, dotSize, 0, Math.PI * 2);
+    ctx.fillStyle = "#111827";
+    ctx.fill();
+
+    lastPointRef.current = pos;
+    lastMidPointRef.current = pos;
+    isDrawingRef.current = true;
+    setHasSignature(true);
   };
 
   const draw = (event) => {
-    if (!isDrawing) return;
+    if (!isDrawingRef.current) return;
     event.preventDefault();
 
     const canvas = canvasRef.current;
@@ -62,24 +92,39 @@ function SignaturePadModal({ isOpen, onClose, onSave }) {
     if (!ctx) return;
 
     const pos = getPosition(event);
-    ctx.lineTo(pos.x, pos.y);
+    const lastPoint = lastPointRef.current;
+    const lastMidPoint = lastMidPointRef.current;
+    if (!lastPoint || !lastMidPoint) {
+      lastPointRef.current = pos;
+      lastMidPointRef.current = pos;
+      return;
+    }
+
+    const mid = midpoint(lastPoint, pos);
+    ctx.beginPath();
+    ctx.moveTo(lastMidPoint.x, lastMidPoint.y);
+    ctx.quadraticCurveTo(lastPoint.x, lastPoint.y, mid.x, mid.y);
     ctx.stroke();
+
+    lastPointRef.current = pos;
+    lastMidPointRef.current = mid;
     setHasSignature(true);
   };
 
   const stopDrawing = (event) => {
     if (event) event.preventDefault();
-    setIsDrawing(false);
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+    lastMidPointRef.current = null;
   };
 
   const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
+    const ctx = setupCanvas();
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+    lastMidPointRef.current = null;
     setHasSignature(false);
   };
 
@@ -108,8 +153,6 @@ function SignaturePadModal({ isOpen, onClose, onSave }) {
         <div className="bg-white rounded-xl border border-gray-200 p-3">
           <canvas
             ref={canvasRef}
-            width={CANVAS_WIDTH}
-            height={CANVAS_HEIGHT}
             className="w-full h-[220px] rounded-lg cursor-crosshair touch-none"
             onMouseDown={startDrawing}
             onMouseMove={draw}

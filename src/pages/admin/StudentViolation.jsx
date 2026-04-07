@@ -74,6 +74,12 @@ const formatProgramYearSection = (program, yearSection) => {
   return programText || yearSectionText || "";
 };
 
+const normalizeRemarksText = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-") return "";
+  return text;
+};
+
 const StudentViolation = () => {
   const location = useLocation();
   const [showLogModal, setShowLogModal] = useState(false);
@@ -659,7 +665,7 @@ const StudentViolation = () => {
       key: "remarks",
       label: "Remarks",
       render: (_value, row) => {
-        const text = String(row.remarks || "-");
+        const text = normalizeRemarksText(row.remarks);
         const maxLetters = 20;
         const needsToggle = text.length > maxLetters;
         const isExpanded = expandedRemarks.has(row.id);
@@ -756,7 +762,7 @@ const StudentViolation = () => {
       program: row.program || "",
       violation: row.violation_label || row.violation_name || "",
       reportedBy: row.reported_by || "-",
-      remarks: row.remarks || "-",
+      remarks: normalizeRemarksText(row.remarks),
       signatureImage: row.signature_image || "",
       clearedAt: cleared
         ? `${cleared.toLocaleDateString()} ${cleared.toLocaleTimeString([], {
@@ -779,7 +785,7 @@ const StudentViolation = () => {
         program: row.program || "",
         violation: row.violation || "",
         reportedBy: row.reportedBy || "-",
-        remarks: row.remarks || "-",
+        remarks: normalizeRemarksText(row.remarks),
         signatureImage: row.signatureImage || "",
         status: row.clearedAt ? `Cleared (${row.clearedAt})` : "Pending",
       })),
