@@ -6,7 +6,7 @@ import Modal, { ModalFooter } from '../../components/ui/Modal';
 import AnimatedContent from '../../components/ui/AnimatedContent';
 import SearchBar from '../../components/ui/SearchBar';
 import Button from '../../components/ui/Button';
-import { Bell, Download, Filter } from 'lucide-react';
+import { Bell, Download, Filter, ChevronDown } from 'lucide-react';
 import { getAuditHeaders } from '@/lib/auditHeaders';
 
 const EXPORT_HEADER_IMAGE_PATH = '/plpasig_header.png';
@@ -213,28 +213,8 @@ const formatDisplayDate = (rawDate) => {
 };
 
 const formatDownloadFileName = useCallback((record, format, isAllRecords = false, studentInfo = {}) => {
-	// Use provided student info first, then fall back to record data
-	let surname = studentInfo.lastName ? studentInfo.lastName.trim().replace(/\s+/g, '_') : '';
-	let givenName = studentInfo.firstName ? studentInfo.firstName.trim().replace(/\s+/g, '_') : '';
-
-	// Fallback to record data if not provided
-	if (!surname) {
-		const recordSurname = (record?.student_last_name || record?.last_name || record?.surname || '').toString().trim();
-		surname = recordSurname ? recordSurname.replace(/\s+/g, '_') : '';
-	}
-	if (!givenName) {
-		const recordFirstName = (record?.student_first_name || record?.first_name || record?.given_name || '').toString().trim();
-		givenName = recordFirstName ? recordFirstName.replace(/\s+/g, '_') : '';
-	}
-
-	// Build student segment - NEVER use "Unknown_Student"
-	const studentSegment = [surname, givenName].filter(Boolean).join('_');
-	if (!studentSegment) {
-		console.warn('Warning: Unable to determine student name for export');
-	}
-	
 	const violationSegment = isAllRecords 
-		? 'AllViolations'
+		? 'Violations'
 		: (record?.violation || record?.violation_label || record?.violation_name || 'Violation')
 			.toString()
 			.trim()
@@ -247,11 +227,10 @@ const formatDownloadFileName = useCallback((record, format, isAllRecords = false
 			.replace(/[\\/:*?"<>|]/g, '')
 			.trim();
 
-	const safeStudentSegment = sanitize(studentSegment);
 	const safeViolationSegment = sanitize(violationSegment).replace(/\s+/g, '_');
 	const ext = format === 'pdf' ? 'pdf' : 'xlsx';
 
-	return `${safeStudentSegment}_${safeViolationSegment}_${dateSegment}.${ext}`;
+	return `${safeViolationSegment.toLowerCase()}_${dateSegment}.${ext}`;
 }, [formatDateForFileName]);
 
 const createDownload = useCallback(async (record, format) => {
@@ -1411,84 +1390,97 @@ sheet.mergeCells('C1:E3');
 									{error}
 								</div>
 							) : null}
-							<DataTable columns={columns} data={tableData} className="mt-2" />							<Modal
+							<DataTable columns={columns} data={tableData} className="mt-2" />
+							<Modal
 								isOpen={downloadModalOpen}
 								onClose={() => setDownloadModalOpen(false)}
-								title="Download Violation Record"
-								size="sm"
+								title={<span className="font-black font-inter">Download Violation Record</span>}
+								size="md"
 							>
-								<div className="space-y-3">
-									<p className="text-sm text-gray-200">Choose download format for:</p>
-									<p className="text-sm font-semibold text-white">
-										{selectedDownloadRecord?.violation ?? 'No violation selected'}
+								<p className="text-sm text-gray-300 mb-3">Choose a format for downloading the selected violation.</p>
+								<div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 mb-4">
+									<p className="text-xs text-gray-300">
+										Violation: <span className="font-semibold text-white">{selectedDownloadRecord?.violation ?? 'No violation selected'}</span>
 									</p>
+								</div>
+
+								<label className="block text-sm font-medium text-white mb-2">Format</label>
+								<div className="relative">
 									<select
 										value={downloadFormat}
 										onChange={(e) => setDownloadFormat(e.target.value)}
-										className="w-full rounded-lg border border-gray-500/30 bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
+										className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
 									>
 										<option value="excel">Excel</option>
 										<option value="pdf">PDF</option>
 									</select>
+									<ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
 								</div>
 								<ModalFooter>
-									<button
+									<Button
 										type="button"
-										className="rounded-lg border border-white/20 px-4 py-2 text-sm text-white hover:bg-white/10"
+										variant="outline"
 										onClick={() => setDownloadModalOpen(false)}
+										className="px-6 py-2.5"
 									>
 										Cancel
-									</button>
-									<button
+									</Button>
+									<Button
 										type="button"
-										className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200"
+										variant="primary"
 										onClick={confirmDownload}
+										className="px-6 py-2.5"
 									>
 										Download
-									</button>
+									</Button>
 								</ModalFooter>
 							</Modal>
 
 							<Modal
 								isOpen={downloadAllModalOpen}
 								onClose={() => setDownloadAllModalOpen(false)}
-								title="Export All Violations"
-								size="sm"
+								title={<span className="font-black font-inter">Export All Violations</span>}
+								size="md"
 							>
-								<div className="space-y-3">
-									<div>
-										<p className="text-sm text-gray-200">Export all violation records in the selected format.</p>
-									</div>
-									<div className="border border-gray-400 rounded px-3 py-2">
-										<label className="text-xs text-gray-300">Rows to export: {records.length}</label>
-									</div>
-									<div className="text-sm font-semibold text-white">Format</div>
+								<p className="text-sm text-gray-300 mb-3">Choose a format for exporting the current table view.</p>
+								<div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 mb-4">
+									<p className="text-xs text-gray-300">
+										Rows to export: <span className="font-semibold text-white">{records.length}</span>
+									</p>
+								</div>
+
+								<label className="block text-sm font-medium text-white mb-2">Format</label>
+								<div className="relative">
 									<select
 										value={downloadAllFormat}
 										onChange={(e) => setDownloadAllFormat(e.target.value)}
-										className="w-full rounded-lg border border-gray-500/30 bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
+										className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
 									>
 										<option value="excel">Excel (.xlsx)</option>
 										<option value="pdf">PDF</option>
 									</select>
+									<ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
 								</div>
 								<ModalFooter>
-									<button
+									<Button
 										type="button"
-										className="rounded-lg border border-white/20 px-4 py-2 text-sm text-white hover:bg-white/10"
+										variant="outline"
 										onClick={() => setDownloadAllModalOpen(false)}
+										className="px-6 py-2.5"
 									>
 										Cancel
-									</button>
-									<button
+									</Button>
+									<Button
 										type="button"
-										className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200"
+										variant="primary"
 										onClick={confirmDownloadAll}
+										className="px-6 py-2.5"
 									>
 										Export
-									</button>
+									</Button>
 								</ModalFooter>
-							</Modal>						</>
+							</Modal>
+						</>
 					)}
 				</Card>
 			</div>
