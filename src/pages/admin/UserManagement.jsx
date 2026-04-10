@@ -1330,7 +1330,9 @@ const UserManagement = () => {
       <AnimatedContent distance={40} delay={0.1}>
         <div className="flex items-center gap-2 mb-4">
           <div className="flex items-center gap-2">
-            <p className="text-white font-semibold">{currentSemester} S.Y. {currentSchoolYear}</p>
+            <div className="px-3 py-1 bg-blue-500/20 border border-blue-500/40 rounded-full text-sm font-medium text-blue-300">
+              {currentSemester} S.Y. {currentSchoolYear}
+            </div>
             <button
               onClick={() => setShowEditSemesterModal(true)}
               className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
