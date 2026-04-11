@@ -68,8 +68,7 @@ const Modal = ({
       />
       {/* Modal Content */}
       <div
-        className={`relative my-auto w-full ${sizes[size]} bg-gradient-to-br from-[#2a2d35]/80 to-[#1a1c20]/80 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] ring-1 ring-inset ring-white/10 ${className} transform transition-transform duration-300 ${isOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'} max-h-[calc(100vh-2rem)] overflow-y-auto scrollbar-hide sm:max-h-[calc(100vh-3rem)]`}
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        className={`modal-scrollbar relative my-auto w-full ${sizes[size]} bg-gradient-to-br from-[#2a2d35]/80 to-[#1a1c20]/80 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] ring-1 ring-inset ring-white/10 ${className} transform transition-transform duration-300 ${isOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'} max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-h-[calc(100vh-3rem)]`}
       >
         {/* Header */}
         {(title || showCloseButton) && (

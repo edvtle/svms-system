@@ -1975,7 +1975,7 @@ app.get("/api/student-violations", async (_req, res) => {
         v.name AS violation_name
       FROM student_violation_logs svl
       INNER JOIN "Students" s ON s.id = svl.student_id
-      LEFT JOIN violations v ON v.id = svl.violation_catalog_id
+      INNER JOIN violations v ON v.id = svl.violation_catalog_id
       WHERE svl.cleared_at IS NULL
       ORDER BY svl.created_at DESC, svl.id DESC
       `,
@@ -2039,7 +2039,7 @@ app.get("/api/student-violations/me", async (req, res) => {
         v.name AS violation_name
       FROM student_violation_logs svl
       INNER JOIN "Students" s ON s.id = svl.student_id
-      LEFT JOIN violations v ON v.id = svl.violation_catalog_id
+      INNER JOIN violations v ON v.id = svl.violation_catalog_id
       WHERE s.user_id = $1
       ORDER BY svl.created_at DESC, svl.id DESC
       `,

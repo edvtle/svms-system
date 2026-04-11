@@ -160,104 +160,105 @@ const EditViolationModal = ({
       showCloseButton
       className="max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-1.5rem)]"
     >
-      <form onSubmit={handleSubmit} className="max-h-[calc(100vh-11rem)] overflow-y-auto pr-1">
-        <p className="text-sm text-gray-300 mb-4">Edit this student violation record.</p>
+      <form onSubmit={handleSubmit} className="flex max-h-[calc(100vh-11rem)] flex-col">
+        <div className="modal-scrollbar flex-1 overflow-y-auto pr-2">
+          <p className="text-sm text-gray-300 mb-4">Edit this student violation record.</p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <ReadOnlyInput label="Student Name" value={record?.full_name} />
-          <ReadOnlyInput label="Student No." value={record?.school_id} />
-        </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <ReadOnlyInput label="Student Name" value={record?.full_name} />
+            <ReadOnlyInput label="Student No." value={record?.school_id} />
+          </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <GlassInput
-            label={<span className="text-sm font-medium text-white mb-2">Date Logged</span>}
-            name="dateLogged"
-            type="date"
-            value={formData.dateLogged}
-            onChange={handleChange}
-            placeholder="Select date"
-          />
-          <ReadOnlyInput label="Program" value={record?.program} />
-        </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <GlassInput
+              label={<span className="text-sm font-medium text-white mb-2">Date Logged</span>}
+              name="dateLogged"
+              type="date"
+              value={formData.dateLogged}
+              onChange={handleChange}
+              placeholder="Select date"
+            />
+            <ReadOnlyInput label="Program" value={record?.program} />
+          </div>
 
-        <div className="mb-6">
-          <ReadOnlyInput label="Year/Section" value={record?.year_section} />
-        </div>
+          <div className="mb-6">
+            <ReadOnlyInput label="Year/Section" value={record?.year_section} />
+          </div>
 
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-white mb-2">Type of Violation</label>
-          <input
-            value={formData.violationLabel}
-            readOnly
-            placeholder="Select from violations list"
-            className="w-full backdrop-blur-md border border-white/5 rounded-xl px-4 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] placeholder-gray-500 focus:outline-none mb-2"
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            onClick={() => setShowViolationPicker(true)}
-            disabled={isSaving || isUnclearing}
-          >
-            Change Violation
-          </Button>
-        </div>
-
-        <div className="mb-4">
-          <GlassInput
-            label={<span className="text-sm font-medium text-white mb-2">Reported by</span>}
-            name="reportedBy"
-            value={formData.reportedBy}
-            onChange={handleChange}
-            placeholder="Reported by"
-          />
-        </div>
-
-        <ModalDivider />
-
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-white mb-2">Remarks</label>
-          <textarea
-            name="remarks"
-            value={formData.remarks}
-            onChange={handleChange}
-            rows={4}
-            placeholder="Remarks"
-            style={{ backgroundColor: "rgba(45, 47, 52, 0.8)" }}
-            className="w-full backdrop-blur-md border border-white/5 rounded-xl px-4 py-3 text-[15px] text-white placeholder-gray-500 focus:outline-none focus:border-white/20 transition-all resize-y min-h-[80px]"
-          />
-        </div>
-
-        {error ? <p className="text-sm text-red-300 mb-4">{error}</p> : null}
-
-        {/* Action Buttons Section */}
-        <div className="mb-6 p-4 bg-blue-500/5 border border-blue-400/20 rounded-lg flex flex-col gap-3">
-          <Button
-            type="button"
-            variant="primary"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2"
-            onClick={handleSignatureClick}
-            disabled={isSaving || isUnclearing}
-          >
-            <PenTool className="w-4 h-4" />
-            {record?.signature_image ? "Update E-Signature" : "Attach E-Signature"}
-          </Button>
-
-          {record?.cleared_at ? (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-white mb-2">Type of Violation</label>
+            <input
+              value={formData.violationLabel}
+              readOnly
+              placeholder="Select from violations list"
+              className="w-full backdrop-blur-md border border-white/5 rounded-xl px-4 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] placeholder-gray-500 focus:outline-none mb-2"
+            />
             <Button
               type="button"
               variant="secondary"
-              className="w-full bg-amber-600/20 border border-amber-400/30 hover:bg-amber-600/30 text-amber-200 gap-2"
-              onClick={handleUnclearClick}
+              className="w-full"
+              onClick={() => setShowViolationPicker(true)}
               disabled={isSaving || isUnclearing}
             >
-              <RotateCcw className="w-4 h-4" />
-              {isUnclearing ? "Unclearing..." : "Unclear Violation"}
+              Change Violation
             </Button>
-          ) : null}
+          </div>
+
+          <div className="mb-4">
+            <GlassInput
+              label={<span className="text-sm font-medium text-white mb-2">Reported by</span>}
+              name="reportedBy"
+              value={formData.reportedBy}
+              onChange={handleChange}
+              placeholder="Reported by"
+            />
+          </div>
+
+          <ModalDivider />
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-white mb-2">Remarks</label>
+            <textarea
+              name="remarks"
+              value={formData.remarks}
+              onChange={handleChange}
+              rows={4}
+              placeholder="Remarks"
+              style={{ backgroundColor: "rgba(45, 47, 52, 0.8)" }}
+              className="w-full backdrop-blur-md border border-white/5 rounded-xl px-4 py-3 text-[15px] text-white placeholder-gray-500 focus:outline-none focus:border-white/20 transition-all resize-y min-h-[80px]"
+            />
+          </div>
+
+          {error ? <p className="text-sm text-red-300 mb-4">{error}</p> : null}
+
+          <div className="mb-6 p-4 bg-blue-500/5 border border-blue-400/20 rounded-lg flex flex-col gap-3">
+            <Button
+              type="button"
+              variant="primary"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2"
+              onClick={handleSignatureClick}
+              disabled={isSaving || isUnclearing}
+            >
+              <PenTool className="w-4 h-4" />
+              {record?.signature_image ? "Update E-Signature" : "Attach E-Signature"}
+            </Button>
+
+            {record?.cleared_at ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full bg-amber-600/20 border border-amber-400/30 hover:bg-amber-600/30 text-amber-200 gap-2"
+                onClick={handleUnclearClick}
+                disabled={isSaving || isUnclearing}
+              >
+                <RotateCcw className="w-4 h-4" />
+                {isUnclearing ? "Unclearing..." : "Unclear Violation"}
+              </Button>
+            ) : null}
+          </div>
         </div>
 
-        <ModalFooter>
+        <ModalFooter className="sticky bottom-0 -mx-6 -mb-6 border-t border-white/10 bg-[#1a1c20]/95 px-6 py-4 backdrop-blur">
           <Button
             variant="outline"
             type="button"

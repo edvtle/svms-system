@@ -600,7 +600,7 @@ const Violations = () => {
           </div>
         )}
         <div className="space-y-5">
-          <div>
+          <div className="admin-subviolation-editor">
             <label className="block text-sm font-medium text-white mb-2">Category</label>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -643,7 +643,7 @@ const Violations = () => {
             )}
           </div>
 
-          <div>
+          <div className="admin-subviolation-editor">
             <label className="block text-sm font-medium text-white mb-2">Degree</label>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -744,7 +744,7 @@ const Violations = () => {
           setEditFormErrors({ category: '', degree: '', name: '' });
         }}
         title="Edit Violation"
-        size="md"
+        size="xl"
       >
         {editFormError && (
           <div className="text-red-400 text-sm mb-2">
@@ -853,7 +853,7 @@ const Violations = () => {
                     setEditFormData({ ...editFormData, children: newChildren });
                   }}
                   className="flex-1 px-3 py-2 bg-[#3a3a3a] border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Child violation"
+                  placeholder="Add sub-violation name"
                 />
                 <button
                   type="button"
@@ -877,11 +877,19 @@ const Violations = () => {
           </div>
         </div>
 
-        <ModalFooter>
-          <Button variant="secondary" onClick={() => setIsEditModalOpen(false)}>
+        <ModalFooter className="sticky bottom-0 -mx-6 -mb-6 border-t border-white/10 bg-[#1a1c20]/95 px-6 py-4 backdrop-blur">
+          <Button
+            variant="outline"
+            onClick={() => setIsEditModalOpen(false)}
+            className="min-w-[120px] border-white/15 bg-white text-[#1a1a1a] hover:bg-gray-100"
+          >
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleEditViolation}>
+          <Button
+            variant="primary"
+            onClick={handleEditViolation}
+            className="min-w-[170px] bg-[#556987] text-white hover:bg-[#3d4654]"
+          >
             Update Violation
           </Button>
         </ModalFooter>
