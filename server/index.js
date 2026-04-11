@@ -2029,6 +2029,8 @@ app.get("/api/student-violations/me", async (req, res) => {
         svl.cleared_by_name,
         svl.created_at,
         svl.updated_at,
+        svl.semester,
+        svl.school_year,
         s.school_id,
         s.full_name,
         s.year_section,
@@ -3484,6 +3486,134 @@ app.put("/api/notifications/:id/mark-read", async (req, res) => {
     return res.status(503).json({
       status: "error",
       message: `Unable to mark notification read (${error.message}).`,
+    });
+  }
+});
+
+// delete a specific notification
+app.delete("/api/notifications/:id", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res
+      .status(500)
+      .json({ status: "error", message: "Database is not configured." });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+    const userId = getCurrentUserId(req);
+    const { id } = req.params;
+    if (!userId) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "User not identified." });
+    }
+
+    const result = await pool.query(
+      `DELETE FROM notifications
+       WHERE id = $1 AND student_user_id = $2
+       RETURNING id`,
+      [id, userId],
+    );
+
+    if (!result.rows?.[0]) {
+      return res.status(404).json({
+        status: "error",
+        message: "Notification not found.",
+      });
+    }
+
+    return res
+      .status(200)
+      .json({ status: "ok", message: "Notification deleted successfully." });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to delete notification (${error.message}).`,
+    });
+  }
+});
+
+// delete multiple notifications
+app.delete("/api/notifications", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res
+      .status(500)
+      .json({ status: "error", message: "Database is not configured." });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+    const userId = getCurrentUserId(req);
+    const { notification_ids } = req.body;
+
+    if (!userId) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "User not identified." });
+    }
+
+    if (!Array.isArray(notification_ids) || notification_ids.length === 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "notification_ids must be a non-empty array.",
+      });
+    }
+
+    const result = await pool.query(
+      `DELETE FROM notifications
+       WHERE id = ANY($1) AND student_user_id = $2
+       RETURNING id`,
+      [notification_ids, userId],
+    );
+
+    return res.status(200).json({
+      status: "ok",
+      message: `${result.rowCount} notification(s) deleted successfully.`,
+      deleted_count: result.rowCount,
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to delete notifications (${error.message}).`,
+    });
+  }
+});
+
+// delete all notifications for current user
+app.delete("/api/notifications/delete-all", async (req, res) => {
+  if (!hasDbConfig()) {
+    return res
+      .status(500)
+      .json({ status: "error", message: "Database is not configured." });
+  }
+
+  try {
+    await ensureAuthDatabaseReady();
+    const pool = getDbPool();
+    const userId = getCurrentUserId(req);
+
+    if (!userId) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "User not identified." });
+    }
+
+    const result = await pool.query(
+      `DELETE FROM notifications WHERE student_user_id = $1 RETURNING id`,
+      [userId],
+    );
+
+    return res.status(200).json({
+      status: "ok",
+      message: `${result.rowCount} notification(s) deleted successfully.`,
+      deleted_count: result.rowCount,
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to delete notifications (${error.message}).`,
     });
   }
 });

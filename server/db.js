@@ -27,7 +27,7 @@ function getSqlOptions() {
     connect_timeout: 10,
     idle_timeout: 60,
     max_lifetime: 60 * 60 * 24,
-    query_timeout: 30 * 1000, // 30 seconds query timeout
+    query_timeout: 30 * 1000,
     ssl: useSsl ? { rejectUnauthorized: false } : undefined,
   };
 }

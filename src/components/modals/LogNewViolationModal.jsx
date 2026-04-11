@@ -4,6 +4,7 @@ import GlassInput from "@/components/ui/GlassInput";
 import Button from "@/components/ui/Button";
 import { getAuditHeaders } from "@/lib/auditHeaders";
 import ViolationPickerModal from "@/components/modals/ViolationPickerModal";
+import { CheckCircle } from "lucide-react";
 
 const initialForm = {
   studentId: "",
@@ -36,6 +37,7 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
   const [formData, setFormData] = useState(initialForm);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const [successModalOpen, setSuccessModalOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -69,6 +71,7 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
     setShowStudentSuggestions(false);
     setShowViolationPicker(false);
     setError("");
+    setSuccessModalOpen(false);
     setFormData(initialForm);
   }, [isOpen]);
 
@@ -168,6 +171,7 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
 
       onSaved?.(result.record);
       onClose?.();
+      setSuccessModalOpen(true);
     } catch (submitError) {
       setError(submitError.message || "Unable to log violation.");
     } finally {
@@ -179,10 +183,10 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
     <>
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={isSaving ? () => {} : onClose}
       title={<span className="font-black font-inter">Log New Violation</span>}
       size="2xl"
-      showCloseButton
+      showCloseButton={!isSaving}
     >
       <form onSubmit={handleSubmit}>
         <p className="text-sm text-gray-300 mb-4">
@@ -257,6 +261,7 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
               variant="secondary"
               className="w-full"
               onClick={() => setShowViolationPicker(true)}
+              disabled={isSaving}
             >
               Choose Violation
             </Button>
@@ -295,6 +300,7 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
             variant="outline"
             type="button"
             onClick={onClose}
+            disabled={isSaving}
             className="px-8 py-2 bg-white text-[#1a1a1a] border-0 hover:bg-gray-100"
           >
             Cancel
@@ -316,6 +322,49 @@ const LogNewViolationModal = ({ isOpen, onClose, onSaved }) => {
       violations={allViolations}
       onSelect={handleViolationPicked}
     />
+
+    <Modal
+      isOpen={isSaving}
+      onClose={() => {}}
+      title={<span className="font-black font-inter">Logging Violation</span>}
+      size="sm"
+      showCloseButton={false}
+    >
+      <div className="flex flex-col items-center justify-center py-8 gap-4">
+        <div className="animate-spin">
+          <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full"></div>
+        </div>
+        <p className="text-gray-300 text-sm">Saving the new violation record...</p>
+      </div>
+    </Modal>
+
+    <Modal
+      isOpen={successModalOpen}
+      onClose={() => setSuccessModalOpen(false)}
+      title={
+        <span className="font-black font-inter flex items-center gap-2">
+          <CheckCircle className="w-5 h-5 text-green-400" />
+          Violation Logged
+        </span>
+      }
+      size="sm"
+      showCloseButton
+    >
+      <div className="rounded-lg border border-green-400/25 bg-green-500/10 px-4 py-3 mb-4">
+        <p className="text-sm font-medium text-green-300">
+          The student violation was logged successfully.
+        </p>
+      </div>
+      <ModalFooter>
+        <Button
+          variant="primary"
+          onClick={() => setSuccessModalOpen(false)}
+          className="px-6"
+        >
+          OK
+        </Button>
+      </ModalFooter>
+    </Modal>
     </>
   );
 };

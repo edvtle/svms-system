@@ -29,6 +29,24 @@ const getDataUrlDimensions = (dataUrl) =>
 		img.src = dataUrl;
 	});
 
+const loadImageFromDataUrl = (dataUrl) =>
+	new Promise((resolve, reject) => {
+		const img = new Image();
+		img.onload = () => resolve(img);
+		img.onerror = () => reject(new Error('Unable to load image.'));
+		img.src = dataUrl;
+	});
+
+const downloadCanvasAsJpeg = (canvas, filename) => {
+	const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+	const link = document.createElement('a');
+	link.href = dataUrl;
+	link.setAttribute('download', filename);
+	document.body.appendChild(link);
+	link.click();
+	document.body.removeChild(link);
+};
+
 // Convert signature image to base64 data URL for exports
 const getSignatureImageData = async (signatureSrc) => {
 	if (!signatureSrc) return null;
@@ -75,6 +93,21 @@ function parseNotificationMetadata(rawMetadata) {
 	}
 }
 
+const formatYearSemesterCell = (record) => {
+	const sourceSection = String(record?.year_section || record?.yearSection || record?.student_year_section || '').trim();
+	const yearMatch = sourceSection.match(/(\d)/);
+	const yearLevel = yearMatch
+		? `${yearMatch[1]}${Number(yearMatch[1]) === 1 ? 'ST' : Number(yearMatch[1]) === 2 ? 'ND' : Number(yearMatch[1]) === 3 ? 'RD' : 'TH'} YEAR`
+		: '-';
+
+	const semester = String(record?.semester || record?.current_semester || '').trim();
+	const schoolYear = String(record?.school_year || record?.schoolYear || record?.current_school_year || '').trim();
+	const term = semester && schoolYear ? `${semester} - ${schoolYear}` : semester || schoolYear || '-';
+
+	if (yearLevel === '-' && term === '-') return '-';
+	return `${yearLevel} | ${term}`;
+};
+
 const StudentViolations = () => {
 	const navigate = useNavigate();
 	const location = useLocation();
@@ -87,10 +120,10 @@ const StudentViolations = () => {
 	const [unreadCount, setUnreadCount] = useState(0);
 	const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 	const [downloadModalOpen, setDownloadModalOpen] = useState(false);
-	const [downloadFormat, setDownloadFormat] = useState('excel');
+	const [downloadFormat, setDownloadFormat] = useState('pdf');
 	const [selectedDownloadRecord, setSelectedDownloadRecord] = useState(null);
 	const [downloadAllModalOpen, setDownloadAllModalOpen] = useState(false);
-	const [downloadAllFormat, setDownloadAllFormat] = useState('excel');
+	const [downloadAllFormat, setDownloadAllFormat] = useState('pdf');
 
 	// Get student info from localStorage
 	const getStudentInfo = useCallback(() => {
@@ -212,6 +245,56 @@ const formatDisplayDate = (rawDate) => {
 	});
 };
 
+const getClearedAtValue = (record) =>
+	record?.cleared_at ||
+	record?.clearedAt ||
+	record?.clearedAtRaw ||
+	record?.cleared_date ||
+	record?.clearedDate ||
+	'';
+
+const isRecordCleared = (record) => {
+	const statusText = String(record?.status || '').trim().toLowerCase();
+	if (statusText === 'cleared') return true;
+	return Boolean(getClearedAtValue(record));
+};
+
+const formatStatusForExport = (record) => {
+	if (!isRecordCleared(record)) {
+		return 'ACTIVE';
+	}
+	const clearedAt = getClearedAtValue(record);
+	if (!clearedAt) {
+		return 'CLEARED';
+	}
+	return `CLEARED (${formatDisplayDate(clearedAt)})`;
+};
+
+const deriveYearLevelFromSection = (yearSection = '') => {
+	const sectionText = String(yearSection || '').trim();
+	const match = sectionText.match(/(\d)/);
+	if (!match) return '-';
+	const yearNumber = Number(match[1]);
+	if (!Number.isFinite(yearNumber)) return '-';
+	const suffix = yearNumber === 1 ? 'ST' : yearNumber === 2 ? 'ND' : yearNumber === 3 ? 'RD' : 'TH';
+	return `${yearNumber}${suffix} YEAR`;
+};
+
+const buildAcademicTermText = (record) => {
+	const semester = String(record?.semester || record?.current_semester || '').trim();
+	const schoolYear = String(record?.school_year || record?.schoolYear || record?.current_school_year || '').trim();
+	if (semester && schoolYear) return `${semester} - ${schoolYear}`;
+	if (semester) return semester;
+	if (schoolYear) return schoolYear;
+	return '-';
+};
+
+const resolveYearLevelForExport = (record, studentInfo) => {
+	const sourceSection =
+		record?.year_section || record?.yearSection || record?.student_year_section || studentInfo?.yearSection || '';
+	return deriveYearLevelFromSection(sourceSection);
+};
+
 const formatDownloadFileName = useCallback((record, format, isAllRecords = false, studentInfo = {}) => {
 	const violationSegment = isAllRecords 
 		? 'Violations'
@@ -228,10 +311,32 @@ const formatDownloadFileName = useCallback((record, format, isAllRecords = false
 			.trim();
 
 	const safeViolationSegment = sanitize(violationSegment).replace(/\s+/g, '_');
-	const ext = format === 'pdf' ? 'pdf' : 'xlsx';
+	const ext = format === 'pdf' ? 'pdf' : format === 'excel' ? 'xlsx' : 'jpg';
 
 	return `${safeViolationSegment.toLowerCase()}_${dateSegment}.${ext}`;
 }, [formatDateForFileName]);
+
+const getFilteredExportRecords = useCallback(() => {
+	const query = searchTerm.trim().toLowerCase();
+
+	return (records || []).filter((row) => {
+		const status = isRecordCleared(row) ? 'Cleared' : 'Active';
+		const typeText = normalizeType(row).toLowerCase();
+		const violationText = String(row?.violation_label || row?.violation_name || '').toLowerCase();
+		const remarksText = String(row?.remarks || '').toLowerCase();
+		const yearSemesterText = formatYearSemesterCell(row).toLowerCase();
+
+		const matchesSearch =
+			!query ||
+			violationText.includes(query) ||
+			typeText.includes(query) ||
+			remarksText.includes(query) ||
+			yearSemesterText.includes(query);
+
+		const matchesStatus = statusFilter === 'All' || status === statusFilter;
+		return matchesSearch && matchesStatus;
+	});
+}, [records, searchTerm, statusFilter]);
 
 const createDownload = useCallback(async (record, format) => {
 	if (!record) return;
@@ -502,6 +607,9 @@ if (format === 'pdf') {
 		const remarksText = String(rawRemarks).trim() === '-' ? '' : rawRemarks;
 		const reportedBy = record.reportedBy || record.reported_by || '-';
 		const programYearSection = studentInfo.yearSection || '-';
+		const yearLevelText = resolveYearLevelForExport(record, studentInfo);
+		const academicTermText = buildAcademicTermText(record);
+		const statusText = formatStatusForExport(record);
 		const studentName = `${studentInfo.lastName || ''}, ${studentInfo.firstName || ''}`
 			.replace(/^,\s*|\s*,\s*$/g, '')
 			.trim() || '-';
@@ -517,19 +625,23 @@ if (format === 'pdf') {
 
 		// Student info box.
 		const infoY = cursorY;
-		const infoH = 24;
+		const infoH = 32;
 		const midX = margin + contentWidth / 2;
 		doc.setDrawColor(203, 213, 225);
 		doc.setLineWidth(0.3);
 		doc.rect(margin, infoY, contentWidth, infoH);
 		doc.line(midX, infoY + 4, midX, infoY + infoH - 4);
-		doc.line(margin + 4, infoY + 12, midX - 4, infoY + 12);
-		doc.line(midX + 4, infoY + 12, margin + contentWidth - 4, infoY + 12);
+		doc.line(margin + 4, infoY + 11, midX - 4, infoY + 11);
+		doc.line(margin + 4, infoY + 21, midX - 4, infoY + 21);
+		doc.line(midX + 4, infoY + 11, margin + contentWidth - 4, infoY + 11);
+		doc.line(midX + 4, infoY + 21, margin + contentWidth - 4, infoY + 21);
 
-		drawLabelValue(margin + 6, infoY + 8, 'Date:', formatDisplayDate(record.createdAtRaw || record.date), 54);
-		drawLabelValue(midX + 6, infoY + 8, 'Student No:', studentNo || '-', 54);
-		drawLabelValue(margin + 6, infoY + 19, 'Name:', studentName, 54);
-		drawLabelValue(midX + 6, infoY + 19, 'Program/Section:', programYearSection, 54);
+		drawLabelValue(margin + 6, infoY + 7.5, 'Date:', formatDisplayDate(record.createdAtRaw || record.date), 54);
+		drawLabelValue(midX + 6, infoY + 7.5, 'Student No:', studentNo || '-', 54);
+		drawLabelValue(margin + 6, infoY + 17.5, 'Name:', studentName, 54);
+		drawLabelValue(midX + 6, infoY + 17.5, 'Program/Section:', programYearSection, 54);
+		drawLabelValue(margin + 6, infoY + 27.5, 'Year Level:', yearLevelText, 54);
+		drawLabelValue(midX + 6, infoY + 27.5, 'Semester/S.Y.:', academicTermText, 54);
 		cursorY = infoY + infoH + 8;
 
 		// VIOLATION section.
@@ -541,11 +653,11 @@ if (format === 'pdf') {
 		doc.setFontSize(11);
 		doc.text('VIOLATION', margin + 6, cursorY + 5.5);
 
-		const violationLines = doc.splitTextToSize(String(violationText), contentWidth - 12);
-		const violationBodyH = Math.max(14, violationLines.length * 5 + 5);
-		doc.rect(margin, cursorY + sectionHeaderH, contentWidth, violationBodyH);
 		doc.setFont('helvetica', 'normal');
-		doc.setFontSize(12);
+		doc.setFontSize(10);
+		const violationLines = doc.splitTextToSize(String(violationText), contentWidth - 12).slice(0, 7);
+		const violationBodyH = 22;
+		doc.rect(margin, cursorY + sectionHeaderH, contentWidth, violationBodyH);
 		doc.text(violationLines, margin + 6, cursorY + sectionHeaderH + 7);
 		cursorY += sectionHeaderH + violationBodyH + 6;
 
@@ -557,13 +669,23 @@ if (format === 'pdf') {
 		doc.setFontSize(11);
 		doc.text('REMARKS', margin + 6, cursorY + 5.5);
 
-		const remarksLines = doc.splitTextToSize(String(remarksText), contentWidth - 12);
-		const remarksBodyH = Math.max(20, remarksLines.length * 5 + 9);
-		doc.rect(margin, cursorY + sectionHeaderH, contentWidth, remarksBodyH);
 		doc.setFont('helvetica', 'normal');
-		doc.setFontSize(12);
+		doc.setFontSize(10);
+		const remarksLines = doc.splitTextToSize(String(remarksText), contentWidth - 12).slice(0, 9);
+		const remarksBodyH = 30;
+		doc.rect(margin, cursorY + sectionHeaderH, contentWidth, remarksBodyH);
 		doc.text(remarksLines, margin + 6, cursorY + sectionHeaderH + 7);
 		cursorY += sectionHeaderH + remarksBodyH + 8;
+
+		doc.setFillColor(248, 250, 252);
+		doc.rect(margin, cursorY, contentWidth, 10, 'F');
+		doc.rect(margin, cursorY, contentWidth, 10);
+		doc.setFont('helvetica', 'bold');
+		doc.setFontSize(11);
+		doc.text('STATUS:', margin + 6, cursorY + 6.5);
+		doc.setFont('helvetica', 'normal');
+		doc.text(`${statusText}   |   Reported By: ${reportedBy || '-'}`, margin + 30, cursorY + 6.5, { maxWidth: contentWidth - 36 });
+		cursorY += 16;
 
 		doc.setDrawColor(203, 213, 225);
 		doc.line(margin, cursorY, margin + contentWidth, cursorY);
@@ -605,11 +727,133 @@ if (format === 'pdf') {
 		alert('Unable to generate PDF download.');
 	}
 }
+if (format === 'jpeg') {
+	try {
+		const headerImage = await resolveHeaderImage();
+
+		const canvas = document.createElement('canvas');
+		canvas.width = 2000;
+		const violationText = record.violation || record.violation_label || record.violation_name || '-';
+		const rawRemarks = record.remarks || '-';
+		const remarksText = String(rawRemarks).trim() === '-' ? '' : rawRemarks;
+		canvas.height = 1500;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('Unable to initialize image canvas.');
+
+		ctx.fillStyle = '#ffffff';
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+		let y = 40;
+		if (headerImage.dataUrl) {
+			const headerImg = await loadImageFromDataUrl(headerImage.dataUrl);
+			const headerWidth = 1800;
+			const headerHeight = Math.round((headerImg.height / headerImg.width) * headerWidth);
+			ctx.drawImage(headerImg, 100, y, headerWidth, headerHeight);
+			y += headerHeight + 30;
+		}
+
+		ctx.fillStyle = '#0f172a';
+		ctx.font = 'bold 48px Arial';
+		ctx.textAlign = 'center';
+		ctx.fillText('STUDENT VIOLATION REPORT', 1000, y + 50);
+		y += 90;
+
+		const reportedBy = record.reportedBy || record.reported_by || '-';
+		const programYearSection = studentInfo.yearSection || '-';
+		const yearLevelText = resolveYearLevelForExport(record, studentInfo);
+		const academicTermText = buildAcademicTermText(record);
+		const statusText = formatStatusForExport(record);
+		const studentName = `${studentInfo.lastName || ''}, ${studentInfo.firstName || ''}`
+			.replace(/^,\s*|\s*,\s*$/g, '')
+			.trim() || '-';
+
+		const drawWrappedText = (text, x, startY, maxWidth, lineHeight) => {
+			const words = String(text || '').split(/\s+/).filter(Boolean);
+			let line = '';
+			let currentY = startY;
+			words.forEach((word) => {
+				const testLine = line ? `${line} ${word}` : word;
+				if (ctx.measureText(testLine).width > maxWidth && line) {
+					ctx.fillText(line, x, currentY);
+					line = word;
+					currentY += lineHeight;
+				} else {
+					line = testLine;
+				}
+			});
+			if (line) {
+				ctx.fillText(line, x, currentY);
+			}
+			return currentY;
+		};
+
+		ctx.textAlign = 'left';
+		ctx.strokeStyle = '#cbd5e1';
+		ctx.lineWidth = 2;
+		ctx.strokeRect(100, y, 1800, 220);
+		ctx.beginPath();
+		ctx.moveTo(1000, y);
+		ctx.lineTo(1000, y + 220);
+		ctx.stroke();
+
+		ctx.fillStyle = '#111827';
+		ctx.font = 'bold 28px Arial';
+		ctx.fillText(`Date: ${formatDisplayDate(record.createdAtRaw || record.date)}`, 130, y + 55);
+		ctx.fillText(`Student No: ${studentNo || '-'}`, 1030, y + 55);
+		ctx.fillText(`Name: ${studentName}`, 130, y + 125);
+		ctx.fillText(`Program/Section: ${programYearSection}`, 1030, y + 125);
+		ctx.fillText(`Year Level: ${yearLevelText}`, 130, y + 195);
+		ctx.fillText(`Semester/S.Y.: ${academicTermText}`, 1030, y + 195);
+
+		y += 255;
+		ctx.fillStyle = '#e5e7eb';
+		ctx.fillRect(100, y, 1800, 54);
+		ctx.strokeRect(100, y, 1800, 54);
+		ctx.fillStyle = '#111827';
+		ctx.font = 'bold 30px Arial';
+		ctx.fillText('VIOLATION', 130, y + 36);
+
+		y += 54;
+		ctx.strokeRect(100, y, 1800, 110);
+		ctx.font = '24px Arial';
+		drawWrappedText(violationText, 130, y + 38, 1740, 30);
+
+		y += 140;
+		ctx.fillStyle = '#e5e7eb';
+		ctx.fillRect(100, y, 1800, 54);
+		ctx.strokeRect(100, y, 1800, 54);
+		ctx.fillStyle = '#111827';
+		ctx.font = 'bold 30px Arial';
+		ctx.fillText('REMARKS', 130, y + 36);
+
+		y += 54;
+		ctx.strokeRect(100, y, 1800, 140);
+		ctx.font = '24px Arial';
+		drawWrappedText(remarksText || '-', 130, y + 38, 1740, 30);
+
+		y += 165;
+		ctx.fillStyle = '#f8fafc';
+		ctx.fillRect(100, y, 1800, 54);
+		ctx.strokeStyle = '#cbd5e1';
+		ctx.strokeRect(100, y, 1800, 54);
+		ctx.fillStyle = '#111827';
+		ctx.font = 'bold 28px Arial';
+		ctx.textAlign = 'left';
+		ctx.fillText('STATUS:', 130, y + 36);
+		ctx.font = '24px Arial';
+		ctx.fillText(`${statusText}  |  Reported By: ${reportedBy || '-'}`, 330, y + 36);
+
+		downloadCanvasAsJpeg(canvas, filename);
+	} catch (error) {
+		console.error('JPEG export failed', error);
+		alert('Unable to generate JPEG download.');
+	}
+}
 }, [formatDownloadFileName, getStudentInfo, resolveHeaderImage]);
 
 	const triggerDownloadModal = useCallback((record) => {
 		setSelectedDownloadRecord(record);
-		setDownloadFormat('excel');
+		setDownloadFormat('pdf');
 		setDownloadModalOpen(true);
 	}, []);
 
@@ -632,11 +876,12 @@ if (format === 'pdf') {
 		const sheetData = records.map((record, index) => ({
 			No: index + 1,
 			Date: formatDisplayDate(record.created_at || record.date),
+			'Year/Semester': `${resolveYearLevelForExport(record, studentInfo)} | ${buildAcademicTermText(record)}`,
 			Violation: record.violation_label || record.violation_name || '-',
 			'Reported by': record.reported_by || '-',
 			Remarks: record.remarks || '-',
 			Signature: record.signature || record.signature_image || record.signatureImage || '',
-			Status: record.cleared_at ? 'Cleared' : 'Active' || '-',
+			Status: formatStatusForExport(record),
 		}));
 
 		const filename = formatDownloadFileName(firstRecord, format, true, studentInfo);
@@ -655,22 +900,23 @@ if (format === 'pdf') {
 				]);
 				const workbook = new Workbook();
 				const sheet = workbook.addWorksheet('All Violations', {
-					views: [{ state: 'frozen', ySplit: 6 }],
+					views: [{ state: 'frozen', ySplit: 8 }],
 				});
 
-				sheet.columns = [
-					{ key: 'No', width: 10 },
-					{ key: 'Date', width: 18 },
-					{ key: 'Violation', width: 40 },
-					{ key: 'Reported by', width: 24 },
-					{ key: 'Remarks', width: 44 },
-					{ key: 'Signature', width: 22 },
-					{ key: 'Status', width: 16 },
-				];
+					sheet.columns = [
+						{ key: 'No', width: 8 },
+						{ key: 'Date', width: 16 },
+						{ key: 'Year/Semester', width: 24 },
+						{ key: 'Violation', width: 36 },
+						{ key: 'Reported by', width: 22 },
+						{ key: 'Remarks', width: 26 },
+						{ key: 'Signature', width: 18 },
+						{ key: 'Status', width: 22 },
+					];
 
-		sheet.mergeCells('C1:E3');
-		sheet.mergeCells('C4:E4');
-		sheet.mergeCells('C5:E5');
+		sheet.mergeCells('A1:H3');
+		sheet.mergeCells('A4:H4');
+		sheet.mergeCells('A5:H5');
 		sheet.pageSetup = {
 			orientation: 'landscape',
 			fitToPage: true,
@@ -685,7 +931,7 @@ if (format === 'pdf') {
 
 		// Add header image if available
 		if (dataUrl && dimensions) {
-			const headerRegionWidthPx = [3, 4, 5].reduce(
+			const headerRegionWidthPx = [1, 2, 3, 4, 5, 6, 7, 8].reduce(
 				(total, colIndex) => total + (Number(sheet.getColumn(colIndex).width || 10) * 7.5),
 				0,
 			);
@@ -707,7 +953,7 @@ if (format === 'pdf') {
 			const toColCoordinate = (pixelOffset) => {
 				let colIndex = 0;
 				let accumulatedPx = 0;
-					for (let i = 3; i <= 5; i += 1) {
+					for (let i = 1; i <= 8; i += 1) {
 						const colWidth = sheet.getColumn(i).width || 15;
 						const colPx = colWidth * 7.5;
 						if (accumulatedPx + colPx >= pixelOffset) {
@@ -747,12 +993,12 @@ if (format === 'pdf') {
 					},
 				});
 
-const titleCell = sheet.getCell('C4');
+const titleCell = sheet.getCell('A4');
 			titleCell.value = 'STUDENT VIOLATION REPORT';
 			titleCell.font = { name: 'Calibri', size: 20, bold: true, color: { argb: 'FF000000' } };
 			titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
-		const subtitleCell = sheet.getCell('C5');
+		const subtitleCell = sheet.getCell('A5');
 			const generatedDateRaw = new Date();
 			const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
 			const day = generatedDateRaw.getDate();
@@ -762,7 +1008,17 @@ const titleCell = sheet.getCell('C4');
 			subtitleCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF4B5563' } };
 			subtitleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
-				const headerRowNumber = 6;
+				sheet.mergeCells('A6:H6');
+				sheet.getCell('A6').value = `Name: ${studentInfo.lastName.toUpperCase()}, ${studentInfo.firstName.toUpperCase()}`;
+				sheet.getCell('A6').font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF111827' } };
+				sheet.getCell('A6').alignment = { horizontal: 'left', vertical: 'middle' };
+
+				sheet.mergeCells('A7:H7');
+				sheet.getCell('A7').value = `Current Year/Section: ${studentInfo.yearSection || '-'}`;
+				sheet.getCell('A7').font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF111827' } };
+				sheet.getCell('A7').alignment = { horizontal: 'left', vertical: 'middle' };
+
+				const headerRowNumber = 8;
 				const headerRow = sheet.getRow(headerRowNumber);
 				headerRow.values = Object.keys(sheetData[0]);
 				headerRow.height = 24;
@@ -783,7 +1039,7 @@ const titleCell = sheet.getCell('C4');
 					};
 				});
 
-				const dataRowStart = 7;
+				const dataRowStart = headerRowNumber + 1;
 				sheetData.forEach((row, index) => {
 					const excelRow = sheet.getRow(dataRowStart + index);
 					excelRow.values = Object.values(row);
@@ -800,7 +1056,7 @@ const titleCell = sheet.getCell('C4');
 							};
 						}
 						// Center align No and Signature columns
-						if ([1, 6].includes(cellNum)) {
+						if ([1, 7].includes(cellNum)) {
 							cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 						} else {
 							cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
@@ -816,7 +1072,7 @@ const titleCell = sheet.getCell('C4');
 					// Add signature image if available for this row
 					if (signatureImages[index]) {
 						const signatureImageId = workbook.addImage({ base64: signatureImages[index], extension: 'png' });
-						const signatureColIndex = 6; // Column F (0-indexed as 5, but 1-indexed as 6)
+						const signatureColIndex = 7;
 						const signatureRowIndex = dataRowStart + index;
 
 						// Calculate position for signature image (centered in the cell)
@@ -870,40 +1126,23 @@ const titleCell = sheet.getCell('C4');
 					}
 				});
 
-				// Add footer with student name and year/section aligned with last table column
-				const footerRowNumber = dataRowStart + sheetData.length + 2;
-				const footerRow = sheet.getRow(footerRowNumber);
-				footerRow.height = 32;
-				
-				// Merge only the last column (G) for centering
-				sheet.mergeCells(`G${footerRowNumber}`);
-				const studentNameCell = sheet.getCell(`G${footerRowNumber}`);
-				studentNameCell.value = `${studentInfo.lastName.charAt(0).toUpperCase() + studentInfo.lastName.slice(1).toLowerCase()}, ${studentInfo.firstName.charAt(0).toUpperCase() + studentInfo.firstName.slice(1).toLowerCase()}`.trim();
-				studentNameCell.font = { name: 'Calibri', size: 11, bold: true };
-				studentNameCell.alignment = { horizontal: 'center', vertical: 'middle' };
-				
-				// Year/Section in footer (next row, also in last column)
-				sheet.mergeCells(`G${footerRowNumber + 1}`);
-				const yearSectionCell = sheet.getCell(`G${footerRowNumber + 1}`);
-				yearSectionCell.value = studentInfo.yearSection || '';
-				yearSectionCell.font = { name: 'Calibri', size: 11, bold: true };
-				yearSectionCell.alignment = { horizontal: 'center', vertical: 'top' };
+				// Student metadata is now shown above the table.
 			} else {
 				// Fallback if header image not available
-sheet.mergeCells('C1:E3');
-		sheet.mergeCells('C4:E4');
-		sheet.mergeCells('C5:E5');
+sheet.mergeCells('A1:H3');
+		sheet.mergeCells('A4:H4');
+		sheet.mergeCells('A5:H5');
 		sheet.getRow(1).height = 40;
 		sheet.getRow(2).height = 40;
 		sheet.getRow(3).height = 40;
 		sheet.getRow(4).height = 35;
 		sheet.getRow(5).height = 28;
-		const titleCell = sheet.getCell('C4');
+		const titleCell = sheet.getCell('A4');
 		titleCell.value = 'STUDENT VIOLATION REPORT';
 		titleCell.font = { name: 'Calibri', size: 20, bold: true, color: { argb: 'FF000000' } };
 		titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
-		const subtitleCell = sheet.getCell('C5');
+		const subtitleCell = sheet.getCell('A5');
 				const generatedDateRaw = new Date();
 				const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
 				const day = generatedDateRaw.getDate();
@@ -913,6 +1152,9 @@ sheet.mergeCells('C1:E3');
 				subtitleCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF4B5563' } };
 				subtitleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
+				sheet.addRow([]);
+				sheet.addRow([`Name: ${studentInfo.lastName.toUpperCase()}, ${studentInfo.firstName.toUpperCase()}`]);
+				sheet.addRow([`Current Year/Section: ${studentInfo.yearSection || '-'}`]);
 				sheet.addRow([]);
 				const headerRow = sheet.addRow(Object.keys(sheetData[0]));
 				headerRow.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
@@ -948,7 +1190,7 @@ sheet.mergeCells('C1:E3');
 							};
 						}
 						// Center align No and Signature columns
-						if ([1, 6].includes(cellNum)) {
+						if ([1, 7].includes(cellNum)) {
 							cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 						} else {
 							cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
@@ -964,8 +1206,8 @@ sheet.mergeCells('C1:E3');
 					// Add signature image if available for this row
 					if (signatureImages[index]) {
 						const signatureImageId = workbook.addImage({ base64: signatureImages[index], extension: 'png' });
-						const signatureColIndex = 7; // Column G (0-indexed as 6, but 1-indexed as 7)
-						const signatureRowIndex = currentRowNumber + 1 + index;
+						const signatureColIndex = 7;
+						const signatureRowIndex = dataRowStart + index;
 
 						// Calculate position for signature image (centered in the cell)
 						const colWidthPx = sheet.getColumn(signatureColIndex).width * 7.5;
@@ -1018,24 +1260,7 @@ sheet.mergeCells('C1:E3');
 					}
 				});
 
-				// Add footer with student name and year/section aligned with last table column
-				const footerRowNumber = currentRowNumber + sheetData.length + 3;
-				const footerRow = sheet.getRow(footerRowNumber);
-				footerRow.height = 32;
-				
-				// Merge only the last column (G) for centering
-				sheet.mergeCells(`G${footerRowNumber}`);
-				const footerStudentNameCell = sheet.getCell(`G${footerRowNumber}`);
-				footerStudentNameCell.value = `${studentInfo.lastName.charAt(0).toUpperCase() + studentInfo.lastName.slice(1).toLowerCase()}, ${studentInfo.firstName.charAt(0).toUpperCase() + studentInfo.firstName.slice(1).toLowerCase()}`.trim();
-				footerStudentNameCell.font = { name: 'Calibri', size: 11, bold: true };
-				footerStudentNameCell.alignment = { horizontal: 'center', vertical: 'middle' };
-				
-				// Year/Section in footer (next row, also in last column)
-				sheet.mergeCells(`G${footerRowNumber + 1}`);
-				const footerYearSectionCell = sheet.getCell(`G${footerRowNumber + 1}`);
-				footerYearSectionCell.value = studentInfo.yearSection || '';
-				footerYearSectionCell.font = { name: 'Calibri', size: 11, bold: true };
-				footerYearSectionCell.alignment = { horizontal: 'center', vertical: 'top' };
+				// Student metadata is now shown above the table.
 			}
 
 			const buffer = await workbook.xlsx.writeBuffer();
@@ -1097,20 +1322,25 @@ sheet.mergeCells('C1:E3');
 			doc.setFont('helvetica', 'normal');
 			doc.setFontSize(11);
 			doc.text(generatedAt, tableCenterX, startY + 13, { align: 'center' });
+			doc.setFont('helvetica', 'bold');
+			doc.setFontSize(10);
+			doc.text(`Name: ${studentInfo.lastName.toUpperCase()}, ${studentInfo.firstName.toUpperCase()}`, tableMarginLeft, startY + 20);
+			doc.text(`Current Year/Section: ${studentInfo.yearSection || '-'}`, tableMarginLeft, startY + 26);
 
 			// Add spacing after header before the table
-			const tableStartY = startY + 20;
+			const tableStartY = startY + 31;
 			const body = records.map((record, index) => [
 				index + 1,
 				formatDisplayDate(record.created_at || record.date),
+				`${resolveYearLevelForExport(record, studentInfo)} | ${buildAcademicTermText(record)}`,
 				record.violation_label || record.violation_name || '-',
 				record.reported_by || '-',
 				record.remarks || '-',
 				'', // Empty text for signature column since we'll add image
-				record.cleared_at ? 'Cleared' : 'Active' || '-',
+				formatStatusForExport(record),
 			]);
 				const didDrawCell = (data) => {
-					if (data.section === 'body' && data.column.index === 5 && signatureImages[data.row.index]) { // Signature column (0-indexed)
+					if (data.section === 'body' && data.column.index === 6 && signatureImages[data.row.index]) {
 						const cellWidth = data.cell.width;
 						const cellHeight = data.cell.height;
 						const x = data.cell.x + 1;
@@ -1132,7 +1362,7 @@ sheet.mergeCells('C1:E3');
 
 				autoTable(doc, {
 					startY: tableStartY,
-					head: [['No.', 'Date', 'Violation', 'Reported by', 'Remarks', 'Signature', 'Status']],
+					head: [['No.', 'Date', 'Year/Semester', 'Violation', 'Reported by', 'Remarks', 'Signature', 'Status']],
 					body: body,
 					theme: 'grid',
 					styles: {
@@ -1152,46 +1382,175 @@ sheet.mergeCells('C1:E3');
 						fillColor: [248, 250, 252],
 					},
 					columnStyles: {
-						0: { cellWidth: 16.5, halign: 'center' },
-						1: { cellWidth: 30 },
-						2: { cellWidth: 60 },
-						3: { cellWidth: 27.5 },
-						4: { cellWidth: 75 },
-						5: { cellWidth: 30, halign: 'center' },
-						6: { cellWidth: 40 },
+						0: { cellWidth: 15, halign: 'center' },
+						1: { cellWidth: 23 },
+						2: { cellWidth: 40 },
+						3: { cellWidth: 62 },
+						4: { cellWidth: 30 },
+						5: { cellWidth: 58 },
+						6: { cellWidth: 24, halign: 'center' },
+						7: { cellWidth: 35 },
 					},
 					margin: { left: tableMarginLeft, right: tableMarginRight },
 					didDrawCell,
 				});
 
-				// Add footer with student name and year/section aligned with last table column
-				const pageHeight = doc.internal.pageSize.getHeight();
-				const footerY = pageHeight - 15;
-				
-				// Calculate the position of the last column (Status column)
-				const columnWidths = [16.5, 30, 60, 27.5, 75, 30, 40]; // Column widths in mm
-				const totalTableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
-				const lastColumnStart = tableMarginLeft + totalTableWidth - columnWidths[columnWidths.length - 1];
-				const lastColumnEnd = tableMarginLeft + totalTableWidth;
-				
-				doc.setFont('helvetica', 'bold');
-				doc.setFontSize(10);
-				const studentName = `${studentInfo.lastName.toUpperCase()}, ${studentInfo.firstName.toUpperCase()}`.trim();
-				const lastColumnCenter = lastColumnStart + (columnWidths[columnWidths.length - 1] / 2);
-				doc.text(studentName, lastColumnCenter, footerY, { align: 'center' });
-				doc.setFontSize(9);
-				doc.text(studentInfo.yearSection || '', lastColumnCenter, footerY + 5, { align: 'center' });
+				// Student metadata is now shown above the table.
 
 				doc.save(filename);
 			} catch (error) {
 				console.error('PDF export failed', error);
 				alert('Unable to generate PDF download.');
 			}
+		} else if (format === 'jpeg') {
+			try {
+				const signaturePromises = records.map((record) =>
+					getSignatureImageData(record.signature || record.signature_image || record.signatureImage || ''),
+				);
+				const signatureImages = await Promise.all(signaturePromises);
+
+				const canvas = document.createElement('canvas');
+				canvas.width = 2200;
+				const rowHeight = 64;
+				const tableTop = 260;
+				canvas.height = Math.max(900, tableTop + (records.length + 1) * rowHeight + 130);
+				const ctx = canvas.getContext('2d');
+				if (!ctx) throw new Error('Unable to initialize image canvas.');
+
+				ctx.fillStyle = '#ffffff';
+				ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+				const headerImage = await resolveHeaderImage();
+				let startY = 20;
+				if (headerImage.dataUrl) {
+					const headerImg = await loadImageFromDataUrl(headerImage.dataUrl);
+					const headerWidth = 2080;
+					const headerHeight = Math.round((headerImg.height / headerImg.width) * headerWidth);
+					ctx.drawImage(headerImg, 60, startY, headerWidth, headerHeight);
+					startY += headerHeight + 22;
+				}
+
+				const generatedDateRaw = new Date();
+				const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
+				const day = generatedDateRaw.getDate();
+				const year = generatedDateRaw.getFullYear();
+				const time = generatedDateRaw.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+				const generatedAt = `Generated: ${month} ${day}, ${year}, ${time}`;
+
+				ctx.textAlign = 'center';
+				ctx.fillStyle = '#0f172a';
+				ctx.font = 'bold 46px Arial';
+				ctx.fillText('STUDENT VIOLATION REPORT', 1100, startY + 42);
+				ctx.fillStyle = '#4b5563';
+				ctx.font = '28px Arial';
+				ctx.fillText(generatedAt, 1100, startY + 84);
+
+				const columns = [
+					{ key: 'No', label: 'No.', width: 80 },
+					{ key: 'Date', label: 'Date', width: 160 },
+					{ key: 'Year/Semester', label: 'Year/Semester', width: 260 },
+					{ key: 'Violation', label: 'Violation', width: 300 },
+					{ key: 'Reported by', label: 'Reported by', width: 180 },
+					{ key: 'Remarks', label: 'Remarks', width: 470 },
+					{ key: 'Signature', label: 'Signature', width: 190 },
+					{ key: 'Status', label: 'Status', width: 160 },
+				];
+
+				const drawWrappedCellText = (text, x, y, width, lineHeight, maxLines = 2) => {
+					const words = String(text || '').split(/\s+/).filter(Boolean);
+					const lines = [];
+					let line = '';
+					for (let i = 0; i < words.length; i += 1) {
+						const testLine = line ? `${line} ${words[i]}` : words[i];
+						if (ctx.measureText(testLine).width > width && line) {
+							lines.push(line);
+							line = words[i];
+						} else {
+							line = testLine;
+						}
+					}
+					if (line) lines.push(line);
+					const finalLines = lines.slice(0, maxLines);
+					if (lines.length > maxLines) {
+						finalLines[maxLines - 1] = `${finalLines[maxLines - 1]}...`;
+					}
+					finalLines.forEach((currentLine, index) => {
+						ctx.fillText(currentLine, x, y + index * lineHeight);
+					});
+				};
+
+				const tableX = 60;
+				const headerY = tableTop;
+				ctx.fillStyle = '#0f172a';
+				ctx.fillRect(tableX, headerY, 2080, rowHeight);
+				ctx.strokeStyle = '#cbd5e1';
+				ctx.lineWidth = 1.2;
+
+				let xCursor = tableX;
+				ctx.font = 'bold 24px Arial';
+				ctx.textAlign = 'center';
+				ctx.fillStyle = '#ffffff';
+				columns.forEach((column) => {
+					ctx.strokeRect(xCursor, headerY, column.width, rowHeight);
+					ctx.fillText(column.label, xCursor + (column.width / 2), headerY + 41);
+					xCursor += column.width;
+				});
+
+				for (let rowIndex = 0; rowIndex < records.length; rowIndex += 1) {
+					const rowTop = headerY + rowHeight + (rowIndex * rowHeight);
+					const rowRecord = sheetData[rowIndex];
+					ctx.fillStyle = rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc';
+					ctx.fillRect(tableX, rowTop, 2080, rowHeight);
+
+					xCursor = tableX;
+					ctx.fillStyle = '#111827';
+					ctx.font = '22px Arial';
+					ctx.textAlign = 'left';
+					columns.forEach((column, colIndex) => {
+						ctx.strokeRect(xCursor, rowTop, column.width, rowHeight);
+						if (column.key === 'Signature' && signatureImages[rowIndex]) {
+							// Draw signature image centered in signature cell.
+						} else if (colIndex === 0) {
+							ctx.textAlign = 'center';
+							ctx.fillText(String(rowRecord[column.key] || ''), xCursor + (column.width / 2), rowTop + 40);
+							ctx.textAlign = 'left';
+						} else {
+							drawWrappedCellText(rowRecord[column.key], xCursor + 8, rowTop + 27, column.width - 16, 22, 2);
+						}
+						xCursor += column.width;
+					});
+
+					if (signatureImages[rowIndex]) {
+						try {
+							const signatureImage = await loadImageFromDataUrl(signatureImages[rowIndex]);
+							const signatureColumnStart = tableX + columns.slice(0, 6).reduce((sum, col) => sum + col.width, 0);
+							ctx.drawImage(signatureImage, signatureColumnStart + 18, rowTop + 12, 200, 40);
+						} catch (_error) {
+							// ignore signature image rendering failures per row
+						}
+					}
+				}
+
+				const footerY = headerY + rowHeight + (records.length * rowHeight) + 56;
+				ctx.textAlign = 'right';
+				ctx.fillStyle = '#111827';
+				ctx.font = 'bold 25px Arial';
+				const studentName = `${studentInfo.lastName.toUpperCase()}, ${studentInfo.firstName.toUpperCase()}`.trim();
+				ctx.fillText(studentName, 2140, footerY);
+				ctx.fillStyle = '#4b5563';
+				ctx.font = '22px Arial';
+				ctx.fillText(studentInfo.yearSection || '', 2140, footerY + 34);
+
+				downloadCanvasAsJpeg(canvas, filename);
+			} catch (error) {
+				console.error('JPEG export failed', error);
+				alert('Unable to generate JPEG download.');
+			}
 		}
 	}, [records, formatDownloadFileName, getStudentInfo, resolveHeaderImage, formatDisplayDate, normalizeType]);
 
 	const triggerDownloadAllModal = useCallback(() => {
-		setDownloadAllFormat('excel');
+		setDownloadAllFormat('pdf');
 		setDownloadAllModalOpen(true);
 	}, []);
 
@@ -1204,9 +1563,10 @@ sheet.mergeCells('C1:E3');
 		() => [
 			{ key: 'no', label: 'No.', width: 'w-12' },
 			{ key: 'date', label: 'Date Logged', width: 'w-40' },
-			{ key: 'violation', label: 'Violation', width: 'w-[30rem]' },
+			{ key: 'yearSemester', label: 'Year/Semester', width: 'w-56' },
+			{ key: 'violation', label: 'Violation', width: 'w-[36rem]' },
 			{ key: 'reportedBy', label: 'Reported by', width: 'w-40' },
-			{ key: 'remarks', label: 'Remarks' },
+			{ key: 'remarks', label: 'Remarks', width: 'w-44' },
 			{
 				key: 'signature',
 				label: 'Signature',
@@ -1286,16 +1646,18 @@ sheet.mergeCells('C1:E3');
 
 		const filtered = (records || [])
 			.filter((row) => {
-				const status = row?.cleared_at ? 'Cleared' : 'Active';
+				const status = isRecordCleared(row) ? 'Cleared' : 'Active';
 				const typeText = normalizeType(row).toLowerCase();
 				const violationText = String(row?.violation_label || row?.violation_name || '').toLowerCase();
 				const remarksText = String(row?.remarks || '').toLowerCase();
+				const yearSemesterText = formatYearSemesterCell(row).toLowerCase();
 
 				const matchesSearch =
 					!query ||
 					violationText.includes(query) ||
 					typeText.includes(query) ||
-					remarksText.includes(query);
+					remarksText.includes(query) ||
+					yearSemesterText.includes(query);
 
 				const matchesStatus = statusFilter === 'All' || status === statusFilter;
 				return matchesSearch && matchesStatus;
@@ -1311,11 +1673,16 @@ sheet.mergeCells('C1:E3');
 				id: row.id,
 				no: index + 1,
 				date: displayDate,
+				yearSemester: formatYearSemesterCell(row),
 				violation: row.violation_label || row.violation_name || '-',
 				reportedBy: row.reported_by || '-',
 				remarks: row.remarks || '-',
 				signature: row.signature_image || row.signatureImage || '',
-				status: row.cleared_at ? 'Cleared' : 'Active',
+				status: isRecordCleared(row) ? 'Cleared' : 'Active',
+				clearedAtRaw: getClearedAtValue(row),
+				year_section: row.year_section || row.yearSection || '',
+				semester: row.semester || row.current_semester || '',
+				school_year: row.school_year || row.current_school_year || '',
 				student_last_name: row.student_last_name || row.last_name || row.surname || '',
 				student_first_name: row.student_first_name || row.first_name || row.given_name || '',
 				createdAtRaw: row.created_at || row.date || new Date().toISOString(),
@@ -1411,8 +1778,8 @@ sheet.mergeCells('C1:E3');
 										onChange={(e) => setDownloadFormat(e.target.value)}
 										className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
 									>
-										<option value="excel">Excel</option>
 										<option value="pdf">PDF</option>
+										<option value="jpeg">JPEG</option>
 									</select>
 									<ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
 								</div>
@@ -1456,8 +1823,8 @@ sheet.mergeCells('C1:E3');
 										onChange={(e) => setDownloadAllFormat(e.target.value)}
 										className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
 									>
-										<option value="excel">Excel (.xlsx)</option>
 										<option value="pdf">PDF</option>
+										<option value="excel">Excel (.xlsx)</option>
 									</select>
 									<ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
 								</div>

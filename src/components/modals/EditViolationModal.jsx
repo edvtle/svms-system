@@ -158,8 +158,9 @@ const EditViolationModal = ({
       title={<span className="font-black font-inter">Edit Violation</span>}
       size="xl"
       showCloseButton
+      className="max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-1.5rem)]"
     >
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="max-h-[calc(100vh-11rem)] overflow-y-auto pr-1">
         <p className="text-sm text-gray-300 mb-4">Edit this student violation record.</p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">

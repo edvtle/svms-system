@@ -105,6 +105,10 @@ const StudentViolation = () => {
   const [showEditSemesterModal, setShowEditSemesterModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState("");
+  const [clearSuccessModal, setClearSuccessModal] = useState({
+    isOpen: false,
+    message: "",
+  });
 
   const [searchTerm, setSearchTerm] = useState("");
   const [sortOrder, setSortOrder] = useState("A-Z");
@@ -204,6 +208,10 @@ const StudentViolation = () => {
         throw new Error(result?.message || "Unable to clear record.");
       }
       mergeRecord(result.record);
+      setClearSuccessModal({
+        isOpen: true,
+        message: `The violation for ${row.full_name || "this student"} has been marked as cleared.`,
+      });
     } catch (error) {
       const message = error?.message || "Unable to clear record.";
       if (message.toLowerCase().includes("signature is required")) {
@@ -1583,6 +1591,49 @@ const StudentViolation = () => {
         </ModalFooter>
       </Modal>
 
+      <Modal
+        isOpen={isConfirmingAction && confirmAction?.type === "clear"}
+        onClose={() => {}}
+        title={<span className="font-black font-inter">Clearing Violation</span>}
+        size="sm"
+        showCloseButton={false}
+      >
+        <div className="flex flex-col items-center justify-center py-8 gap-4">
+          <div className="animate-spin">
+            <div className="w-10 h-10 border-4 border-amber-500/20 border-t-amber-400 rounded-full"></div>
+          </div>
+          <p className="text-gray-300 text-sm">Updating the student violation record...</p>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={clearSuccessModal.isOpen}
+        onClose={() => setClearSuccessModal({ isOpen: false, message: "" })}
+        title={
+          <span className="font-black font-inter flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-green-400" />
+            Violation Cleared
+          </span>
+        }
+        size="sm"
+        showCloseButton
+      >
+        <div className="rounded-lg border border-green-400/25 bg-green-500/10 px-4 py-3 mb-4">
+          <p className="text-sm font-medium text-green-300">
+            {clearSuccessModal.message || "The violation has been marked as cleared."}
+          </p>
+        </div>
+        <ModalFooter>
+          <Button
+            variant="primary"
+            onClick={() => setClearSuccessModal({ isOpen: false, message: "" })}
+            className="px-6"
+          >
+            OK
+          </Button>
+        </ModalFooter>
+      </Modal>
+
       {showSignatureModal ? (
         <SignaturePadModal
           isOpen={showSignatureModal}
@@ -1593,6 +1644,21 @@ const StudentViolation = () => {
           onSave={handleSignatureSave}
         />
       ) : null}
+
+      <Modal
+        isOpen={isSignatureSaving}
+        onClose={() => {}}
+        title={<span className="font-black font-inter">Adding Signature</span>}
+        size="sm"
+        showCloseButton={false}
+      >
+        <div className="flex flex-col items-center justify-center py-8 gap-4">
+          <div className="animate-spin">
+            <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full"></div>
+          </div>
+          <p className="text-gray-300 text-sm">Processing your signature...</p>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={signatureSuccessModal}

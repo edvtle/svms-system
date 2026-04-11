@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Trash2, Loader } from 'lucide-react';
 import AnimatedContent from '../../components/ui/AnimatedContent';
 import Card from '../../components/ui/Card';
 import Modal, { ModalFooter } from '../../components/ui/Modal';
@@ -13,6 +14,9 @@ const StudentNotification = () => {
   const [selectedAlertNotificationId, setSelectedAlertNotificationId] = useState(null);
   const [showAlertDetailsModal, setShowAlertDetailsModal] = useState(false);
   const [highlightedNotificationId, setHighlightedNotificationId] = useState(null);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [selectedForDeletion, setSelectedForDeletion] = useState(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
   const isFetchingRef = useRef(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,6 +26,77 @@ const StudentNotification = () => {
     () => notifications.find((note) => String(note.id) === String(selectedAlertNotificationId)) || null,
     [notifications, selectedAlertNotificationId],
   );
+
+  const handleCheckboxChange = (notificationId) => {
+    setSelectedForDeletion(prev => {
+      const newSelected = new Set(prev);
+      if (newSelected.has(notificationId)) {
+        newSelected.delete(notificationId);
+      } else {
+        newSelected.add(notificationId);
+      }
+      return newSelected;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedForDeletion.size === notifications.length) {
+      setSelectedForDeletion(new Set());
+    } else {
+      setSelectedForDeletion(new Set(notifications.map(n => n.id)));
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedForDeletion.size === 0) return;
+    setShowDeleteConfirmModal(true);
+  };
+
+  const confirmDelete = async () => {
+    if (selectedForDeletion.size === 0) return;
+
+    const idsToDelete = Array.from(selectedForDeletion);
+    setIsDeleting(true);
+
+    try {
+      let response;
+      if (idsToDelete.length === 1) {
+        // Single delete
+        response = await fetch(`/api/notifications/${idsToDelete[0]}`, {
+          method: 'DELETE',
+          headers: { ...getAuditHeaders() },
+        });
+      } else {
+        // Bulk delete
+        response = await fetch('/api/notifications', {
+          method: 'DELETE',
+          headers: { 
+            ...getAuditHeaders(),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ notification_ids: idsToDelete }),
+        });
+      }
+
+      const data = await response.json().catch(() => ({}));
+      
+      if (response.ok) {
+        // Remove deleted notifications from state
+        setNotifications(prev => prev.filter(n => !idsToDelete.includes(n.id)));
+        setShowDeleteConfirmModal(false);
+        setSelectedForDeletion(new Set());
+        window.dispatchEvent(new Event('notificationsDeleted'));
+      } else {
+        console.error('Delete failed:', data.message);
+        setError(data.message || 'Failed to delete notification(s)');
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
+      setError('Network error while deleting notification(s)');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const parseNotificationMetadata = (rawMetadata) => {
     if (!rawMetadata) return null;
@@ -121,25 +196,50 @@ const StudentNotification = () => {
         <div className="flex flex-col gap-6">
           <h2 className="text-2xl font-bold text-white mb-1">NOTIFICATION</h2>
           <Card variant="glass" padding="lg" className="w-full">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">&nbsp;</h3>
-            <button
-              className="text-gray-400 hover:text-white transition-colors"
-              onClick={async () => {
-                try {
-                  await fetch('/api/notifications/mark-read-all', {
-                    method: 'PUT',
-                    headers: { ...getAuditHeaders() },
-                  });
-                  setNotifications(prev => prev.map(n => ({ ...n, read_at: new Date().toISOString() })));
-                  window.dispatchEvent(new Event('notificationsRead'));
-                } catch (err) {
-                  console.error('Failed to mark all read', err);
-                }
-              }}
-            >
-              Mark all as read
-            </button>
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              {notifications.length > 0 && (
+                <label className="inline-flex items-center gap-2 text-sm text-gray-200 rounded-lg border border-white/10 bg-white/5 px-3 py-2 cursor-pointer hover:bg-white/10 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={selectedForDeletion.size === notifications.length && notifications.length > 0}
+                    onChange={handleSelectAll}
+                    className="w-4 h-4 rounded border-white/30 bg-white/10 cursor-pointer accent-blue-500"
+                    title="Select all notifications"
+                  />
+                  Select all
+                </label>
+              )}
+              {selectedForDeletion.size > 0 && (
+                <button
+                  className="text-red-300 hover:text-red-200 border border-red-400/40 bg-red-500/15 hover:bg-red-500/25 rounded-lg px-3 py-2 transition-colors text-sm flex items-center gap-1"
+                  onClick={handleDeleteSelected}
+                  disabled={isDeleting}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete ({selectedForDeletion.size})
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                className="text-gray-400 hover:text-white transition-colors"
+                onClick={async () => {
+                  try {
+                    await fetch('/api/notifications/mark-read-all', {
+                      method: 'PUT',
+                      headers: { ...getAuditHeaders() },
+                    });
+                    setNotifications(prev => prev.map(n => ({ ...n, read_at: new Date().toISOString() })));
+                    window.dispatchEvent(new Event('notificationsRead'));
+                  } catch (err) {
+                    console.error('Failed to mark all read', err);
+                  }
+                }}
+              >
+                Mark all as read
+              </button>
+            </div>
           </div>
 
           {loading ? (
@@ -154,44 +254,53 @@ const StudentNotification = () => {
                 <div
                   key={note.id}
                   id={`student-notification-${note.id}`}
-                  className={`bg-[#232528]/60 rounded-lg px-4 py-3 flex justify-between items-center border-b border-white/10 cursor-pointer hover:bg-[#232528]/80 ${!note.read_at ? 'ring-1 ring-blue-500/40 bg-blue-500/10' : ''} ${String(highlightedNotificationId) === String(note.id) ? 'ring-2 ring-yellow-400 bg-yellow-500/20 animate-pulse' : ''}`}
-                  onClick={async () => {
-                    // Mark as read if not already
-                    if (!note.read_at) {
-                      try {
-                        await fetch(`/api/notifications/${note.id}/mark-read`, {
-                          method: 'PUT',
-                          headers: { ...getAuditHeaders() },
-                        });
-                        setNotifications(prev => prev.map(n => n.id === note.id ? { ...n, read_at: new Date().toISOString() } : n));
-                      } catch (err) {
-                        console.error('Failed to mark read', err);
-                      }
-                    }
-                    // Navigate based on metadata
-                    const metadataType = String(note.metadata?.type || '');
-
-                    if (metadataType.startsWith('student_violation_')) {
-                      if (note.metadata?.violationLogId) {
-                        navigate(`/student/violations?highlight=${note.metadata.violationLogId}`);
-                      } else {
-                        navigate('/student/violations');
-                      }
-                    } else if (metadataType === 'admin_alert') {
-                      setSelectedAlertNotificationId(note.id);
-                      setShowAlertDetailsModal(true);
-                    } else if (note.metadata?.violationId) {
-                      const highlightParam = `?highlight=${note.metadata.violationId}`;
-                      navigate(`/student/offenses${highlightParam}`);
-                    } else {
-                      navigate('/student/offenses');
-                    }
-
-                    // Emit event so sidebar/navbar refresh unread state
-                    window.dispatchEvent(new Event('notificationRead'));
-                  }}
+                  className={`bg-[#232528]/60 rounded-lg px-4 py-3 flex items-center gap-3 border-b border-white/10 group transition-all ${!note.read_at ? 'ring-1 ring-blue-500/40 bg-blue-500/10' : ''} ${selectedForDeletion.has(note.id) ? 'ring-2 ring-red-400/60 bg-red-500/10' : ''} ${String(highlightedNotificationId) === String(note.id) ? 'ring-2 ring-yellow-400 bg-yellow-500/20 animate-pulse' : ''}`}
                 >
-                  <div className="flex-1">
+                  <input
+                    type="checkbox"
+                    checked={selectedForDeletion.has(note.id)}
+                    onChange={() => handleCheckboxChange(note.id)}
+                    className="w-4 h-4 rounded border-white/30 bg-white/10 cursor-pointer accent-blue-500 flex-shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <div
+                    className="flex-1 cursor-pointer hover:opacity-80 transition-opacity"
+                    onClick={async () => {
+                      // Mark as read if not already
+                      if (!note.read_at) {
+                        try {
+                          await fetch(`/api/notifications/${note.id}/mark-read`, {
+                            method: 'PUT',
+                            headers: { ...getAuditHeaders() },
+                          });
+                          setNotifications(prev => prev.map(n => n.id === note.id ? { ...n, read_at: new Date().toISOString() } : n));
+                        } catch (err) {
+                          console.error('Failed to mark read', err);
+                        }
+                      }
+                      // Navigate based on metadata
+                      const metadataType = String(note.metadata?.type || '');
+
+                      if (metadataType.startsWith('student_violation_')) {
+                        if (note.metadata?.violationLogId) {
+                          navigate(`/student/violations?highlight=${note.metadata.violationLogId}`);
+                        } else {
+                          navigate('/student/violations');
+                        }
+                      } else if (metadataType === 'admin_alert') {
+                        setSelectedAlertNotificationId(note.id);
+                        setShowAlertDetailsModal(true);
+                      } else if (note.metadata?.violationId) {
+                        const highlightParam = `?highlight=${note.metadata.violationId}`;
+                        navigate(`/student/offenses${highlightParam}`);
+                      } else {
+                        navigate('/student/offenses');
+                      }
+
+                      // Emit event so sidebar/navbar refresh unread state
+                      window.dispatchEvent(new Event('notificationRead'));
+                    }}
+                  >
                     <div className="flex items-center gap-2">
                       {!note.read_at && <span className="w-2 h-2 rounded-full bg-blue-500" />}
                       <span className={`text-white text-sm ${!note.read_at ? 'font-bold' : 'font-medium'}`}>{note.title}</span>
@@ -280,6 +389,67 @@ const StudentNotification = () => {
             <p className="text-sm text-gray-300">Unable to load alert details for this notification.</p>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        isOpen={showDeleteConfirmModal}
+        onClose={() => {
+          setShowDeleteConfirmModal(false);
+        }}
+        title={<span className="font-bold">Delete Notification{selectedForDeletion.size > 1 ? 's' : ''}</span>}
+        size="md"
+        showCloseButton
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-4 py-3">
+            <p className="text-sm text-red-200 font-semibold">
+              Are you sure you want to delete {selectedForDeletion.size} notification{selectedForDeletion.size > 1 ? 's' : ''}?
+            </p>
+            <p className="text-xs text-red-100 mt-2">This action cannot be undone.</p>
+          </div>
+
+          {selectedForDeletion.size === 1 && (
+            <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+              <p className="text-gray-400 text-xs mb-2">Notification to delete:</p>
+              <p className="text-white font-medium text-sm">
+                {notifications.find(n => n.id === Array.from(selectedForDeletion)[0])?.title}
+              </p>
+            </div>
+          )}
+
+          <ModalFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setShowDeleteConfirmModal(false);
+              }}
+              disabled={isDeleting}
+              className="px-6 py-2.5"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={confirmDelete}
+              disabled={isDeleting}
+              className="px-6 py-2.5 flex items-center gap-2"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  Delete
+                </>
+              )}
+            </Button>
+          </ModalFooter>
+        </div>
       </Modal>
     </>
   );
