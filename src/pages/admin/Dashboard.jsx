@@ -302,8 +302,8 @@ const Dashboard = () => {
       const activePoint =
         dashboardTrendChart.points[hoveredTrendPointIndex] ||
         dashboardTrendChart.latestPoint;
-      const chartHeightClass = compact ? "h-[78%]" : "h-[77%]";
-      const wrapperHeightClass = compact ? "h-[276px]" : "h-[452px]";
+      const chartHeightClass = compact ? "h-[80%]" : "h-[83%]";
+      const wrapperHeightClass = compact ? "h-[286px]" : "h-[472px]";
 
       const handlePointerMove = (event) => {
         const svg = event.currentTarget;
@@ -332,7 +332,7 @@ const Dashboard = () => {
 
       return (
         <div
-          className={`relative ${wrapperHeightClass} overflow-hidden rounded-[28px] border border-white/25 bg-[linear-gradient(180deg,rgba(242,244,247,0.94)_0%,rgba(214,219,228,0.78)_38%,rgba(137,147,161,0.58)_68%,rgba(24,29,36,0.96)_100%)] px-4 pt-3 pb-2 shadow-[0_22px_45px_rgba(3,7,18,0.35),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-sm`}
+          className={`relative ${wrapperHeightClass} overflow-hidden rounded-[28px] border border-white/25 bg-[linear-gradient(180deg,rgba(242,244,247,0.94)_0%,rgba(214,219,228,0.78)_38%,rgba(137,147,161,0.58)_68%,rgba(24,29,36,0.96)_100%)] px-4 pt-5 pb-8 shadow-[0_22px_45px_rgba(3,7,18,0.35),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-sm`}
         >
           <svg
             viewBox={`0 0 ${dashboardTrendChart.width} ${dashboardTrendChart.height}`}
@@ -461,7 +461,7 @@ const Dashboard = () => {
             ) : null}
           </svg>
 
-          <div className="grid grid-cols-3 gap-3 px-7 pt-3">
+          <div className="grid grid-cols-3 gap-4 px-7 pt-5 mt-3">
             <div className="text-center">
               <p className="text-[12px] font-medium tracking-wide text-slate-100/90">Start ({dashboardTrendChart.startPoint.label || "-"})</p>
               <p className="text-lg font-semibold text-white">{dashboardTrendChart.startPoint.count || 0}</p>

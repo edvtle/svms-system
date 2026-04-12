@@ -112,6 +112,7 @@ const StudentViolation = () => {
   const [currentSchoolYear, setCurrentSchoolYear] = useState("");
   const [archiveSuccessMessage, setArchiveSuccessMessage] = useState("");
   const [showEditSemesterModal, setShowEditSemesterModal] = useState(false);
+  const [showAnalyticsDetailModal, setShowAnalyticsDetailModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState("");
   const [analyticsData, setAnalyticsData] = useState({
@@ -1347,8 +1348,11 @@ const StudentViolation = () => {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-6 mb-6 w-full h-full">
         <AnimatedContent delay={0.05}>
-          <Card className="h-full min-h-[110px] xl:col-span-2 flex flex-col justify-between items-start px-6 py-5 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02]">
-            <div className="flex w-full justify-between items-center mb-2">
+          <Card
+            onClick={() => setShowAnalyticsDetailModal(true)}
+            className="cursor-pointer h-full min-h-[200px] xl:col-span-2 flex flex-col justify-between items-start px-6 py-5 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02]"
+          >
+            <div className="flex w-full justify-between items-center mb-4">
               <span className="text-lg font-black font-inter">Student Analytics</span>
               <span
                 className={`font-bold text-sm ${
@@ -1361,14 +1365,14 @@ const StudentViolation = () => {
                 {analyticsData.studentAnalytics.predictedChangePercent}%
               </span>
             </div>
-            <div className="w-full bg-gradient-to-b from-[#A3AED0]/30 to-transparent rounded-lg border border-white/10 mt-2 px-4 py-2">
+            <div className="w-full bg-gradient-to-b from-[#A3AED0]/30 to-transparent rounded-lg border border-white/10 mt-2 px-4 py-4 min-h-[140px] flex flex-col justify-between">
               <AnalyticsLineGraph
                 data={analyticsData.studentAnalytics.graphData}
                 color="#A3AED0"
-                height={48}
+                height={110}
                 showDots
               />
-              <p className="text-xs text-gray-300 mt-2">
+              <p className="text-xs text-gray-300 mt-4 leading-5">
                 Next term forecast: {analyticsData.studentAnalytics.predictedNextTerm?.predictedViolations ?? 0} violations
                 {analyticsData.studentAnalytics.predictedNextTerm?.label
                   ? ` (${analyticsData.studentAnalytics.predictedNextTerm.label})`
@@ -1612,6 +1616,47 @@ const StudentViolation = () => {
         isUnclearing={isEditUnclearing}
         onUpdateSignature={handleEditSignatureUpdate}
       />
+
+      <Modal
+        isOpen={showAnalyticsDetailModal}
+        onClose={() => setShowAnalyticsDetailModal(false)}
+        title={<span className="font-black font-inter">Student Analytics Details</span>}
+        size="lg"
+      >
+        <p className="text-sm text-gray-300 mb-4">
+          View the student analytics trend and next term forecast in greater detail.
+        </p>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-4">
+          <AnalyticsLineGraph
+            data={analyticsData.studentAnalytics.graphData}
+            color="#A3AED0"
+            height={160}
+            showDots
+            showAxis
+            showHoverLabel
+          />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 min-h-[110px]">
+            <p className="text-sm text-gray-400">Predicted change</p>
+            <p className={`mt-3 text-3xl font-semibold ${analyticsData.studentAnalytics.predictedChangePercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {analyticsData.studentAnalytics.predictedChangePercent >= 0 ? '+' : ''}{analyticsData.studentAnalytics.predictedChangePercent}%
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 min-h-[110px]">
+            <p className="text-sm text-gray-400">Next term forecast</p>
+            <p className="mt-3 text-3xl font-semibold text-white">
+              {analyticsData.studentAnalytics.predictedNextTerm?.predictedViolations ?? 0}
+            </p>
+            <p className="text-sm text-gray-400 mt-2">
+              violations
+            </p>
+            <p className="text-xs text-gray-500 mt-1 whitespace-normal break-words">
+              {analyticsData.studentAnalytics.predictedNextTerm?.label || "No term label available"}
+            </p>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={showErrorModal}

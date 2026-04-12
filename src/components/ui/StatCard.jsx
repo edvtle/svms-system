@@ -15,10 +15,10 @@ const StatCard = ({
   const isPositive = percentage >= 0;
 
   return (
-    <div className={`bg-gradient-to-br from-[#1E1F22] to-[#26282c] rounded-xl p-5 border border-white/10 transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02] ${className}`}>
-      <div className="flex flex-col h-full">
+    <div className={`bg-gradient-to-br from-[#1E1F22] to-[#26282c] rounded-xl p-5 border border-white/10 transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02] h-full ${className}`}>
+      <div className="flex flex-col h-full justify-center gap-6">
         {/* Top Row: Value and Icon */}
-        <div className="flex justify-between items-start gap-3">
+        <div className="flex justify-between items-center gap-3">
           <p className="text-3xl sm:text-4xl font-bold text-white leading-none break-words">
             {value}
           </p>
@@ -31,7 +31,7 @@ const StatCard = ({
           </div>
         </div>
         {/* Bottom Row: Title and Percentage */}
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-end">
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-end">
           <p className="text-gray-400 text-xs sm:text-sm font-bold leading-snug break-words max-w-[12rem]">
             {title}
           </p>
