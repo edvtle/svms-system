@@ -117,8 +117,12 @@ const Dashboard = () => {
   const [isLoadingRanking, setIsLoadingRanking] = useState(true);
   const [showRankingExportModal, setShowRankingExportModal] = useState(false);
   const [showRankingExportAlertModal, setShowRankingExportAlertModal] = useState(false);
+  const [showTrendExportConfirmModal, setShowTrendExportConfirmModal] = useState(false);
+  const [showTrendExportAlertModal, setShowTrendExportAlertModal] = useState(false);
+  const [trendExportAlertMessage, setTrendExportAlertMessage] = useState("");
   const [rankingExportFormat, setRankingExportFormat] = useState("excel");
   const [isExportingRanking, setIsExportingRanking] = useState(false);
+  const [isTrendExporting, setIsTrendExporting] = useState(false);
   const [rankingExportAlertMessage, setRankingExportAlertMessage] = useState("");
   const [hoveredTrendPointIndex, setHoveredTrendPointIndex] = useState(null);
 
@@ -204,6 +208,11 @@ const Dashboard = () => {
 
     return normalized.length ? normalized : trendRows;
   }, [selectedSemester, trendBySemester]);
+
+  const selectedTrendRawData = useMemo(
+    () => (Array.isArray(trendBySemester?.[selectedSemester]) ? trendBySemester[selectedSemester] : []),
+    [selectedSemester, trendBySemester],
+  );
 
   const selectedTrendGraphData = useMemo(
     () => selectedTrendData.map((entry) => Number(entry.count) || 0),
@@ -299,6 +308,229 @@ const Dashboard = () => {
       peakIndex,
     };
   }, [selectedTrendData]);
+
+  const createTrendChartCanvasImage = useCallback(() => {
+    const width = 920;
+    const height = 300;
+    const scale = 3;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Unable to create export canvas.");
+    }
+    ctx.scale(scale, scale);
+    ctx.imageSmoothingEnabled = true;
+
+    const wrapperRadius = 24;
+    const wrapperBackground = "#222427";
+    const wrapperBorder = "rgba(255,255,255,0.12)";
+    const chartGridColor = "rgba(255,255,255,0.12)";
+    const chartLineColor = "#d1d5db";
+    const chartPointFill = "#e5e7eb";
+    const chartPointBorder = "#222427";
+    const gradientTopColor = "rgba(209,213,219,0.08)";
+    const gradientBottomColor = "rgba(34,36,39,0)";
+    const labelTextColor = "rgba(156,163,175,0.9)";
+    const summaryBg = "rgba(255,255,255,0.05)";
+    const summaryBorder = "rgba(255,255,255,0.1)";
+    const summaryLabelColor = "#9ca3af";
+    const summaryValueColor = "#ffffff";
+
+    const drawRoundedRect = (x, y, w, h, r) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    };
+
+    // Card background
+    drawRoundedRect(0.5, 0.5, width - 1, height - 1, wrapperRadius);
+    ctx.fillStyle = wrapperBackground;
+    ctx.fill();
+
+    const svgOffsetY = 6;
+    const chartTop = svgOffsetY + dashboardTrendChart.top;
+    const chartBottom = svgOffsetY + dashboardTrendChart.top + dashboardTrendChart.chartHeight + 20;
+    const chartLeft = dashboardTrendChart.left + 48;
+    const chartRight = width - dashboardTrendChart.right - 12;
+    const chartWidth = chartRight - chartLeft;
+
+    const counts = dashboardTrendChart.points.map((point) => point.count);
+    const maxTick = Math.max(...dashboardTrendChart.yTicks, 1);
+    const minorStep = Math.max(1, Math.ceil(maxTick / 10));
+    const detailedYValues = [];
+    for (let value = 0; value <= maxTick; value += minorStep) {
+      detailedYValues.push(value);
+    }
+    if (detailedYValues[detailedYValues.length - 1] !== maxTick) {
+      detailedYValues.push(maxTick);
+    }
+
+    const minorValueSet = new Set(detailedYValues);
+    const majorValueSet = new Set(dashboardTrendChart.yTicks);
+
+    const exportPoints = counts.map((count, index) => {
+      const x =
+        counts.length <= 1
+          ? chartLeft + chartWidth / 2
+          : chartLeft + (index / (counts.length - 1)) * chartWidth;
+      const y = chartTop + ((maxTick - count) / maxTick) * dashboardTrendChart.chartHeight;
+      return {
+        x,
+        y,
+        count,
+        label: dashboardTrendChart.points[index]?.label || "",
+      };
+    });
+
+    // Horizontal guide lines for all detailed Y values
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 0.5;
+    detailedYValues.forEach((value) => {
+      const y =
+        chartTop +
+        ((maxTick - value) / maxTick) *
+          dashboardTrendChart.chartHeight;
+      ctx.beginPath();
+      ctx.moveTo(chartLeft, y);
+      ctx.lineTo(chartRight, y);
+      ctx.stroke();
+    });
+
+    // Major Y-axis labels (bold)
+    ctx.font = "bold 11px Inter, sans-serif";
+    ctx.fillStyle = labelTextColor;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    dashboardTrendChart.yTicks.forEach((tick) => {
+      const y =
+        chartTop +
+        ((maxTick - tick) / maxTick) *
+          dashboardTrendChart.chartHeight;
+      ctx.fillText(String(tick), chartLeft - 24, y);
+    });
+
+    // Minor Y-axis values (smaller, lighter)
+    ctx.font = "10px Inter, sans-serif";
+    ctx.fillStyle = "rgba(156,163,175,0.55)";
+    detailedYValues.forEach((value) => {
+      if (majorValueSet.has(value)) return;
+      const y =
+        chartTop +
+        ((maxTick - value) / maxTick) *
+          dashboardTrendChart.chartHeight;
+      ctx.fillText(String(value), chartLeft - 24, y);
+    });
+
+    // Axis lines
+    ctx.strokeStyle = chartGridColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(chartLeft, chartTop);
+    ctx.lineTo(chartLeft, chartBottom);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(chartLeft, chartBottom);
+    ctx.lineTo(chartRight, chartBottom);
+    ctx.stroke();
+
+    // X-axis labels
+    ctx.font = "11px Inter, sans-serif";
+    ctx.fillStyle = labelTextColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    exportPoints.forEach((point) => {
+      const label = point.label || "";
+      ctx.fillText(label, point.x, chartBottom + 12);
+    });
+
+    // Axis titles
+    ctx.font = "12px Inter, sans-serif";
+    ctx.fillStyle = labelTextColor;
+    ctx.textAlign = "center";
+    ctx.fillText("Months", (chartLeft + chartRight) / 2, chartBottom + 32);
+
+    ctx.save();
+    ctx.translate(chartLeft - 50, chartTop + dashboardTrendChart.chartHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Violations", 0, 0);
+    ctx.restore();
+
+    ctx.font = "11px Inter, sans-serif";
+    ctx.fillStyle = labelTextColor;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    if (exportPoints.length) {
+      const gradient = ctx.createLinearGradient(0, chartTop, 0, chartBottom);
+      gradient.addColorStop(0, gradientTopColor);
+      gradient.addColorStop(1, gradientBottomColor);
+
+      ctx.beginPath();
+      exportPoints.forEach((point, index) => {
+        const x = point.x;
+        const y = point.y;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          const prev = exportPoints[index - 1];
+          const cpX = (prev.x + point.x) / 2;
+          ctx.quadraticCurveTo(cpX, prev.y, x, y);
+        }
+      });
+      const lastPoint = exportPoints[exportPoints.length - 1];
+      const firstPoint = exportPoints[0];
+      ctx.lineTo(lastPoint.x, chartBottom);
+      ctx.lineTo(firstPoint.x, chartBottom);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      ctx.beginPath();
+      exportPoints.forEach((point, index) => {
+        const x = point.x;
+        const y = point.y;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          const prev = exportPoints[index - 1];
+          const cpX = (prev.x + point.x) / 2;
+          ctx.quadraticCurveTo(cpX, prev.y, x, y);
+        }
+      });
+      ctx.strokeStyle = chartLineColor;
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.stroke();
+
+      exportPoints.forEach((point, index) => {
+        const x = point.x;
+        const y = point.y;
+        const radius = index === exportPoints.length - 1 ? 4.8 : 3.4;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = chartPointFill;
+        ctx.fill();
+        ctx.strokeStyle = chartPointBorder;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+      });
+    }
+
+    return canvas.toDataURL("image/png");
+  }, [dashboardTrendChart]);
 
   const renderInteractiveTrendChart = useCallback(
     ({ compact = false } = {}) => {
@@ -782,6 +1014,77 @@ const Dashboard = () => {
 
     doc.save(`student_violation_ranking_${formatDateForFileName()}.pdf`);
   }, [rankingExportRows, resolveRankingHeaderImage]);
+
+  const exportTrendAsPdf = useCallback(async () => {
+    if (!selectedTrendRawData.length) {
+      setTrendExportAlertMessage("There's no record to export");
+      setShowTrendExportAlertModal(true);
+      return;
+    }
+
+    setIsTrendExporting(true);
+    try {
+      const [{ jsPDF }] = await Promise.all([import("jspdf")]);
+
+        const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const { dataUrl, dimensions, imageFormat } = await resolveRankingHeaderImage();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 20;
+      const contentWidth = pageWidth - margin * 2;
+      const centerX = pageWidth / 2;
+      let cursorY = margin;
+
+      if (dataUrl) {
+        const headerWidth = contentWidth;
+        const headerHeight = (dimensions.height * headerWidth) / dimensions.width;
+        doc.addImage(dataUrl, imageFormat, margin, cursorY, headerWidth, headerHeight);
+        cursorY += headerHeight + 10;
+      }
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text("Violation Trends Over the Semester", centerX, cursorY, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Semester: ${selectedSemester}`, centerX, cursorY + 8, { align: "center" });
+      doc.text(`Generated: ${new Date().toLocaleString()}`, centerX, cursorY + 16, { align: "center" });
+      cursorY += 28;
+
+      const chartImageDataUrl = createTrendChartCanvasImage();
+      const chartImageWidth = contentWidth * 0.86;
+      const chartImageHeight = (260 / 920) * chartImageWidth;
+      const chartImageLeft = margin + (contentWidth - chartImageWidth) / 2;
+      const chartImageTop = cursorY;
+      doc.addImage(chartImageDataUrl, "PNG", chartImageLeft, chartImageTop, chartImageWidth, chartImageHeight);
+
+      const statsY = chartImageTop + chartImageHeight + 12;
+      const statsSpacing = chartImageWidth / 3;
+      const statsX = [chartImageLeft + statsSpacing * 0.5, chartImageLeft + statsSpacing * 1.5, chartImageLeft + statsSpacing * 2.5];
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Start (${trendSummary.first.label || "-"})`, statsX[0], statsY, { align: "center" });
+      doc.text(`Peak (${trendSummary.peak.label || "-"})`, statsX[1], statsY, { align: "center" });
+      doc.text(`Latest (${trendSummary.latest.label || "-"})`, statsX[2], statsY, { align: "center" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      const valueY = statsY + 6;
+      doc.text(String(trendSummary.first.count || 0), statsX[0], valueY, { align: "center" });
+      doc.text(String(trendSummary.peak.count || 0), statsX[1], valueY, { align: "center" });
+      doc.text(String(trendSummary.latest.count || 0), statsX[2], valueY, { align: "center" });
+
+      const cleanedSemester = selectedSemester
+        .replace(/\s+/g, "_")
+        .replace(/[^a-zA-Z0-9_-]/g, "");
+      doc.save(`violation_trends_${cleanedSemester}_${formatDateForFileName()}.pdf`);
+    } catch (error) {
+      setTrendExportAlertMessage(error?.message || "Unable to export report.");
+      setShowTrendExportAlertModal(true);
+    } finally {
+      setIsTrendExporting(false);
+    }
+  }, [selectedTrendData, selectedSemester, resolveRankingHeaderImage, selectedTrendRawData, createTrendChartCanvasImage, trendSummary]);
 
   const handleConfirmRankingExport = async () => {
     if (rankingExportRows.length === 0) {
@@ -1381,16 +1684,25 @@ const Dashboard = () => {
               <DropdownMenuItem onClick={() => setSelectedSemester("2nd Sem")}>
                 2nd Sem
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSelectedSemester("Summer")}>
+                Summer
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <button
             className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-100 text-sm font-medium px-4 py-2.5 rounded-lg border border-gray-600 shadow transition-colors h-10"
             onClick={() => {
-              /* Add export logic here */
+              if (!selectedTrendRawData.length) {
+                setTrendExportAlertMessage("There's no record to export");
+                setShowTrendExportAlertModal(true);
+                return;
+              }
+              setShowTrendExportConfirmModal(true);
             }}
+            disabled={isTrendExporting}
           >
             <Download className="w-4 h-4" />
-            Export
+            {isTrendExporting ? "Exporting PDF..." : "Export PDF"}
           </button>
         </div>
         {renderInteractiveTrendChart({ compact: false })}
@@ -1639,11 +1951,57 @@ const Dashboard = () => {
         </ModalFooter>
       </Modal>
 
+      <Modal
+        isOpen={showTrendExportConfirmModal}
+        onClose={() => {
+          if (!isTrendExporting) {
+            setShowTrendExportConfirmModal(false);
+          }
+        }}
+        title={<span className="font-black font-inter">Confirm Trend Export</span>}
+        size="sm"
+        showCloseButton={!isTrendExporting}
+      >
+        <p className="text-sm text-gray-300 mb-4">
+          Export the current violation trends chart and summary for {selectedSemester}?
+        </p>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowTrendExportConfirmModal(false)}
+            disabled={isTrendExporting}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => {
+              setShowTrendExportConfirmModal(false);
+              exportTrendAsPdf();
+            }}
+            disabled={isTrendExporting}
+            className="px-6 py-2.5"
+          >
+            {isTrendExporting ? "Exporting..." : "Confirm"}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
       <AlertModal
         isOpen={showRankingExportAlertModal}
         onClose={() => setShowRankingExportAlertModal(false)}
         title="Export unavailable"
         message={rankingExportAlertMessage}
+        confirmLabel="Okay"
+      />
+      <AlertModal
+        isOpen={showTrendExportAlertModal}
+        onClose={() => setShowTrendExportAlertModal(false)}
+        title="Export unavailable"
+        message={trendExportAlertMessage}
         confirmLabel="Okay"
       />
     </div>

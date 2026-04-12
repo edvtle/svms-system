@@ -23,6 +23,7 @@ import {
   DropdownMenuItem,
 } from "../../components/ui/dropdown-menu";
 import Modal, { ModalFooter } from "../../components/ui/Modal";
+import AlertModal from "../../components/ui/AlertModal";
 import EditUserModal from "@/components/modals/EditUserModal";
 import AddUserModal from "@/components/modals/AddUserModal";
 import EditSemesterYearModal from "@/components/modals/EditSemesterYearModal";
@@ -87,7 +88,9 @@ const UserManagement = () => {
   const [showCreateSuccessModal, setShowCreateSuccessModal] = useState(false);
   const [showDuplicateSchoolIdModal, setShowDuplicateSchoolIdModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showExportAlertModal, setShowExportAlertModal] = useState(false);
   const [exportFormat, setExportFormat] = useState("excel");
+  const [exportAlertMessage, setExportAlertMessage] = useState("");
   const [isExporting, setIsExporting] = useState(false);
 
   const [studentData, setStudentData] = useState([]);
