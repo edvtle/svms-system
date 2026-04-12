@@ -32,6 +32,7 @@ import EditViolationModal from "@/components/modals/EditViolationModal";
 import EditSemesterYearModal from "@/components/modals/EditSemesterYearModal";
 import ArchiveViolationModal from "@/components/modals/ArchiveViolationModal";
 import Modal, { ModalFooter } from "@/components/ui/Modal";
+import AlertModal from "@/components/ui/AlertModal";
 import { getAuditHeaders } from "@/lib/auditHeaders";
 
 const EXPORT_HEADER_IMAGE_PATH = "/plpasig_header.png";
@@ -105,6 +106,8 @@ const StudentViolation = () => {
   const [signatureSuccessModal, setSignatureSuccessModal] = useState(false);
   const [isSignatureSaving, setIsSignatureSaving] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showExportAlertModal, setShowExportAlertModal] = useState(false);
+  const [exportAlertMessage, setExportAlertMessage] = useState("");
   const [exportFormat, setExportFormat] = useState("excel");
   const [isExporting, setIsExporting] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
@@ -1242,7 +1245,8 @@ const StudentViolation = () => {
 
   const handleConfirmExport = async () => {
     if (exportRows.length === 0) {
-      alert("No rows available to export.");
+      setExportAlertMessage("There's no record to export");
+      setShowExportAlertModal(true);
       return;
     }
 
@@ -1603,6 +1607,14 @@ const StudentViolation = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      <AlertModal
+        isOpen={showExportAlertModal}
+        onClose={() => setShowExportAlertModal(false)}
+        title="Export unavailable"
+        message={exportAlertMessage}
+        confirmLabel="Okay"
+      />
 
       <EditViolationModal
         isOpen={showEditModal}

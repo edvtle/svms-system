@@ -1167,7 +1167,8 @@ const UserManagement = () => {
 
   const handleConfirmExport = async () => {
     if (exportRows.length === 0) {
-      alert("No rows available to export.");
+      setExportAlertMessage("There's no record to export");
+      setShowExportAlertModal(true);
       return;
     }
 
@@ -1801,6 +1802,14 @@ const UserManagement = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      <AlertModal
+        isOpen={showExportAlertModal}
+        onClose={() => setShowExportAlertModal(false)}
+        title="Export unavailable"
+        message={exportAlertMessage}
+        confirmLabel="Okay"
+      />
 
       <Modal
         isOpen={showCreateSuccessModal}

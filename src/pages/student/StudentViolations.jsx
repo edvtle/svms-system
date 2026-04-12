@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Card from '../../components/ui/Card';
 import DataTable from '../../components/ui/DataTable';
 import Modal, { ModalFooter } from '../../components/ui/Modal';
+import AlertModal from '../../components/ui/AlertModal';
 import AnimatedContent from '../../components/ui/AnimatedContent';
 import SearchBar from '../../components/ui/SearchBar';
 import Button from '../../components/ui/Button';
@@ -124,6 +125,8 @@ const StudentViolations = () => {
 	const [selectedDownloadRecord, setSelectedDownloadRecord] = useState(null);
 	const [downloadAllModalOpen, setDownloadAllModalOpen] = useState(false);
 	const [downloadAllFormat, setDownloadAllFormat] = useState('pdf');
+	const [showDownloadAlertModal, setShowDownloadAlertModal] = useState(false);
+	const [downloadAlertMessage, setDownloadAlertMessage] = useState("");
 
 	// Get student info from localStorage
 	const getStudentInfo = useCallback(() => {
@@ -865,7 +868,8 @@ if (format === 'jpeg') {
 
 	const createDownloadAll = useCallback(async (format) => {
 		if (!records || records.length === 0) {
-			alert('No violations to download.');
+			setDownloadAlertMessage("There's no violations to export.");
+			setShowDownloadAlertModal(true);
 			return;
 		}
 
@@ -1847,6 +1851,15 @@ sheet.mergeCells('A1:H3');
 									</Button>
 								</ModalFooter>
 							</Modal>
+
+						<AlertModal
+							isOpen={showDownloadAlertModal}
+							onClose={() => setShowDownloadAlertModal(false)}
+							title="Export unavailable"
+							message={downloadAlertMessage}
+							confirmLabel="Okay"
+						/>
+
 						</>
 					)}
 				</Card>

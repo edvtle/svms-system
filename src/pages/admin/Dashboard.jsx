@@ -8,6 +8,7 @@ import {
 } from "../../components/ui/QuickActionButton";
 import AnimatedContent from "../../components/ui/AnimatedContent";
 import Modal, { ModalFooter } from "../../components/ui/Modal";
+import AlertModal from "../../components/ui/AlertModal";
 import Button from "../../components/ui/Button";
 import DataTable, {
   TableCellText,
@@ -115,8 +116,10 @@ const Dashboard = () => {
   const [rankingData, setRankingData] = useState([]);
   const [isLoadingRanking, setIsLoadingRanking] = useState(true);
   const [showRankingExportModal, setShowRankingExportModal] = useState(false);
+  const [showRankingExportAlertModal, setShowRankingExportAlertModal] = useState(false);
   const [rankingExportFormat, setRankingExportFormat] = useState("excel");
   const [isExportingRanking, setIsExportingRanking] = useState(false);
+  const [rankingExportAlertMessage, setRankingExportAlertMessage] = useState("");
   const [hoveredTrendPointIndex, setHoveredTrendPointIndex] = useState(null);
 
   const filteredRankingData = rankingData.filter((student) => {
@@ -782,7 +785,8 @@ const Dashboard = () => {
 
   const handleConfirmRankingExport = async () => {
     if (rankingExportRows.length === 0) {
-      alert("No rows available to export.");
+      setRankingExportAlertMessage("There's no record to export");
+      setShowRankingExportAlertModal(true);
       return;
     }
 
@@ -1634,6 +1638,14 @@ const Dashboard = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      <AlertModal
+        isOpen={showRankingExportAlertModal}
+        onClose={() => setShowRankingExportAlertModal(false)}
+        title="Export unavailable"
+        message={rankingExportAlertMessage}
+        confirmLabel="Okay"
+      />
     </div>
   );
 };

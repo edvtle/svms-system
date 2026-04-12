@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
 } from "../../components/ui/dropdown-menu";
 import Modal, { ModalFooter } from "@/components/ui/Modal";
+import AlertModal from "@/components/ui/AlertModal";
 import EditArchiveModal from "@/components/modals/EditArchiveModal";
 import { getAuditHeaders } from "@/lib/auditHeaders";
 
@@ -212,6 +213,8 @@ const Archives = () => {
   const [downloadFormat, setDownloadFormat] = useState('excel');
   const [downloadAllModalOpen, setDownloadAllModalOpen] = useState(false);
   const [downloadAllFormat, setDownloadAllFormat] = useState('excel');
+  const [showDownloadAlertModal, setShowDownloadAlertModal] = useState(false);
+  const [downloadAlertMessage, setDownloadAlertMessage] = useState("");
 
   // Load archived users on mount
   useEffect(() => {
@@ -1662,7 +1665,8 @@ const Archives = () => {
 
   const createDownload = async (format) => {
     if (filteredData.length === 0) {
-      alert('No data to export.');
+      setDownloadAlertMessage("There's no record to export");
+      setShowDownloadAlertModal(true);
       return;
     }
 
@@ -2574,6 +2578,14 @@ const Archives = () => {
           </button>
         </ModalFooter>
       </Modal>
+
+      <AlertModal
+        isOpen={showDownloadAlertModal}
+        onClose={() => setShowDownloadAlertModal(false)}
+        title="Export unavailable"
+        message={downloadAlertMessage}
+        confirmLabel="Okay"
+      />
 
       {/* Edit Modal */}
       {isEditOpen && selectedRow && (
