@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import AnimatedContent from "../../components/ui/AnimatedContent";
 import Card from "../../components/ui/Card";
 import StatCard from "../../components/ui/StatCard";
+import AnalyticsLineGraph from "../../components/ui/AnalyticsLineGraph";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
 import TableTabs from "../../components/ui/TableTabs";
@@ -79,6 +80,14 @@ const normalizeRemarksText = (value) => {
   if (!text || text === "-") return "";
   return text;
 };
+const getDisplaySemester = (semester, schoolYear) => {
+  const normalizedSemester = String(semester || "").trim().toUpperCase();
+  const normalizedSchoolYear = String(schoolYear || "").trim();
+  if (normalizedSemester === "1ST SEM" && normalizedSchoolYear === "2025-2026") {
+    return "2ND SEM";
+  }
+  return normalizedSemester || semester || "";
+};
 
 const StudentViolation = () => {
   const location = useLocation();
@@ -105,6 +114,19 @@ const StudentViolation = () => {
   const [showEditSemesterModal, setShowEditSemesterModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState("");
+  const [analyticsData, setAnalyticsData] = useState({
+    cards: {
+      activeViolations: { percentChange: 0 },
+      warningStudents: { percentChange: 0 },
+      atRiskStudents: { percentChange: 0 },
+      highRiskStudents: { percentChange: 0 },
+    },
+    studentAnalytics: {
+      graphData: [0, 0, 0, 0],
+      predictedNextTerm: null,
+      predictedChangePercent: 0,
+    },
+  });
   const [clearSuccessModal, setClearSuccessModal] = useState({
     isOpen: false,
     message: "",
@@ -140,7 +162,7 @@ const StudentViolation = () => {
         });
         const data = await response.json();
         if (response.ok && data.status === "ok") {
-          setCurrentSemester(data.currentSemester || "1ST SEM");
+          setCurrentSemester(getDisplaySemester(data.currentSemester || "1ST SEM", data.currentSchoolYear || "2025-2026"));
           setCurrentSchoolYear(data.currentSchoolYear || "2025-2026");
         }
       } catch (error) {
@@ -149,6 +171,55 @@ const StudentViolation = () => {
     };
     loadCurrentSettings();
   }, []);
+
+  const fetchViolationAnalytics = async () => {
+    try {
+      const response = await fetch("/api/violation-analytics", {
+        headers: { ...getAuditHeaders() },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.status !== "ok") {
+        return;
+      }
+
+      setAnalyticsData({
+        cards: {
+          activeViolations: {
+            percentChange:
+              Number(data?.cards?.activeViolations?.percentChange) || 0,
+          },
+          warningStudents: {
+            percentChange:
+              Number(data?.cards?.warningStudents?.percentChange) || 0,
+          },
+          atRiskStudents: {
+            percentChange: Number(data?.cards?.atRiskStudents?.percentChange) || 0,
+          },
+          highRiskStudents: {
+            percentChange:
+              Number(data?.cards?.highRiskStudents?.percentChange) || 0,
+          },
+        },
+        studentAnalytics: {
+          graphData:
+            Array.isArray(data?.studentAnalytics?.historyCounts) &&
+            data?.studentAnalytics?.predictedNextTerm
+              ? [
+                  ...data.studentAnalytics.historyCounts.map((value) => Number(value) || 0),
+                  Number(data.studentAnalytics.predictedNextTerm.predictedViolations) || 0,
+                ]
+              : Array.isArray(data?.studentAnalytics?.graphData)
+                ? data.studentAnalytics.graphData
+                : [0, 0, 0, 0],
+          predictedNextTerm: data?.studentAnalytics?.predictedNextTerm || null,
+          predictedChangePercent:
+            Number(data?.studentAnalytics?.predictedChangePercent) || 0,
+        },
+      });
+    } catch {
+      // Keep existing fallback values if analytics loading fails.
+    }
+  };
 
   const fetchStudentViolations = async ({ silent = false } = {}) => {
     if (!silent) setIsLoading(true);
@@ -175,6 +246,7 @@ const StudentViolation = () => {
 
   useEffect(() => {
     fetchStudentViolations();
+    fetchViolationAnalytics();
   }, []);
 
   const deleteRecord = async (row) => {
@@ -269,7 +341,7 @@ const StudentViolation = () => {
   };
 
   const handleArchiveComplete = (archiveData) => {
-    setCurrentSemester(archiveData.nextSemester);
+    setCurrentSemester(getDisplaySemester(archiveData.nextSemester, archiveData.nextSchoolYear));
     setCurrentSchoolYear(archiveData.nextSchoolYear);
     
     let message = `Archive completed! ${archiveData.archivedCount || 0} violations moved to archive.`;
@@ -322,7 +394,7 @@ const StudentViolation = () => {
         throw new Error(data?.message || "Failed to update semester and school year");
       }
 
-      setCurrentSemester(data.currentSemester || semester);
+      setCurrentSemester(getDisplaySemester(data.currentSemester || semester, data.currentSchoolYear || schoolYear));
       setCurrentSchoolYear(data.currentSchoolYear || schoolYear);
     } catch (error) {
       alert(error.message || "Unable to save changes");
@@ -1278,10 +1350,30 @@ const StudentViolation = () => {
           <Card className="h-full min-h-[110px] xl:col-span-2 flex flex-col justify-between items-start px-6 py-5 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02]">
             <div className="flex w-full justify-between items-center mb-2">
               <span className="text-lg font-black font-inter">Student Analytics</span>
-              <span className="text-green-400 font-bold text-sm">+0%</span>
+              <span
+                className={`font-bold text-sm ${
+                  analyticsData.studentAnalytics.predictedChangePercent >= 0
+                    ? "text-green-400"
+                    : "text-red-400"
+                }`}
+              >
+                {analyticsData.studentAnalytics.predictedChangePercent >= 0 ? "+" : ""}
+                {analyticsData.studentAnalytics.predictedChangePercent}%
+              </span>
             </div>
-            <div className="w-full h-12 flex items-center justify-center bg-gradient-to-b from-[#A3AED0]/30 to-transparent rounded-lg border border-white/10 mt-2">
-              <span className="text-gray-400 text-sm">[Chart Placeholder]</span>
+            <div className="w-full bg-gradient-to-b from-[#A3AED0]/30 to-transparent rounded-lg border border-white/10 mt-2 px-4 py-2">
+              <AnalyticsLineGraph
+                data={analyticsData.studentAnalytics.graphData}
+                color="#A3AED0"
+                height={48}
+                showDots
+              />
+              <p className="text-xs text-gray-300 mt-2">
+                Next term forecast: {analyticsData.studentAnalytics.predictedNextTerm?.predictedViolations ?? 0} violations
+                {analyticsData.studentAnalytics.predictedNextTerm?.label
+                  ? ` (${analyticsData.studentAnalytics.predictedNextTerm.label})`
+                  : ""}
+              </p>
             </div>
           </Card>
         </AnimatedContent>
@@ -1291,7 +1383,7 @@ const StudentViolation = () => {
             <StatCard
               title="Warning Students"
               value={metrics.warning}
-              percentage={0}
+              percentage={analyticsData.cards.warningStudents.percentChange}
               icon={<TrendingUp />}
               className="h-full w-full"
             />
@@ -1300,7 +1392,7 @@ const StudentViolation = () => {
             <StatCard
               title="At-Risk Students"
               value={metrics.atRisk}
-              percentage={0}
+              percentage={analyticsData.cards.atRiskStudents.percentChange}
               icon={<TrendingUp />}
               className="h-full w-full"
             />
@@ -1309,7 +1401,7 @@ const StudentViolation = () => {
             <StatCard
               title="High-Risk Students"
               value={metrics.highRisk}
-              percentage={0}
+              percentage={analyticsData.cards.highRiskStudents.percentChange}
               icon={<TrendingDown />}
               className="h-full w-full"
             />
@@ -1318,7 +1410,7 @@ const StudentViolation = () => {
             <StatCard
               title="Total Violations"
               value={metrics.total}
-              percentage={0}
+              percentage={analyticsData.cards.activeViolations.percentChange}
               icon={<TrendingDown />}
               className="h-full w-full"
             />

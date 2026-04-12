@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import nodemailer from "nodemailer";
 import multer from "multer";
 import path from "node:path";
+import { access, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   closeDbPool,
@@ -35,10 +36,764 @@ const FORGOT_CODE_EXPIRY_MS = 10 * 60 * 1000;
 const FORGOT_RESEND_COOLDOWN_MS = 15 * 1000;
 const AUDIT_LOG_RETENTION_DAYS = 15;
 const AUDIT_LOG_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const HISTORICAL_VIOLATION_RECORDS_PATH = path.resolve(
+  __dirname,
+  "../ViolationRecords1.xlsx",
+);
+const HISTORICAL_VIOLATION_CACHE = {
+  mtimeMs: 0,
+  records: [],
+};
 const isServerlessRuntime =
   process.env.VERCEL === "1" ||
   process.env.AWS_LAMBDA_FUNCTION_NAME ||
   process.env.NODE_ENV === "serverless";
+
+const DEGREE_WORD_TO_RANK = {
+  first: 1,
+  second: 2,
+  third: 3,
+  fourth: 4,
+  fifth: 5,
+  sixth: 6,
+  seventh: 7,
+};
+
+const MONTH_LABELS_BY_SEMESTER = {
+  "1ST SEM": ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov"],
+  "2ND SEM": ["Dec", "Jan", "Feb", "Mar", "Apr"],
+  SUMMER: ["May"],
+};
+
+const SEMESTER_DISPLAY_MAP = {
+  "1ST SEM": "1st Sem",
+  "2ND SEM": "2nd Sem",
+  SUMMER: "Summer",
+};
+
+function normalizeSemester(value) {
+  const text = String(value || "")
+    .trim()
+    .toUpperCase();
+
+  if (!text) return "";
+  if (text.includes("SUM")) return "SUMMER";
+  if (text.includes("1")) return "1ST SEM";
+  if (text.includes("2")) return "2ND SEM";
+  return "";
+}
+
+function normalizeSchoolYear(value) {
+  const match = String(value || "")
+    .trim()
+    .match(/(\d{4})\s*-\s*(\d{4})/);
+
+  if (!match) return "";
+  return `${match[1]}-${match[2]}`;
+}
+
+function inferAcademicTermFromDate(dateInput) {
+  const date = new Date(dateInput);
+  if (Number.isNaN(date.getTime())) {
+    return { semester: "", schoolYear: "" };
+  }
+
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+
+  if (month === 5) {
+    return {
+      semester: "SUMMER",
+      schoolYear: `${year - 1}-${year}`,
+    };
+  }
+
+  if (month >= 6) {
+    return {
+      semester: "1ST SEM",
+      schoolYear: `${year}-${year + 1}`,
+    };
+  }
+
+  return {
+    semester: "2ND SEM",
+    schoolYear: `${year - 1}-${year}`,
+  };
+}
+
+function toMonthLabel(dateInput) {
+  const date = new Date(dateInput);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleString("en-US", { month: "short" });
+}
+
+function parseDegreeRank(value) {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (!text) return 1;
+
+  const numericMatch = text.match(/(\d+)\s*(st|nd|rd|th)?\s*degree?/i);
+  if (numericMatch) {
+    const numericRank = Number(numericMatch[1]);
+    if (Number.isFinite(numericRank) && numericRank >= 1) {
+      return Math.min(7, numericRank);
+    }
+  }
+
+  for (const [word, rank] of Object.entries(DEGREE_WORD_TO_RANK)) {
+    if (text.includes(word)) {
+      return rank;
+    }
+  }
+
+  return 1;
+}
+
+function getRiskBucket(violationCount, maxDegreeRank) {
+  if (violationCount >= 5 || (maxDegreeRank >= 5 && maxDegreeRank <= 7)) {
+    return "highRiskStudents";
+  }
+
+  if (
+    (violationCount >= 3 && violationCount <= 4) ||
+    (maxDegreeRank >= 3 && maxDegreeRank <= 4)
+  ) {
+    return "atRiskStudents";
+  }
+
+  if (violationCount === 2 || maxDegreeRank === 2) {
+    return "warningStudents";
+  }
+
+  return null;
+}
+
+function computePercentChange(currentValue, previousValue) {
+  const current = Number(currentValue) || 0;
+  const previous = Number(previousValue) || 0;
+
+  if (previous === 0) {
+    return current === 0 ? 0 : 100;
+  }
+
+  return Number((((current - previous) / previous) * 100).toFixed(1));
+}
+
+function getSemesterOrder(semester) {
+  if (semester === "1ST SEM") return 1;
+  if (semester === "2ND SEM") return 2;
+  if (semester === "SUMMER") return 3;
+  return 99;
+}
+
+function getSchoolYearStart(schoolYear) {
+  const match = String(schoolYear || "").match(/^(\d{4})-/);
+  return match ? Number(match[1]) : 0;
+}
+
+function buildTermKey(semester, schoolYear) {
+  return `${schoolYear}|${semester}`;
+}
+
+function parseTermKey(termKey) {
+  const [schoolYear = "", semester = ""] = String(termKey || "").split("|");
+  return { schoolYear, semester };
+}
+
+function compareTermKeys(leftKey, rightKey) {
+  const left = parseTermKey(leftKey);
+  const right = parseTermKey(rightKey);
+
+  const yearDiff =
+    getSchoolYearStart(left.schoolYear) - getSchoolYearStart(right.schoolYear);
+  if (yearDiff !== 0) return yearDiff;
+
+  return getSemesterOrder(left.semester) - getSemesterOrder(right.semester);
+}
+
+function calculateLinearRegressionNextY(points) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return 0;
+  }
+
+  if (points.length === 1) {
+    return points[0]?.y || 0;
+  }
+
+  const n = points.length;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXY = 0;
+  let sumXX = 0;
+
+  points.forEach((point) => {
+    sumX += point.x;
+    sumY += point.y;
+    sumXY += point.x * point.y;
+    sumXX += point.x * point.x;
+  });
+
+  const denominator = n * sumXX - sumX * sumX;
+  if (denominator === 0) {
+    return points[points.length - 1]?.y || 0;
+  }
+
+  const slope = (n * sumXY - sumX * sumY) / denominator;
+  const intercept = (sumY - slope * sumX) / n;
+  const nextX = points.length;
+
+  return slope * nextX + intercept;
+}
+
+function calculateForecastCount(termSeries, nextSemester) {
+  const regressionPoints = termSeries.map((entry) => ({
+    x: entry.index,
+    y: entry.totalViolations,
+  }));
+
+  const regressionPrediction = Math.max(
+    0,
+    Math.round(calculateLinearRegressionNextY(regressionPoints)),
+  );
+
+  const sameSemesterCounts = termSeries
+    .filter((entry) => parseTermKey(entry.termKey).semester === nextSemester)
+    .map((entry) => Number(entry.totalViolations) || 0);
+
+  const sameSemesterBaseline = sameSemesterCounts.length
+    ? sameSemesterCounts.reduce((sum, value) => sum + value, 0) /
+      sameSemesterCounts.length
+    : null;
+
+  const allTermBaseline = termSeries.length
+    ? termSeries.reduce(
+        (sum, entry) => sum + (Number(entry.totalViolations) || 0),
+        0,
+      ) / termSeries.length
+    : 0;
+
+  const baseline =
+    sameSemesterBaseline != null ? sameSemesterBaseline : allTermBaseline;
+
+  let forecast = regressionPrediction;
+  if (baseline > 0) {
+    if (regressionPrediction <= 0) {
+      forecast = Math.round(baseline);
+    } else {
+      forecast = Math.round(regressionPrediction * 0.65 + baseline * 0.35);
+    }
+  }
+
+  if (
+    forecast === 0 &&
+    termSeries.some((entry) => (Number(entry.totalViolations) || 0) > 0)
+  ) {
+    forecast = 1;
+  }
+
+  return Math.max(0, forecast);
+}
+
+function parseCellDate(rawValue) {
+  if (!rawValue) return null;
+
+  if (rawValue instanceof Date) {
+    return Number.isNaN(rawValue.getTime()) ? null : rawValue;
+  }
+
+  if (typeof rawValue === "object" && rawValue?.result instanceof Date) {
+    return Number.isNaN(rawValue.result.getTime()) ? null : rawValue.result;
+  }
+
+  if (typeof rawValue === "number") {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const converted = new Date(excelEpoch.getTime() + rawValue * 86400000);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+
+  const normalizedText = String(rawValue || "")
+    .trim()
+    .replace(/\/+/, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/\s+/g, " ");
+  const parsed = new Date(normalizedText);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseCourseSection(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return { program: "", yearSection: "" };
+  }
+
+  const parts = text.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return { program: parts[0], yearSection: "" };
+  }
+
+  return {
+    program: parts.slice(0, -1).join(" "),
+    yearSection: parts[parts.length - 1],
+  };
+}
+
+function normalizeWorkbookText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseWorkbookTermHeader(rowValues) {
+  const cells = rowValues
+    .slice(1, 6)
+    .map((value) => normalizeWorkbookText(value))
+    .filter(Boolean);
+
+  if (cells.length < 3) {
+    return null;
+  }
+
+  const firstText = cells[0];
+  const allSame = cells.every((value) => value === firstText);
+  if (!allSame) {
+    return null;
+  }
+
+  const semesterMatch = firstText.match(/(1st|2nd) semester/i);
+  const schoolYearMatch = firstText.match(/s\.?y\.?\s*(\d{4})\s*-\s*(\d{4})/i);
+
+  if (!semesterMatch || !schoolYearMatch) {
+    return null;
+  }
+
+  return {
+    semester: semesterMatch[1].toUpperCase().startsWith("1")
+      ? "1ST SEM"
+      : "2ND SEM",
+    schoolYear: `${schoolYearMatch[1]}-${schoolYearMatch[2]}`,
+  };
+}
+
+function parseWorkbookTypeLabel(value) {
+  const label = normalizeWorkbookText(value);
+  if (!label) {
+    return { category: "", degree: "", label: "" };
+  }
+
+  const parts = label.split(/\s*-\s*/);
+  return {
+    category: normalizeWorkbookText(parts[0] || ""),
+    degree: normalizeWorkbookText(parts.slice(1).join(" - ") || ""),
+    label,
+  };
+}
+
+function mapWorkbookRecordToArchiveRow(record, index) {
+  const dateValue = new Date(record.date);
+  const archivedAt = Number.isNaN(dateValue.getTime())
+    ? null
+    : dateValue.toISOString();
+  const { category, degree, label } = parseWorkbookTypeLabel(record.typeLabel);
+
+  return {
+    id: `wb-${record.schoolYear}-${record.semester}-${index}`,
+    student_id: null,
+    violation_catalog_id: null,
+    violation_label: record.violationLabel || "",
+    reported_by: "",
+    remarks: "",
+    signature_image: "",
+    signature_updated_at: null,
+    semester: record.semester,
+    school_year: record.schoolYear,
+    archived_at: archivedAt,
+    archived_by_name: "Historical Import",
+    original_created_at: archivedAt,
+    original_updated_at: archivedAt,
+    student_name: record.studentName || "",
+    school_id: record.schoolId || "",
+    program: record.program || "",
+    year_section: record.yearSection || "",
+    violation_category: category,
+    violation_degree: degree,
+    violation_type_label: label,
+    isHistoricalWorkbook: true,
+    sourceType: "workbook",
+  };
+}
+
+async function loadHistoricalViolationRecordsFromWorkbook() {
+  try {
+    await access(HISTORICAL_VIOLATION_RECORDS_PATH);
+  } catch {
+    return [];
+  }
+
+  try {
+    const fileInfo = await stat(HISTORICAL_VIOLATION_RECORDS_PATH);
+    if (
+      Number.isFinite(HISTORICAL_VIOLATION_CACHE.mtimeMs) &&
+      HISTORICAL_VIOLATION_CACHE.mtimeMs === fileInfo.mtimeMs
+    ) {
+      return HISTORICAL_VIOLATION_CACHE.records;
+    }
+
+    const excelModule = await import("exceljs");
+    const ExcelJS = excelModule.default || excelModule;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(HISTORICAL_VIOLATION_RECORDS_PATH);
+
+    const worksheet = workbook.worksheets?.[0];
+    if (!worksheet) {
+      return [];
+    }
+
+    const headerRow = worksheet.getRow(1);
+    const headerMap = {};
+    headerRow.eachCell((cell, colNumber) => {
+      const headerText = String(cell.value || "")
+        .trim()
+        .toUpperCase();
+      if (headerText) {
+        headerMap[headerText] = colNumber;
+      }
+    });
+
+    const nameColumn = headerMap.NAME;
+    const courseSectionColumn = headerMap["COURSE/SECTION"];
+    const violationColumn = headerMap.VIOLATION;
+    const dateColumn = headerMap.DATE;
+    const typeColumn = headerMap.TYPE;
+
+    if (!dateColumn) {
+      return [];
+    }
+
+    const records = [];
+    let currentSemester = "";
+    let currentSchoolYear = "";
+
+    for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+      const row = worksheet.getRow(rowNumber);
+      const rowValues = row.values;
+      const termHeader = parseWorkbookTermHeader(rowValues);
+      if (termHeader) {
+        currentSemester = termHeader.semester;
+        currentSchoolYear = termHeader.schoolYear;
+        continue;
+      }
+
+      const nameValue = normalizeWorkbookText(
+        nameColumn ? row.getCell(nameColumn).value || "" : "",
+      );
+      const dateValue = parseCellDate(row.getCell(dateColumn).value);
+
+      if (!dateValue || !nameValue) {
+        continue;
+      }
+
+      const semester = normalizeSemester(currentSemester);
+      const schoolYear = normalizeSchoolYear(currentSchoolYear);
+      if (!semester || !schoolYear) {
+        continue;
+      }
+
+      const studentKey = nameValue
+        ? `name:${nameValue.toLowerCase()}`
+        : `historical-row:${rowNumber}`;
+
+      const courseSection = normalizeWorkbookText(
+        courseSectionColumn ? row.getCell(courseSectionColumn).value || "" : "",
+      );
+      const { program, yearSection } = parseCourseSection(courseSection);
+      const typeLabel = normalizeWorkbookText(
+        typeColumn ? row.getCell(typeColumn).value || "" : "",
+      );
+
+      records.push({
+        source: "historical",
+        studentKey,
+        studentName: nameValue,
+        schoolId: "",
+        program,
+        yearSection,
+        violationLabel: normalizeWorkbookText(
+          violationColumn ? row.getCell(violationColumn).value || "" : "",
+        ),
+        typeLabel,
+        degreeRank: parseDegreeRank(typeLabel),
+        date: dateValue,
+        monthLabel: toMonthLabel(dateValue),
+        semester,
+        schoolYear,
+      });
+    }
+
+    HISTORICAL_VIOLATION_CACHE.mtimeMs = fileInfo.mtimeMs;
+    HISTORICAL_VIOLATION_CACHE.records = records;
+
+    return records;
+  } catch (error) {
+    console.warn(`Historical workbook read failed: ${error.message}`);
+    return [];
+  }
+}
+
+function buildAnalyticsFromRecords({
+  allRecords,
+  currentSemester,
+  currentSchoolYear,
+}) {
+  const termMap = new Map();
+
+  allRecords.forEach((record) => {
+    const semester = normalizeSemester(record.semester);
+    const schoolYear = normalizeSchoolYear(record.schoolYear);
+    const date = new Date(record.date);
+
+    if (!semester || !schoolYear || Number.isNaN(date.getTime())) {
+      return;
+    }
+
+    const termKey = buildTermKey(semester, schoolYear);
+    if (!termMap.has(termKey)) {
+      termMap.set(termKey, {
+        semester,
+        schoolYear,
+        violations: 0,
+        students: new Map(),
+      });
+    }
+
+    const bucket = termMap.get(termKey);
+    bucket.violations += 1;
+
+    const studentKey = String(record.studentKey || "").trim();
+    if (!studentKey) {
+      return;
+    }
+
+    if (!bucket.students.has(studentKey)) {
+      bucket.students.set(studentKey, { count: 0, maxDegreeRank: 0 });
+    }
+
+    const studentStats = bucket.students.get(studentKey);
+    studentStats.count += 1;
+    studentStats.maxDegreeRank = Math.max(
+      studentStats.maxDegreeRank,
+      Number(record.degreeRank) || 1,
+    );
+  });
+
+  const sortedTermKeys = Array.from(termMap.keys()).sort(compareTermKeys);
+  const metricsByTerm = {};
+
+  sortedTermKeys.forEach((termKey) => {
+    const termData = termMap.get(termKey);
+    const metrics = {
+      activeViolations: termData.violations,
+      warningStudents: 0,
+      atRiskStudents: 0,
+      highRiskStudents: 0,
+    };
+
+    termData.students.forEach((studentStats) => {
+      const bucketKey = getRiskBucket(
+        studentStats.count,
+        studentStats.maxDegreeRank,
+      );
+      if (bucketKey) {
+        metrics[bucketKey] += 1;
+      }
+    });
+
+    metricsByTerm[termKey] = metrics;
+  });
+
+  const normalizedCurrentSemester = normalizeSemester(currentSemester);
+  const normalizedCurrentSchoolYear = normalizeSchoolYear(currentSchoolYear);
+
+  let currentTermKey = "";
+  if (normalizedCurrentSemester && normalizedCurrentSchoolYear) {
+    const targetKey = buildTermKey(
+      normalizedCurrentSemester,
+      normalizedCurrentSchoolYear,
+    );
+    if (metricsByTerm[targetKey]) {
+      currentTermKey = targetKey;
+    }
+  }
+
+  if (!currentTermKey && sortedTermKeys.length > 0) {
+    currentTermKey = sortedTermKeys[sortedTermKeys.length - 1];
+  }
+
+  const currentTermIndex = sortedTermKeys.indexOf(currentTermKey);
+  const previousTermKey =
+    currentTermIndex > 0 ? sortedTermKeys[currentTermIndex - 1] : "";
+
+  const emptyMetrics = {
+    activeViolations: 0,
+    warningStudents: 0,
+    atRiskStudents: 0,
+    highRiskStudents: 0,
+  };
+  const currentMetrics = currentTermKey
+    ? metricsByTerm[currentTermKey] || emptyMetrics
+    : emptyMetrics;
+  const previousMetrics = previousTermKey
+    ? metricsByTerm[previousTermKey] || emptyMetrics
+    : emptyMetrics;
+
+  const cards = {
+    activeViolations: {
+      current: currentMetrics.activeViolations,
+      previous: previousMetrics.activeViolations,
+      percentChange: computePercentChange(
+        currentMetrics.activeViolations,
+        previousMetrics.activeViolations,
+      ),
+    },
+    warningStudents: {
+      current: currentMetrics.warningStudents,
+      previous: previousMetrics.warningStudents,
+      percentChange: computePercentChange(
+        currentMetrics.warningStudents,
+        previousMetrics.warningStudents,
+      ),
+    },
+    atRiskStudents: {
+      current: currentMetrics.atRiskStudents,
+      previous: previousMetrics.atRiskStudents,
+      percentChange: computePercentChange(
+        currentMetrics.atRiskStudents,
+        previousMetrics.atRiskStudents,
+      ),
+    },
+    highRiskStudents: {
+      current: currentMetrics.highRiskStudents,
+      previous: previousMetrics.highRiskStudents,
+      percentChange: computePercentChange(
+        currentMetrics.highRiskStudents,
+        previousMetrics.highRiskStudents,
+      ),
+    },
+  };
+
+  const trendBucketsBySemester = {
+    "1st Sem": new Map(),
+    "2nd Sem": new Map(),
+    Summer: new Map(),
+  };
+
+  allRecords.forEach((record) => {
+    const semester = normalizeSemester(record.semester);
+    const monthLabel = String(record.monthLabel || "").trim();
+    const displaySemester = SEMESTER_DISPLAY_MAP[semester];
+    const date = new Date(record.date);
+    const monthKey = Number.isNaN(date.getTime())
+      ? ""
+      : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+    if (
+      !displaySemester ||
+      !monthLabel ||
+      !monthKey ||
+      !trendBucketsBySemester[displaySemester]
+    ) {
+      return;
+    }
+
+    if (!trendBucketsBySemester[displaySemester].has(monthKey)) {
+      trendBucketsBySemester[displaySemester].set(monthKey, {
+        label: monthLabel,
+        monthKey,
+        count: 0,
+      });
+    }
+
+    const targetRow = trendBucketsBySemester[displaySemester].get(monthKey);
+    targetRow.count += 1;
+  });
+
+  const trendBySemester = Object.fromEntries(
+    Object.entries(trendBucketsBySemester).map(([semesterLabel, monthMap]) => [
+      semesterLabel,
+      Array.from(monthMap.values())
+        .sort((left, right) => left.monthKey.localeCompare(right.monthKey))
+        .map(({ label, count }) => ({ label, count })),
+    ]),
+  );
+
+  const termSeries = sortedTermKeys.map((termKey, index) => {
+    const { schoolYear, semester } = parseTermKey(termKey);
+    const displaySemester = SEMESTER_DISPLAY_MAP[semester] || semester;
+    const totalViolations = metricsByTerm[termKey]?.activeViolations || 0;
+    return {
+      index,
+      termKey,
+      label: `${schoolYear} ${displaySemester}`,
+      totalViolations,
+    };
+  });
+
+  const currentTermForForecast =
+    currentTermKey || termSeries[termSeries.length - 1]?.termKey || "";
+  const parsedCurrentTerm = parseTermKey(currentTermForForecast);
+  const forecastBaseSemester = parsedCurrentTerm.semester || "1ST SEM";
+  const forecastBaseSchoolYear = parsedCurrentTerm.schoolYear || "2025-2026";
+  const { nextSemester, nextSchoolYear } = computeNextSemesterYear(
+    forecastBaseSemester,
+    forecastBaseSchoolYear,
+  );
+  const predictedCount = calculateForecastCount(termSeries, nextSemester);
+
+  const studentAnalyticsSeriesRaw = [
+    ...termSeries.map((entry) => entry.totalViolations),
+    predictedCount,
+  ];
+  const maxSeriesValue = Math.max(...studentAnalyticsSeriesRaw, 1);
+  const studentAnalyticsSeriesNormalized = studentAnalyticsSeriesRaw.map(
+    (value) => Math.round((value / maxSeriesValue) * 42),
+  );
+
+  return {
+    cards,
+    trendBySemester,
+    studentAnalytics: {
+      historyLabels: termSeries.map((entry) => entry.label),
+      historyCounts: termSeries.map((entry) => entry.totalViolations),
+      graphData: studentAnalyticsSeriesNormalized,
+      predictedNextTerm: {
+        semester: nextSemester,
+        schoolYear: nextSchoolYear,
+        label: `${nextSchoolYear} ${SEMESTER_DISPLAY_MAP[nextSemester] || nextSemester}`,
+        predictedViolations: predictedCount,
+      },
+      predictedChangePercent: computePercentChange(
+        predictedCount,
+        cards.activeViolations.current,
+      ),
+    },
+    currentTerm: currentTermKey
+      ? {
+          ...parseTermKey(currentTermKey),
+          label: `${parseTermKey(currentTermKey).schoolYear} ${SEMESTER_DISPLAY_MAP[parseTermKey(currentTermKey).semester] || parseTermKey(currentTermKey).semester}`,
+        }
+      : null,
+    previousTerm: previousTermKey
+      ? {
+          ...parseTermKey(previousTermKey),
+          label: `${parseTermKey(previousTermKey).schoolYear} ${SEMESTER_DISPLAY_MAP[parseTermKey(previousTermKey).semester] || parseTermKey(previousTermKey).semester}`,
+        }
+      : null,
+  };
+}
 
 function hashSecret(value) {
   return crypto
@@ -1935,6 +2690,124 @@ async function getFullViolationRecord(pool, id) {
   );
   return result.rows?.[0] || null;
 }
+
+app.get("/api/violation-analytics", async (_req, res) => {
+  let workbookRecords = [];
+  let databaseRecords = [];
+  let currentSemester = "";
+  let currentSchoolYear = "";
+
+  try {
+    workbookRecords = await loadHistoricalViolationRecordsFromWorkbook();
+
+    if (workbookRecords.length === 0 && hasDbConfig()) {
+      await ensureAuthDatabaseReady();
+      const pool = getDbPool();
+
+      const [settingsResult, violationsResult] = await Promise.all([
+        pool.query(
+          `
+          SELECT current_semester, current_school_year
+          FROM "SystemSettings"
+          WHERE setting_key = 'system_config'
+          LIMIT 1
+          `,
+        ),
+        pool.query(
+          `
+          SELECT
+            svl.student_id,
+            svl.created_at,
+            svl.semester,
+            svl.school_year,
+            svl.violation_label,
+            s.full_name,
+            s.program,
+            s.year_section,
+            v.degree AS violation_degree
+          FROM student_violation_logs svl
+          LEFT JOIN "Students" s ON s.id = svl.student_id
+          LEFT JOIN violations v ON v.id = svl.violation_catalog_id
+          ORDER BY svl.created_at ASC, svl.id ASC
+          `,
+        ),
+      ]);
+
+      const settings = settingsResult.rows?.[0] || {};
+      currentSemester = String(settings.current_semester || "").trim();
+      currentSchoolYear = String(settings.current_school_year || "").trim();
+
+      databaseRecords = (violationsResult.rows || []).map((row, index) => {
+        const createdAt = new Date(row.created_at);
+        const inferredTerm = inferAcademicTermFromDate(createdAt);
+        const semester =
+          normalizeSemester(row.semester) ||
+          normalizeSemester(inferredTerm.semester);
+        const schoolYear =
+          normalizeSchoolYear(row.school_year) ||
+          normalizeSchoolYear(inferredTerm.schoolYear);
+
+        const safeName = String(row.full_name || "").trim();
+        const studentKey = Number.isFinite(Number(row.student_id))
+          ? `student:${Number(row.student_id)}`
+          : safeName
+            ? `name:${safeName.toLowerCase()}`
+            : `db-row:${index}`;
+
+        return {
+          source: "database",
+          studentKey,
+          studentName: safeName,
+          program: String(row.program || "").trim(),
+          yearSection: String(row.year_section || "").trim(),
+          violationLabel: String(row.violation_label || "").trim(),
+          degreeRank: parseDegreeRank(row.violation_degree),
+          date: createdAt,
+          monthLabel: toMonthLabel(createdAt),
+          semester,
+          schoolYear,
+        };
+      });
+    }
+
+    const selectedRecords =
+      workbookRecords.length > 0 ? workbookRecords : databaseRecords;
+    const mergedRecords = selectedRecords.filter((record) => {
+      const hasTerm =
+        normalizeSemester(record.semester) &&
+        normalizeSchoolYear(record.schoolYear);
+      const hasValidDate = !Number.isNaN(new Date(record.date).getTime());
+      return hasTerm && hasValidDate;
+    });
+
+    if (mergedRecords.length > 0 && !currentSemester && !currentSchoolYear) {
+      const latestRecord = mergedRecords[mergedRecords.length - 1];
+      currentSemester = String(latestRecord.semester || "").trim();
+      currentSchoolYear = String(latestRecord.schoolYear || "").trim();
+    }
+
+    const analytics = buildAnalyticsFromRecords({
+      allRecords: mergedRecords,
+      currentSemester,
+      currentSchoolYear,
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      ...analytics,
+      metadata: {
+        historicalRecordCount: workbookRecords.length,
+        databaseRecordCount: databaseRecords.length,
+        totalAnalyzedRecords: mergedRecords.length,
+      },
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: "error",
+      message: `Unable to compute violation analytics (${error.message}).`,
+    });
+  }
+});
 
 // ==================== STUDENT VIOLATION LOGS API ====================
 
@@ -4531,6 +5404,17 @@ app.get("/api/archive/unresolved-school-years", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
 
+    const workbookRecords = await loadHistoricalViolationRecordsFromWorkbook();
+    const workbookUnresolvedSchoolYears = new Set();
+    workbookRecords.forEach((record) => {
+      if (
+        normalizeSemester(record.semester) &&
+        normalizeSchoolYear(record.schoolYear)
+      ) {
+        // Historical workbook rows are resolved archive data only.
+      }
+    });
+
     const result = await pool.query(
       `SELECT DISTINCT school_year
        FROM student_violation_archives
@@ -4544,7 +5428,9 @@ app.get("/api/archive/unresolved-school-years", async (req, res) => {
 
     return res.status(200).json({
       status: "ok",
-      schoolYears,
+      schoolYears: Array.from(
+        new Set([...schoolYears, ...workbookUnresolvedSchoolYears]),
+      ).sort((left, right) => right.localeCompare(left)),
     });
   } catch (error) {
     console.error("Error fetching unresolved school years:", error);
@@ -4576,6 +5462,8 @@ app.get("/api/archive/unresolved/:schoolYear/:semester", async (req, res) => {
   try {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
+
+    const workbookRecords = await loadHistoricalViolationRecordsFromWorkbook();
 
     const result = await pool.query(
       `SELECT 
@@ -4616,9 +5504,18 @@ app.get("/api/archive/unresolved/:schoolYear/:semester", async (req, res) => {
         null,
     }));
 
+    const workbookViolations = workbookRecords
+      .filter(
+        (record) =>
+          normalizeSchoolYear(record.schoolYear) ===
+            normalizeSchoolYear(schoolYear) &&
+          normalizeSemester(record.semester) === normalizeSemester(semester),
+      )
+      .map((record, index) => mapWorkbookRecordToArchiveRow(record, index));
+
     return res.status(200).json({
       status: "ok",
-      violations,
+      violations: [...violations, ...workbookViolations],
     });
   } catch (error) {
     console.error("Error fetching unresolved violations:", error);
@@ -4676,6 +5573,8 @@ app.get("/api/archive/school-years", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
 
+    const workbookRecords = await loadHistoricalViolationRecordsFromWorkbook();
+
     // Get distinct school years from the archive table
     // Only return years that have actual archived data
     const result = await pool.query(
@@ -4689,9 +5588,19 @@ app.get("/api/archive/school-years", async (req, res) => {
       .map((row) => row.school_year)
       .filter((sy) => sy);
 
+    const workbookSchoolYears = Array.from(
+      new Set(
+        workbookRecords
+          .map((record) => normalizeSchoolYear(record.schoolYear))
+          .filter(Boolean),
+      ),
+    );
+
     return res.status(200).json({
       status: "ok",
-      schoolYears,
+      schoolYears: Array.from(
+        new Set([...schoolYears, ...workbookSchoolYears]),
+      ).sort((left, right) => right.localeCompare(left)),
     });
   } catch (error) {
     console.error("Error fetching school years:", error);
@@ -4872,6 +5781,8 @@ app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
     await ensureAuthDatabaseReady();
     const pool = getDbPool();
 
+    const workbookRecords = await loadHistoricalViolationRecordsFromWorkbook();
+
     // Query archived violations from the archive table for this semester/year, excluding unresolved
     const result = await pool.query(
       `SELECT 
@@ -4912,9 +5823,18 @@ app.get("/api/archive/violations/:schoolYear/:semester", async (req, res) => {
         null,
     }));
 
+    const workbookViolations = workbookRecords
+      .filter(
+        (record) =>
+          normalizeSchoolYear(record.schoolYear) ===
+            normalizeSchoolYear(schoolYear) &&
+          normalizeSemester(record.semester) === normalizeSemester(semester),
+      )
+      .map((record, index) => mapWorkbookRecordToArchiveRow(record, index));
+
     return res.status(200).json({
       status: "ok",
-      violations,
+      violations: [...violations, ...workbookViolations],
     });
   } catch (error) {
     console.error("Error fetching archived violations:", error);

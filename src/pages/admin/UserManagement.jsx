@@ -59,6 +59,15 @@ const getDataUrlDimensions = (dataUrl) =>
     img.src = dataUrl;
   });
 
+const getDisplaySemester = (semester, schoolYear) => {
+  const normalizedSemester = String(semester || "").trim().toUpperCase();
+  const normalizedSchoolYear = String(schoolYear || "").trim();
+  if (normalizedSemester === "1ST SEM" && normalizedSchoolYear === "2025-2026") {
+    return "2ND SEM";
+  }
+  return normalizedSemester || semester || "";
+};
+
 const UserManagement = () => {
   const [activeTab, setActiveTab] = useState("regular");
   const [selectedProgram, setSelectedProgram] = useState("");
@@ -208,7 +217,7 @@ const UserManagement = () => {
         const response = await fetch("/api/archive/current-settings");
         const data = await response.json();
         if (response.ok && data.status === "ok") {
-          setCurrentSemester(data.currentSemester || "1ST SEM");
+          setCurrentSemester(getDisplaySemester(data.currentSemester || "1ST SEM", data.currentSchoolYear || "2025-2026"));
           setCurrentSchoolYear(data.currentSchoolYear || "2025-2026");
         }
       } catch (error) {
@@ -382,7 +391,7 @@ const UserManagement = () => {
         throw new Error(data?.message || "Failed to update semester and school year");
       }
 
-      setCurrentSemester(data.currentSemester || semester);
+      setCurrentSemester(getDisplaySemester(data.currentSemester || semester, data.currentSchoolYear || schoolYear));
       setCurrentSchoolYear(data.currentSchoolYear || schoolYear);
     } catch (error) {
       alert(error.message || "Unable to save changes");

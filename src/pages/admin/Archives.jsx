@@ -790,6 +790,7 @@ const Archives = () => {
           folder: "USERS",
           folderKey: "users",
           recordType: "user",
+          sourceType: "archive",
           searchableText: `${user.full_name || ""} ${user.school_id || ""} ${user.email || ""} ${user.program || ""} ${user.year_section || ""} ${user.status || ""} ${user.archived_reason || ""}`.toLowerCase(),
         }));
       } else {
@@ -831,6 +832,8 @@ const Archives = () => {
                 : activeFolder,
             status: activeFolder === "unresolved" ? "Unresolved" : "Archived",
             recordType: "violation",
+            sourceType: violation.sourceType || (violation.isHistoricalWorkbook ? "workbook" : "archive"),
+            isHistoricalWorkbook: Boolean(violation.isHistoricalWorkbook),
             searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${combinedYearSection || preservedYearSection || violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
           };
         });
@@ -875,6 +878,7 @@ const Archives = () => {
           folder: "USERS",
           folderKey: "users",
           recordType: "user",
+          sourceType: "archive",
           // Add searchable text for global search
           searchableText: `${user.full_name || ""} ${user.school_id || ""} ${user.email || ""} ${user.program || ""} ${user.year_section || ""} ${user.status || ""} ${user.archived_reason || ""}`.toLowerCase(),
         });
@@ -914,6 +918,8 @@ const Archives = () => {
             folder: `S.Y. ${violation.school_year}`,
             folderKey: violation.school_year,
             recordType: "violation",
+            sourceType: violation.sourceType || (violation.isHistoricalWorkbook ? "workbook" : "archive"),
+            isHistoricalWorkbook: Boolean(violation.isHistoricalWorkbook),
             // Add searchable text for global search
             searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${formatProgramYearSection(violation.program, violation.year_section) || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
           });
@@ -955,6 +961,8 @@ const Archives = () => {
             folderKey: `unresolved-${violation.school_year}`,
             subFolderKey: violation.school_year,
             recordType: "violation",
+            sourceType: violation.sourceType || (violation.isHistoricalWorkbook ? "workbook" : "archive"),
+            isHistoricalWorkbook: Boolean(violation.isHistoricalWorkbook),
             isUnresolved: true,
             schoolYear: violation.school_year,
             // Add searchable text for global search
@@ -1173,6 +1181,14 @@ const Archives = () => {
                 </DropdownMenu>
               );
             } else {
+              if (row.isHistoricalWorkbook || row.sourceType === "workbook") {
+                return (
+                  <span className="text-xs text-gray-400 uppercase tracking-wide">
+                    Imported
+                  </span>
+                );
+              }
+
               return (
                 <Button
                   size="sm"
@@ -1424,28 +1440,34 @@ const Archives = () => {
           label: "",
           align: "center",
           render: (_value, row) => (
-            <Button
-              size="sm"
-              variant="secondary"
-              className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
-              onClick={() => handleEdit(row, "violation")}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
-                />
-              </svg>
-              Edit
-            </Button>
+              row.isHistoricalWorkbook || row.sourceType === "workbook" ? (
+                <span className="text-xs text-gray-400 uppercase tracking-wide">
+                  Imported
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+                  onClick={() => handleEdit(row, "violation")}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
+                    />
+                  </svg>
+                  Edit
+                </Button>
+              )
           ),
         },
       ];

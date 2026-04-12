@@ -100,12 +100,24 @@ const Dashboard = () => {
     highRiskStudents: 0,
   });
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
+  const [metricComparisons, setMetricComparisons] = useState({
+    activeViolations: 0,
+    warningStudents: 0,
+    atRiskStudents: 0,
+    highRiskStudents: 0,
+  });
+  const [trendBySemester, setTrendBySemester] = useState({
+    "1st Sem": [],
+    "2nd Sem": [],
+    Summer: [],
+  });
 
   const [rankingData, setRankingData] = useState([]);
   const [isLoadingRanking, setIsLoadingRanking] = useState(true);
   const [showRankingExportModal, setShowRankingExportModal] = useState(false);
   const [rankingExportFormat, setRankingExportFormat] = useState("excel");
   const [isExportingRanking, setIsExportingRanking] = useState(false);
+  const [hoveredTrendPointIndex, setHoveredTrendPointIndex] = useState(null);
 
   const filteredRankingData = rankingData.filter((student) => {
     const matchesSearch = student.name
@@ -152,6 +164,321 @@ const Dashboard = () => {
         totalViolations: student.violations,
       })),
     [filteredRankingData],
+  );
+
+  const selectedTrendData = useMemo(() => {
+    const fallback = [
+      { label: "Sep", count: 0 },
+      { label: "Oct", count: 0 },
+      { label: "Nov", count: 0 },
+    ];
+    const trendRows = Array.isArray(trendBySemester?.[selectedSemester])
+      ? trendBySemester[selectedSemester]
+      : [];
+
+    if (!trendRows.length) {
+      return fallback;
+    }
+
+    const monthOrderBySemester = {
+      "1st Sem": ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov"],
+      "2nd Sem": ["Dec", "Jan", "Feb", "Mar", "Apr", "May"],
+      Summer: ["May", "Jun"],
+    };
+
+    const aggregate = trendRows.reduce((acc, row) => {
+      const label = String(row?.label || "").trim();
+      if (!label) return acc;
+      const count = Number(row?.count) || 0;
+      acc.set(label, (acc.get(label) || 0) + count);
+      return acc;
+    }, new Map());
+
+    const ordered = monthOrderBySemester[selectedSemester] || [];
+    const normalized = ordered
+      .filter((label) => aggregate.has(label))
+      .map((label) => ({ label, count: aggregate.get(label) || 0 }));
+
+    return normalized.length ? normalized : trendRows;
+  }, [selectedSemester, trendBySemester]);
+
+  const selectedTrendGraphData = useMemo(
+    () => selectedTrendData.map((entry) => Number(entry.count) || 0),
+    [selectedTrendData],
+  );
+
+  const trendSummary = useMemo(() => {
+    if (!selectedTrendData.length) {
+      return {
+        first: { label: "-", count: 0 },
+        peak: { label: "-", count: 0 },
+        latest: { label: "-", count: 0 },
+      };
+    }
+
+    const first = selectedTrendData[0];
+    const latest = selectedTrendData[selectedTrendData.length - 1];
+    const peak = selectedTrendData.reduce((best, current) =>
+      (Number(current.count) || 0) > (Number(best.count) || 0) ? current : best,
+    );
+
+    return { first, peak, latest };
+  }, [selectedTrendData]);
+
+  const dashboardTrendChart = useMemo(() => {
+    const width = 920;
+    const height = 250;
+    const left = 38;
+    const right = 18;
+    const top = 14;
+    const bottom = 36;
+    const chartWidth = width - left - right;
+    const chartHeight = height - top - bottom;
+
+    const counts = selectedTrendData.map((entry) => Number(entry.count) || 0);
+    const maxCount = Math.max(...counts, 1);
+    const maxTick = Math.max(4, Math.ceil(maxCount / 2) * 2);
+    const yTicks = Array.from(
+      new Set([0, Math.round(maxTick / 3), Math.round((maxTick * 2) / 3), maxTick]),
+    ).sort((a, b) => a - b);
+
+    const points = counts.map((count, index) => {
+      const x =
+        counts.length <= 1
+          ? left + chartWidth / 2
+          : left + (index / (counts.length - 1)) * chartWidth;
+      const y = top + ((maxTick - count) / maxTick) * chartHeight;
+      return {
+        x,
+        y,
+        count,
+        label: selectedTrendData[index]?.label || "",
+        index,
+      };
+    });
+
+    const linePath = points.reduce((acc, point, index) => {
+      if (index === 0) {
+        return `M ${point.x} ${point.y}`;
+      }
+      const prev = points[index - 1];
+      const cpX = (prev.x + point.x) / 2;
+      return `${acc} Q ${cpX} ${prev.y}, ${point.x} ${point.y}`;
+    }, "");
+
+    const areaPath = points.length
+      ? `${linePath} L ${points[points.length - 1].x} ${top + chartHeight} L ${points[0].x} ${top + chartHeight} Z`
+      : "";
+
+    const peakIndex = counts.reduce((bestIndex, value, index) =>
+      value > counts[bestIndex] ? index : bestIndex,
+    0);
+
+    const startPoint = points[0] || { label: "-", count: 0 };
+    const peakPoint = points[peakIndex] || startPoint;
+    const latestPoint = points[points.length - 1] || startPoint;
+
+    return {
+      width,
+      height,
+      left,
+      right,
+      top,
+      bottom,
+      chartHeight,
+      yTicks,
+      points,
+      linePath,
+      areaPath,
+      startPoint,
+      peakPoint,
+      latestPoint,
+      peakIndex,
+    };
+  }, [selectedTrendData]);
+
+  const renderInteractiveTrendChart = useCallback(
+    ({ compact = false } = {}) => {
+      const activePoint =
+        dashboardTrendChart.points[hoveredTrendPointIndex] ||
+        dashboardTrendChart.latestPoint;
+      const chartHeightClass = compact ? "h-[78%]" : "h-[77%]";
+      const wrapperHeightClass = compact ? "h-[276px]" : "h-[452px]";
+
+      const handlePointerMove = (event) => {
+        const svg = event.currentTarget;
+        const rect = svg.getBoundingClientRect();
+        const ratioX = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+        const xInViewBox = ratioX * dashboardTrendChart.width;
+
+        if (!dashboardTrendChart.points.length) {
+          setHoveredTrendPointIndex(null);
+          return;
+        }
+
+        const nearestIndex = dashboardTrendChart.points.reduce(
+          (bestIndex, point, index) => {
+            const currentDistance = Math.abs(point.x - xInViewBox);
+            const bestDistance = Math.abs(
+              dashboardTrendChart.points[bestIndex].x - xInViewBox,
+            );
+            return currentDistance < bestDistance ? index : bestIndex;
+          },
+          0,
+        );
+
+        setHoveredTrendPointIndex(nearestIndex);
+      };
+
+      return (
+        <div
+          className={`relative ${wrapperHeightClass} overflow-hidden rounded-[28px] border border-white/25 bg-[linear-gradient(180deg,rgba(242,244,247,0.94)_0%,rgba(214,219,228,0.78)_38%,rgba(137,147,161,0.58)_68%,rgba(24,29,36,0.96)_100%)] px-4 pt-3 pb-2 shadow-[0_22px_45px_rgba(3,7,18,0.35),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-sm`}
+        >
+          <svg
+            viewBox={`0 0 ${dashboardTrendChart.width} ${dashboardTrendChart.height}`}
+            className={`${chartHeightClass} w-full`}
+            preserveAspectRatio="none"
+            onMouseMove={handlePointerMove}
+            onMouseLeave={() => setHoveredTrendPointIndex(null)}
+          >
+            <defs>
+              <linearGradient id="dashTrendArea" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#334155" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="#0f172a" stopOpacity="0" />
+              </linearGradient>
+              <filter id="dashTrendGlow" x="-20%" y="-20%" width="140%" height="160%">
+                <feGaussianBlur stdDeviation="2.2" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            {dashboardTrendChart.yTicks.map((tick) => {
+              const y =
+                dashboardTrendChart.top +
+                ((dashboardTrendChart.yTicks[dashboardTrendChart.yTicks.length - 1] - tick) /
+                  dashboardTrendChart.yTicks[dashboardTrendChart.yTicks.length - 1]) *
+                  dashboardTrendChart.chartHeight;
+              return (
+                <g key={`tick-${tick}`}>
+                  <line
+                    x1={dashboardTrendChart.left}
+                    y1={y}
+                    x2={dashboardTrendChart.width - dashboardTrendChart.right}
+                    y2={y}
+                    stroke="rgba(15,23,42,0.14)"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={dashboardTrendChart.left - 14}
+                    y={y + 4}
+                    fill="rgba(15,23,42,0.56)"
+                    fontSize="10"
+                    textAnchor="end"
+                  >
+                    {tick}
+                  </text>
+                </g>
+              );
+            })}
+
+            {dashboardTrendChart.areaPath ? (
+              <path d={dashboardTrendChart.areaPath} fill="url(#dashTrendArea)" />
+            ) : null}
+
+            {dashboardTrendChart.linePath ? (
+              <path
+                d={dashboardTrendChart.linePath}
+                fill="none"
+                stroke="#263449"
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                filter="url(#dashTrendGlow)"
+              />
+            ) : null}
+
+            {dashboardTrendChart.points.map((point, index) => {
+              const isActive = activePoint?.index === index;
+              const isLatest = index === dashboardTrendChart.points.length - 1;
+              return (
+                <g key={`point-${index}`}>
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r={9}
+                    fill="transparent"
+                  />
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r={isActive ? 6.8 : isLatest ? 5.8 : 4.4}
+                    fill="#f8fafc"
+                    stroke="#0f172a"
+                    strokeWidth={isActive ? 3.2 : 2.8}
+                    fillOpacity={1}
+                  />
+                </g>
+              );
+            })}
+
+            {activePoint ? (
+              <g>
+                <rect
+                  x={Math.max(
+                    dashboardTrendChart.left,
+                    Math.min(
+                      dashboardTrendChart.width - 190,
+                      activePoint.x - 90,
+                    ),
+                  )}
+                  y={Math.max(10, activePoint.y - 58)}
+                  rx="8"
+                  width="170"
+                  height="36"
+                  fill="rgba(30,41,59,0.9)"
+                  stroke="rgba(148,163,184,0.28)"
+                  pointerEvents="none"
+                />
+                <text
+                  x={Math.max(
+                    dashboardTrendChart.left + 12,
+                    Math.min(
+                      dashboardTrendChart.width - 175,
+                      activePoint.x - 77,
+                    ),
+                  )}
+                  y={Math.max(31, activePoint.y - 34)}
+                  fill="#f8fafc"
+                  fontSize="13"
+                  fontWeight="600"
+                  pointerEvents="none"
+                >
+                  {activePoint.count} Violations  {activePoint.label}
+                </text>
+              </g>
+            ) : null}
+          </svg>
+
+          <div className="grid grid-cols-3 gap-3 px-7 pt-3">
+            <div className="text-center">
+              <p className="text-[12px] font-medium tracking-wide text-slate-100/90">Start ({dashboardTrendChart.startPoint.label || "-"})</p>
+              <p className="text-lg font-semibold text-white">{dashboardTrendChart.startPoint.count || 0}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-[12px] font-medium tracking-wide text-slate-100/90">Peak ({dashboardTrendChart.peakPoint.label || "-"})</p>
+              <p className="text-lg font-semibold text-white">{dashboardTrendChart.peakPoint.count || 0}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-[12px] font-medium tracking-wide text-slate-100/90">Latest ({dashboardTrendChart.latestPoint.label || "-"})</p>
+              <p className="text-lg font-semibold text-white">{dashboardTrendChart.latestPoint.count || 0}</p>
+            </div>
+          </div>
+        </div>
+      );
+    },
+    [dashboardTrendChart, hoveredTrendPointIndex],
   );
 
   const formatDateForFileName = () => {
@@ -492,13 +819,15 @@ const Dashboard = () => {
       setIsLoadingRanking(true);
 
       try {
-        const [studentsRes, violationsRes] = await Promise.all([
+        const [studentsRes, violationsRes, analyticsRes] = await Promise.all([
           fetch("/api/students"),
           fetch("/api/student-violations"),
+          fetch("/api/violation-analytics"),
         ]);
 
         const studentsResult = await studentsRes.json().catch(() => ({}));
         const violationsResult = await violationsRes.json().catch(() => ({}));
+        const analyticsResult = await analyticsRes.json().catch(() => ({}));
 
         if (!studentsRes.ok || !Array.isArray(studentsResult?.students)) {
           throw new Error("Failed to load students.");
@@ -591,6 +920,30 @@ const Dashboard = () => {
             atRiskStudents,
             highRiskStudents,
           });
+
+          setMetricComparisons({
+            activeViolations:
+              Number(analyticsResult?.cards?.activeViolations?.percentChange) || 0,
+            warningStudents:
+              Number(analyticsResult?.cards?.warningStudents?.percentChange) || 0,
+            atRiskStudents:
+              Number(analyticsResult?.cards?.atRiskStudents?.percentChange) || 0,
+            highRiskStudents:
+              Number(analyticsResult?.cards?.highRiskStudents?.percentChange) || 0,
+          });
+
+          setTrendBySemester({
+            "1st Sem": Array.isArray(analyticsResult?.trendBySemester?.["1st Sem"])
+              ? analyticsResult.trendBySemester["1st Sem"]
+              : [],
+            "2nd Sem": Array.isArray(analyticsResult?.trendBySemester?.["2nd Sem"])
+              ? analyticsResult.trendBySemester["2nd Sem"]
+              : [],
+            Summer: Array.isArray(analyticsResult?.trendBySemester?.Summer)
+              ? analyticsResult.trendBySemester.Summer
+              : [],
+          });
+
           setRankingData(newRankingData);
         }
       } catch (_error) {
@@ -600,6 +953,17 @@ const Dashboard = () => {
             warningStudents: 0,
             atRiskStudents: 0,
             highRiskStudents: 0,
+          });
+          setMetricComparisons({
+            activeViolations: 0,
+            warningStudents: 0,
+            atRiskStudents: 0,
+            highRiskStudents: 0,
+          });
+          setTrendBySemester({
+            "1st Sem": [],
+            "2nd Sem": [],
+            Summer: [],
           });
           setRankingData([]);
         }
@@ -769,7 +1133,7 @@ const Dashboard = () => {
               value={
                 isLoadingMetrics ? "-" : violationMetrics.activeViolations.toString()
               }
-              percentage={0}
+              percentage={metricComparisons.activeViolations}
               comparisonLabel="vs last semester"
               icon={<AlertTriangle className="w-5 h-5 text-orange-400" />}
               iconBgColor="bg-orange-500/20"
@@ -780,7 +1144,7 @@ const Dashboard = () => {
               value={
                 isLoadingMetrics ? "-" : violationMetrics.warningStudents.toString()
               }
-              percentage={0}
+              percentage={metricComparisons.warningStudents}
               comparisonLabel="vs last semester"
               icon={<AlertTriangle className="w-5 h-5 text-yellow-400" />}
               iconBgColor="bg-yellow-500/20"
@@ -791,7 +1155,7 @@ const Dashboard = () => {
               value={
                 isLoadingMetrics ? "-" : violationMetrics.atRiskStudents.toString()
               }
-              percentage={0}
+              percentage={metricComparisons.atRiskStudents}
               comparisonLabel="vs last semester"
               icon={<Users className="w-5 h-5 text-orange-400" />}
               iconBgColor="bg-orange-500/20"
@@ -802,7 +1166,7 @@ const Dashboard = () => {
               value={
                 isLoadingMetrics ? "-" : violationMetrics.highRiskStudents.toString()
               }
-              percentage={0}
+              percentage={metricComparisons.highRiskStudents}
               comparisonLabel="vs last semester"
               icon={<AlertTriangle className="w-5 h-5 text-red-400" />}
               iconBgColor="bg-red-500/20"
@@ -876,64 +1240,7 @@ const Dashboard = () => {
                 </button>
               </div>
             </div>
-            {/* Chart Placeholder */}
-            <div className="h-48 flex items-end justify-between px-4 relative">
-              <svg
-                className="w-full h-full absolute inset-0"
-                preserveAspectRatio="none"
-              >
-                <defs>
-                  <linearGradient
-                    id="lineGradient"
-                    x1="0%"
-                    y1="0%"
-                    x2="100%"
-                    y2="0%"
-                  >
-                    <stop offset="0%" stopColor="#06b6d4" />
-                    <stop offset="100%" stopColor="#06b6d4" />
-                  </linearGradient>
-                </defs>
-                <path
-                  d="M 20 140 Q 80 120, 120 130 T 200 80 T 280 90 T 360 60 T 440 70"
-                  fill="none"
-                  stroke="url(#lineGradient)"
-                  strokeWidth="2"
-                />
-                <circle
-                  cx="120"
-                  cy="130"
-                  r="6"
-                  fill="#fff"
-                  stroke="#06b6d4"
-                  strokeWidth="2"
-                />
-                <circle
-                  cx="200"
-                  cy="80"
-                  r="6"
-                  fill="#fff"
-                  stroke="#06b6d4"
-                  strokeWidth="2"
-                />
-                <circle
-                  cx="360"
-                  cy="60"
-                  r="6"
-                  fill="#fff"
-                  stroke="#06b6d4"
-                  strokeWidth="2"
-                />
-              </svg>
-              <div className="absolute bottom-0 left-0 right-0 flex justify-between text-muted px-2">
-                <span>Jan</span>
-                <span>Feb</span>
-                <span>Mar</span>
-                <span>Apr</span>
-                <span>May</span>
-                <span>Jun</span>
-              </div>
-            </div>
+            {renderInteractiveTrendChart({ compact: true })}
           </Card>
 
           {/* Student Violation Ranking */}
@@ -1073,80 +1380,7 @@ const Dashboard = () => {
             Export
           </button>
         </div>
-        {/* Chart Area */}
-        <div className="h-[320px] flex items-end justify-between px-4 relative mb-6">
-          <svg
-            className="w-full h-full absolute inset-0"
-            preserveAspectRatio="none"
-          >
-            <defs>
-              <linearGradient
-                id="modalLineGradient"
-                x1="0%"
-                y1="0%"
-                x2="100%"
-                y2="0%"
-              >
-                <stop offset="0%" stopColor="#06b6d4" />
-                <stop offset="100%" stopColor="#06b6d4" />
-              </linearGradient>
-            </defs>
-            <path
-              d="M 10 140 Q 100 120, 150 130 T 250 80 T 350 90 T 450 60 T 550 75 T 650 50 T 750 65 T 850 55 T 950 70"
-              fill="none"
-              stroke="url(#modalLineGradient)"
-              strokeWidth="2"
-            />
-            <circle
-              cx="150"
-              cy="130"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-            <circle
-              cx="250"
-              cy="80"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-            <circle
-              cx="450"
-              cy="60"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-            <circle
-              cx="650"
-              cy="50"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-            <circle
-              cx="850"
-              cy="55"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-          </svg>
-          <div className="absolute bottom-0 left-0 right-0 flex justify-between text-muted px-2">
-            <span>Jan</span>
-            <span>Feb</span>
-            <span>Mar</span>
-            <span>Apr</span>
-            <span>May</span>
-            <span>Jun</span>
-          </div>
-        </div>
+        {renderInteractiveTrendChart({ compact: false })}
         {/* Analytics Description */}
         <div className="bg-white/5 border border-white/10 rounded-lg p-4 text-sm text-gray-300">
           This chart visualizes the trend of recorded student violations
