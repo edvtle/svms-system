@@ -332,7 +332,7 @@ const Dashboard = () => {
 
       return (
         <div
-          className={`relative ${wrapperHeightClass} overflow-hidden rounded-[28px] border border-white/25 bg-[linear-gradient(180deg,rgba(242,244,247,0.94)_0%,rgba(214,219,228,0.78)_38%,rgba(137,147,161,0.58)_68%,rgba(24,29,36,0.96)_100%)] px-4 pt-5 pb-8 shadow-[0_22px_45px_rgba(3,7,18,0.35),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-sm`}
+          className={`relative ${wrapperHeightClass} overflow-hidden rounded-2xl border border-white/12 bg-[#222427] px-6 pt-6 pb-12 shadow-[0_8px_24px_rgba(0,0,0,0.4)]`}
         >
           <svg
             viewBox={`0 0 ${dashboardTrendChart.width} ${dashboardTrendChart.height}`}
@@ -343,16 +343,9 @@ const Dashboard = () => {
           >
             <defs>
               <linearGradient id="dashTrendArea" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#334155" stopOpacity="0.18" />
-                <stop offset="100%" stopColor="#0f172a" stopOpacity="0" />
+                <stop offset="0%" stopColor="#d1d5db" stopOpacity="0.08" />
+                <stop offset="100%" stopColor="#222427" stopOpacity="0" />
               </linearGradient>
-              <filter id="dashTrendGlow" x="-20%" y="-20%" width="140%" height="160%">
-                <feGaussianBlur stdDeviation="2.2" result="blur" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
             </defs>
 
             {dashboardTrendChart.yTicks.map((tick) => {
@@ -368,14 +361,14 @@ const Dashboard = () => {
                     y1={y}
                     x2={dashboardTrendChart.width - dashboardTrendChart.right}
                     y2={y}
-                    stroke="rgba(15,23,42,0.14)"
-                    strokeWidth="1"
+                    stroke="rgba(209,213,219,0.12)"
+                    strokeWidth="0.8"
                   />
                   <text
-                    x={dashboardTrendChart.left - 14}
-                    y={y + 4}
-                    fill="rgba(15,23,42,0.56)"
-                    fontSize="10"
+                    x={dashboardTrendChart.left - 16}
+                    y={y + 5}
+                    fill="rgba(156,163,175,0.8)"
+                    fontSize="11"
                     textAnchor="end"
                   >
                     {tick}
@@ -392,10 +385,10 @@ const Dashboard = () => {
               <path
                 d={dashboardTrendChart.linePath}
                 fill="none"
-                stroke="#263449"
-                strokeWidth="2.8"
+                stroke="#d1d5db"
+                strokeWidth="2.2"
                 strokeLinecap="round"
-                filter="url(#dashTrendGlow)"
+                strokeLinejoin="round"
               />
             ) : null}
 
@@ -413,10 +406,10 @@ const Dashboard = () => {
                   <circle
                     cx={point.x}
                     cy={point.y}
-                    r={isActive ? 6.8 : isLatest ? 5.8 : 4.4}
-                    fill="#f8fafc"
-                    stroke="#0f172a"
-                    strokeWidth={isActive ? 3.2 : 2.8}
+                    r={isActive ? 5.8 : isLatest ? 4.8 : 3.4}
+                    fill="#e5e7eb"
+                    stroke="#222427"
+                    strokeWidth={isActive ? 2.2 : 1.8}
                     fillOpacity={1}
                   />
                 </g>
@@ -424,55 +417,70 @@ const Dashboard = () => {
             })}
 
             {activePoint ? (
-              <g>
+              <g transform={`translate(${-60}, 0)`}>
                 <rect
                   x={Math.max(
-                    dashboardTrendChart.left,
+                    dashboardTrendChart.left + 12,
                     Math.min(
-                      dashboardTrendChart.width - 190,
-                      activePoint.x - 90,
+                      dashboardTrendChart.width - dashboardTrendChart.right - 120,
+                      activePoint.x,
                     ),
                   )}
-                  y={Math.max(10, activePoint.y - 58)}
-                  rx="8"
-                  width="170"
-                  height="36"
-                  fill="rgba(30,41,59,0.9)"
-                  stroke="rgba(148,163,184,0.28)"
+                  y={Math.max(16, Math.min(dashboardTrendChart.height - 70, activePoint.y - 76))}
+                  rx="6"
+                  width="120"
+                  height="48"
+                  fill="#222427"
+                  stroke="rgba(156,163,175,0.3)"
                   pointerEvents="none"
                 />
                 <text
                   x={Math.max(
-                    dashboardTrendChart.left + 12,
+                    dashboardTrendChart.left + 24,
                     Math.min(
-                      dashboardTrendChart.width - 175,
-                      activePoint.x - 77,
+                      dashboardTrendChart.width - dashboardTrendChart.right - 108,
+                      activePoint.x + 12,
                     ),
                   )}
-                  y={Math.max(31, activePoint.y - 34)}
-                  fill="#f8fafc"
-                  fontSize="13"
+                  y={Math.max(32, Math.min(dashboardTrendChart.height - 54, activePoint.y - 60))}
+                  fill="#f3f4f6"
+                  fontSize="12"
                   fontWeight="600"
                   pointerEvents="none"
                 >
-                  {activePoint.count} Violations  {activePoint.label}
+                  {activePoint.count} violations
+                </text>
+                <text
+                  x={Math.max(
+                    dashboardTrendChart.left + 24,
+                    Math.min(
+                      dashboardTrendChart.width - dashboardTrendChart.right - 108,
+                      activePoint.x + 12,
+                    ),
+                  )}
+                  y={Math.max(49, Math.min(dashboardTrendChart.height - 37, activePoint.y - 43))}
+                  fill="rgba(243,244,246,0.85)"
+                  fontSize="12"
+                  pointerEvents="none"
+                >
+                  {activePoint.label}
                 </text>
               </g>
             ) : null}
           </svg>
 
-          <div className="grid grid-cols-3 gap-4 px-7 pt-5 mt-3">
+          <div className="grid grid-cols-3 gap-4 px-7 pt-7 mt-3 pb-2">
             <div className="text-center">
-              <p className="text-[12px] font-medium tracking-wide text-slate-100/90">Start ({dashboardTrendChart.startPoint.label || "-"})</p>
-              <p className="text-lg font-semibold text-white">{dashboardTrendChart.startPoint.count || 0}</p>
+              <p className="text-[11px] font-medium tracking-wide text-gray-400 mb-2">Start ({dashboardTrendChart.startPoint.label || "-"})</p>
+              <p className="text-xl font-semibold text-white">{dashboardTrendChart.startPoint.count || 0}</p>
             </div>
             <div className="text-center">
-              <p className="text-[12px] font-medium tracking-wide text-slate-100/90">Peak ({dashboardTrendChart.peakPoint.label || "-"})</p>
-              <p className="text-lg font-semibold text-white">{dashboardTrendChart.peakPoint.count || 0}</p>
+              <p className="text-[11px] font-medium tracking-wide text-gray-400 mb-2">Peak ({dashboardTrendChart.peakPoint.label || "-"})</p>
+              <p className="text-xl font-semibold text-white">{dashboardTrendChart.peakPoint.count || 0}</p>
             </div>
             <div className="text-center">
-              <p className="text-[12px] font-medium tracking-wide text-slate-100/90">Latest ({dashboardTrendChart.latestPoint.label || "-"})</p>
-              <p className="text-lg font-semibold text-white">{dashboardTrendChart.latestPoint.count || 0}</p>
+              <p className="text-[11px] font-medium tracking-wide text-gray-400 mb-2">Latest ({dashboardTrendChart.latestPoint.label || "-"})</p>
+              <p className="text-xl font-semibold text-white">{dashboardTrendChart.latestPoint.count || 0}</p>
             </div>
           </div>
         </div>
@@ -1348,16 +1356,16 @@ const Dashboard = () => {
         onClose={() => setTrendModalOpen(false)}
         title={"Violation Trends Over the Semester"}
         size="2xl"
-        className="max-w-[1100px] max-h-[80vh] overflow-y-auto scrollbar-hide"
+        className="max-w-[1100px] max-h-[80vh] overflow-y-auto custom-scrollbar"
       >
-        <p className="text-sm text-gray-400 mb-4">
+        <p className="text-sm text-gray-400 mb-5">
           This chart visualizes violation trends for the selected semester.
         </p>
         {/* Semester Dropdown & Actions */}
-        <div className="flex items-center gap-2 mb-6">
+        <div className="flex items-center gap-3 mb-6">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 bg-white/10 backdrop-blur-sm text-white text-sm px-4 py-2 rounded-lg border border-white/10 h-10">
+              <button className="flex items-center gap-2 bg-white/8 backdrop-blur-sm text-white text-sm px-4 py-2.5 rounded-lg border border-white/12 h-10">
                 {selectedSemester}
                 <ChevronDown className="w-4 h-4" />
               </button>
@@ -1372,11 +1380,12 @@ const Dashboard = () => {
             </DropdownMenuContent>
           </DropdownMenu>
           <button
-            className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors h-10"
+            className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-100 text-sm font-medium px-4 py-2.5 rounded-lg border border-gray-600 shadow transition-colors h-10"
             onClick={() => {
               /* Add export logic here */
             }}
           >
+            <Download className="w-4 h-4" />
             Export
           </button>
         </div>

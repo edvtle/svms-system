@@ -183,7 +183,7 @@ input[type="password"]::-webkit-credentials-auto-fill-button {
 
 .modal-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(103, 232, 249, 0.65) rgba(255, 255, 255, 0.08);
+  scrollbar-color: rgba(156,163,175,0.6) rgba(34,36,39,0.4);
 }
 
 .modal-scrollbar::-webkit-scrollbar {
@@ -191,19 +191,44 @@ input[type="password"]::-webkit-credentials-auto-fill-button {
 }
 
 .modal-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(156,163,175,0.08);
   border-radius: 9999px;
   margin: 10px 0;
 }
 
 .modal-scrollbar::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(103, 232, 249, 0.85), rgba(59, 130, 246, 0.7));
-  border: 2px solid rgba(26, 28, 32, 0.92);
+  background: rgba(156,163,175,0.5);
+  border: none;
   border-radius: 9999px;
 }
 
 .modal-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(165, 243, 252, 0.95), rgba(96, 165, 250, 0.82));
+  background: rgba(156,163,175,0.7);
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156,163,175,0.6) rgba(34,36,39,0.4);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(156,163,175,0.08);
+  border-radius: 9999px;
+  margin: 10px 0;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(156,163,175,0.5);
+  border: none;
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(156,163,175,0.7);
 }
 
 .admin-subviolation-editor > button:last-of-type {
