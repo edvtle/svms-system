@@ -4,7 +4,7 @@ import logo from "../../assets/css_logo.png";
 import { useSettings } from "../../context/SettingsContext";
 import { getAuditHeaders } from '@/lib/auditHeaders';
 
-const StudentSidebar = () => {
+const StudentSidebar = ({ onRequestLogout }) => {
   const { settings } = useSettings();
   
   // Parse the display name to show first two words in bold
@@ -94,7 +94,7 @@ const StudentSidebar = () => {
   ];
 
   return (
-    <aside className="w-60 h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-6 font-inter">
+    <aside className="w-60 h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-6 font-inter flex flex-col">
       
       {/* Logo */}
       <div className="mb-12">
@@ -111,7 +111,7 @@ const StudentSidebar = () => {
       </div>
 
       {/* Navigation */}
-      <nav>
+      <nav className="flex-1">
         <ul className="space-y-1">
           {menuItems.map((item) => (
             <li key={item.path}>
@@ -133,6 +133,17 @@ const StudentSidebar = () => {
           ))}
         </ul>
       </nav>
+
+      <button
+        type="button"
+        onClick={onRequestLogout}
+        className="mt-4 flex items-center gap-3 py-2.5 px-4 rounded-lg text-sm font-medium text-red-300 hover:text-red-200 hover:bg-red-500/10 transition-all"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 11-4 0v-1m4-8V5a2 2 0 10-4 0v1" />
+        </svg>
+        <span>Logout</span>
+      </button>
     </aside>
   );
 };

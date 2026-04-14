@@ -1,9 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import logo from '../../assets/css_logo.png'
 import { useSettings } from '../../context/SettingsContext'
 
-const Sidebar = () => {
+const Sidebar = ({ onRequestLogout }) => {
+  const [isCollapsed, setIsCollapsed] = useState(false)
   const { settings, loading } = useSettings()
   
   // Parse the display name to show first two words in bold
@@ -72,19 +73,38 @@ const Sidebar = () => {
   ]
 
   return (
-    <aside className="w-60 h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-6 font-inter">
+    <aside className={`${isCollapsed ? 'w-24' : 'w-60'} relative h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-4 font-inter transition-all duration-300 flex flex-col`}>
+      <button
+        type="button"
+        onClick={() => setIsCollapsed((prev) => !prev)}
+        className="absolute right-2 top-3 z-10 h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-gray-200 shadow-[0_8px_18px_rgba(0,0,0,0.25)] transition-colors duration-300 hover:bg-white/15 hover:text-white"
+        aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M5 7h14M5 12h14M5 17h14" />
+        </svg>
+      </button>
       {/* Logo/Brand */}  
-      <div className="mb-12">
-        <img src={settings?.logoPath || logo} alt="System Logo" className="h-[8.5rem] mt-4 mb-4 object-contain" />
-        <h1 className="text-xl font-extrabold leading-tight text-white">
-          {firstTwoWords}
-        </h1>
-        {secondLine && <p className="text-white">{secondLine}</p>}
-        {thirdLine && <p className="text-white">{thirdLine}</p>}
+      <div className={`mb-10 ${isCollapsed ? 'flex justify-center' : ''}`}>
+        <img
+          src={settings?.logoPath || logo}
+          alt="System Logo"
+          className={`${isCollapsed ? 'h-16' : 'h-[8.5rem]'} mt-2 mb-4 object-contain transition-all duration-300`}
+        />
+        {!isCollapsed && (
+          <>
+            <h1 className="text-xl font-extrabold leading-tight text-white">
+              {firstTwoWords}
+            </h1>
+            {secondLine && <p className="text-white">{secondLine}</p>}
+            {thirdLine && <p className="text-white">{thirdLine}</p>}
+          </>
+        )}
       </div>
 
       {/* Navigation */}
-      <nav>
+      <nav className="flex-1">
         <ul className="space-y-1">
           {menuItems.map((item) => (
             <li key={item.path}>
@@ -92,20 +112,33 @@ const Sidebar = () => {
                 to={item.path}
                 end={item.path === '/admin'}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
+                  `flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
                     isActive
                       ? 'bg-gradient-to-r from-white/15 to-transparent text-white'
                       : 'text-gray-400 hover:text-white hover:bg-white/5'
                   }`
                 }
+                title={isCollapsed ? item.label : undefined}
               >
                 {item.icon}
-                {item.label}
+                {!isCollapsed && item.label}
               </NavLink>
             </li>
           ))}
         </ul>
       </nav>
+
+      <button
+        type="button"
+        onClick={onRequestLogout}
+        className={`mt-4 flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} py-2.5 px-4 rounded-lg text-sm font-medium text-red-300 hover:text-red-200 hover:bg-red-500/10 transition-all`}
+        title={isCollapsed ? 'Logout' : undefined}
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 11-4 0v-1m4-8V5a2 2 0 10-4 0v1" />
+        </svg>
+        {!isCollapsed && <span>Logout</span>}
+      </button>
     </aside>
   )
 }

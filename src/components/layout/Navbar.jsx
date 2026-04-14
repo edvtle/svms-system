@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { getAuditHeaders } from '@/lib/auditHeaders'
 
-const Navbar = () => {
+const Navbar = ({ onRequestLogout }) => {
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false)
   const [notifCount, setNotifCount] = useState(0)
   const [allNotifications, setAllNotifications] = useState([])
@@ -199,6 +199,10 @@ const Navbar = () => {
   }
 
   const handleLogout = () => {
+    if (typeof onRequestLogout === 'function') {
+      onRequestLogout()
+      return
+    }
     // Clear user session (customize as needed)
     localStorage.clear();
     window.location.href = '/login';
