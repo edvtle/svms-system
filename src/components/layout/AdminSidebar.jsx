@@ -60,29 +60,35 @@ const Sidebar = ({ onRequestLogout }) => {
         </svg>
       )
     },
-    { 
-      path: '/admin/settings', 
-      label: 'Settings',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      )
-    },
   ]
+
+  const settingsItem = {
+    path: '/admin/settings',
+    label: 'Settings',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    )
+  }
 
   return (
     <aside className={`${isCollapsed ? 'w-24' : 'w-60'} relative h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-4 font-inter transition-all duration-300 flex flex-col`}>
       <button
         type="button"
         onClick={() => setIsCollapsed((prev) => !prev)}
-        className="absolute right-2 top-3 z-10 h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-gray-200 shadow-[0_8px_18px_rgba(0,0,0,0.25)] transition-colors duration-300 hover:bg-white/15 hover:text-white"
+        className="group absolute -right-5 top-1/2 z-30 h-10 w-10 -translate-y-1/2 overflow-hidden rounded-xl border border-white/25 bg-gradient-to-b from-[#191c21] to-[#101318] text-white shadow-[0_10px_26px_rgba(0,0,0,0.35)] transition-all duration-300 hover:border-white/45 hover:from-[#21252b] hover:to-[#12171d]"
         aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M5 7h14M5 12h14M5 17h14" />
+        <span className="absolute inset-[2px] rounded-[10px] border border-white/10" aria-hidden="true" />
+        <svg className="relative z-10 mx-auto h-4 w-4 transition-transform duration-300 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {isCollapsed ? (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M9 5l7 7-7 7" />
+          ) : (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M15 5l-7 7 7 7" />
+          )}
         </svg>
       </button>
       {/* Logo/Brand */}  
@@ -127,6 +133,21 @@ const Sidebar = ({ onRequestLogout }) => {
           ))}
         </ul>
       </nav>
+
+      <NavLink
+        to={settingsItem.path}
+        className={({ isActive }) =>
+          `flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
+            isActive
+              ? 'bg-gradient-to-r from-white/15 to-transparent text-white'
+              : 'text-gray-400 hover:text-white hover:bg-white/5'
+          }`
+        }
+        title={isCollapsed ? settingsItem.label : undefined}
+      >
+        {settingsItem.icon}
+        {!isCollapsed && settingsItem.label}
+      </NavLink>
 
       <button
         type="button"
