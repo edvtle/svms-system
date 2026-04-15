@@ -1,15 +1,15 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import Modal, { ModalFooter, ModalDivider } from '../ui/Modal'
 import GlassInput from '../ui/GlassInput'
-import Button from '../ui/button'
+import Button from '../ui/Button'
 
 /**
  * EditProfileModal - Modal for editing user profile
  * 
  * @param {boolean} isOpen - Whether the modal is open
  * @param {Function} onClose - Callback when modal is closed
- * @param {Object} initialData - Initial user data { fullName, idNumber, email }
+ * @param {Object} initialData - Initial user data { username, schoolId, firstName, lastName, email }
  * @param {Function} onSave - Callback when save is clicked with form data
  */
 const EditProfileModal = ({ 
@@ -18,14 +18,28 @@ const EditProfileModal = ({
   initialData = {},
   onSave 
 }) => {
-  const [formData, setFormData] = useState({
-    fullName: initialData.fullName || '',
-    idNumber: initialData.idNumber || '',
+  const buildInitialFormData = () => ({
+    username: initialData.username || '',
+    schoolId: initialData.schoolId || '',
+    firstName: initialData.firstName || '',
+    lastName: initialData.lastName || '',
     email: initialData.email || '',
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
   })
+
+  const [formData, setFormData] = useState({
+    ...buildInitialFormData(),
+  })
+
+  useEffect(() => {
+    if (isOpen) {
+      setFormData(buildInitialFormData())
+    }
+  }, [isOpen, initialData.username, initialData.schoolId, initialData.firstName, initialData.lastName, initialData.email])
+
+  const isStudent = initialData.role === 'student'
 
   const [showPassword, setShowPassword] = useState({
     currentPassword: false,
@@ -41,20 +55,13 @@ const EditProfileModal = ({
     setFormData(prev => ({ ...prev, [field]: e.target.value }))
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    onSave?.(formData)
+    await onSave?.(formData)
   }
 
   const handleCancel = () => {
-    setFormData({
-      fullName: initialData.fullName || '',
-      idNumber: initialData.idNumber || '',
-      email: initialData.email || '',
-      currentPassword: '',
-      newPassword: '',
-      confirmPassword: '',
-    })
+    setFormData(buildInitialFormData())
     onClose?.()
   }
 
@@ -67,23 +74,51 @@ const EditProfileModal = ({
       showCloseButton={false}
     >
       <form onSubmit={handleSubmit}>
-        {/* Name and ID Row */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium text-white mb-2">Full Name</label>
-            <GlassInput
-              value={formData.fullName}
-              onChange={handleChange('fullName')}
-              placeholder="Enter full name"
-            />
+        {/* Full Name */}
+        <div className="mb-4">
+          <p className="text-sm font-semibold text-white mb-2">Full Name</p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-white mb-2">First Name</label>
+              <GlassInput
+                value={formData.firstName}
+                onChange={handleChange('firstName')}
+                placeholder="Enter first name"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white mb-2">Last Name</label>
+              <GlassInput
+                value={formData.lastName}
+                onChange={handleChange('lastName')}
+                placeholder="Enter last name"
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-white mb-2">ID Number</label>
-            <GlassInput
-              value={formData.idNumber}
-              onChange={handleChange('idNumber')}
-              placeholder="Enter ID number"
-            />
+        </div>
+
+        {/* Username and School ID (student only) */}
+        <div className="mb-4">
+          <div className={isStudent ? 'grid grid-cols-2 gap-4' : ''}>
+            <div>
+              <label className="block text-sm font-medium text-white mb-2">Username</label>
+              <GlassInput
+                value={formData.username}
+                onChange={handleChange('username')}
+                placeholder="Enter username"
+              />
+            </div>
+
+            {isStudent && (
+              <div>
+                <label className="block text-sm font-medium text-white mb-2">School ID</label>
+                <GlassInput
+                  value={formData.schoolId}
+                  onChange={handleChange('schoolId')}
+                  placeholder="Enter school ID"
+                />
+              </div>
+            )}
           </div>
         </div>
 

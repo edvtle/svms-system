@@ -1,202 +1,2184 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import AnimatedContent from "../../components/ui/AnimatedContent";
 import SearchBar from "../../components/ui/SearchBar";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
 import TableTabs from "../../components/ui/TableTabs";
-import { Folder, Filter, Download, X } from "lucide-react";
+import { Folder, Filter, Download, X, AlertCircle, MoreVertical, Edit, RotateCcw, Trash2, Check } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from "../../components/ui/dropdown-menu";
-import Modal, { ModalFooter } from "../../components/ui/Modal";
+import Modal, { ModalFooter } from "@/components/ui/Modal";
+import AlertModal from "@/components/ui/AlertModal";
 import EditArchiveModal from "@/components/modals/EditArchiveModal";
+import { getAuditHeaders } from "@/lib/auditHeaders";
 
-const folderList = [
-  { key: "users", label: "USERS" },
-  { key: "2024-2025", label: "S.Y. 2024-2025" },
-  { key: "2023-2024", label: "S.Y. 2023-2024" },
-  { key: "2022-2023", label: "S.Y. 2022-2023" },
-  { key: "2021-2022", label: "S.Y. 2021-2022" },
-  { key: "2020-2021", label: "S.Y. 2020-2021" },
-];
-
-const tabs = [{ key: "users", label: "Users" }];
+const EXPORT_HEADER_IMAGE_PATH = '/plpasig_header.png';
 
 const semesterTabs = [
-  { key: "1st", label: "1st Semester" },
-  { key: "2nd", label: "2nd Semester" },
+  { key: "1ST SEM", label: "1st Semester" },
+  { key: "2ND SEM", label: "2nd Semester" },
+  { key: "SUMMER", label: "Summer" },
 ];
+
+// Helper function to safely format dates
+const formatDate = (dateString) => {
+  if (!dateString) return "-";
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      return "-";
+    }
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  } catch (err) {
+    console.warn("Date format error:", dateString, err);
+    return "-";
+  }
+};
+
+// Helper functions for export functionality
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const getDataUrlDimensions = (dataUrl) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+    };
+    img.onerror = () => reject(new Error('Unable to load image dimensions.'));
+    img.src = dataUrl;
+  });
+
+// Convert signature image to base64 data URL for exports
+const getSignatureImageData = async (signatureSrc) => {
+  if (!signatureSrc) return null;
+
+  try {
+    // If it's already a data URL, return it
+    if (signatureSrc.startsWith('data:')) {
+      return signatureSrc;
+    }
+
+    // If it's a regular URL, fetch it
+    const response = await fetch(signatureSrc);
+    if (!response.ok) return null;
+
+    const blob = await response.blob();
+    return await blobToDataUrl(blob);
+  } catch (error) {
+    console.warn('Failed to load signature image:', error);
+    return null;
+  }
+};
+
+// Resolve header image for exports
+const resolveHeaderImage = async () => {
+  try {
+    const response = await fetch(EXPORT_HEADER_IMAGE_PATH);
+    if (!response.ok) {
+      throw new Error(`Header image not found: ${EXPORT_HEADER_IMAGE_PATH}`);
+    }
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    const dimensions = await getDataUrlDimensions(dataUrl);
+    return { dataUrl, dimensions };
+  } catch (error) {
+    console.warn('Failed to load header image:', error);
+    return { dataUrl: null, dimensions: null };
+  }
+};
+
+const formatExportGeneratedDate = (date) => {
+  const parsedDate = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return '-';
+  }
+  const month = parsedDate.toLocaleString(undefined, { month: 'long' }).toUpperCase();
+  const day = parsedDate.getDate();
+  const year = parsedDate.getFullYear();
+  const time = parsedDate.toLocaleString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  return `${month} ${day}, ${year}, ${time}`;
+};
+
+const formatDateForFileName = (dateString) => {
+  if (!dateString) return 'Unknown_Date';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Unknown_Date';
+    
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  } catch (err) {
+    return 'Unknown_Date';
+  }
+};
+
+const formatProgramYearSection = (program, yearSection) => {
+  const programText = String(program || '').trim();
+  const yearSectionText = String(yearSection || '').trim();
+
+  if (programText && yearSectionText) {
+    const normalizedPrefix = `${programText.toLowerCase()}-`;
+    if (yearSectionText.toLowerCase().startsWith(normalizedPrefix)) {
+      return yearSectionText;
+    }
+
+    return `${programText}-${yearSectionText}`;
+  }
+
+  return programText || yearSectionText || '';
+};
 
 const Archives = () => {
   const [activeFolder, setActiveFolder] = useState("users");
-  const [activeTab, setActiveTab] = useState("users");
-  const [activeSemester, setActiveSemester] = useState("1st");
+  const [activeSemester, setActiveSemester] = useState("1ST SEM");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("");
-  const [filterSignature, setFilterSignature] = useState("");
+  const [isGlobalSearch, setIsGlobalSearch] = useState(false); // Default to current folder search
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [archivedUsers, setArchivedUsers] = useState([]);
+  const [archivedViolations, setArchivedViolations] = useState([]);
+  const [allArchivedViolations, setAllArchivedViolations] = useState([]); // For global search
+  const [allUnresolvedViolations, setAllUnresolvedViolations] = useState([]); // Global unresolved records
+  const [preservedYearSectionByViolationId, setPreservedYearSectionByViolationId] = useState({});
+  const [schoolYears, setSchoolYears] = useState([]);
+  const [unresolvedSchoolYears, setUnresolvedSchoolYears] = useState([]);
+  const [selectedUnresolvedYear, setSelectedUnresolvedYear] = useState("");
+
+  // Restore preserved year-section mapping from localStorage to prevent lost history during navigation/refresh.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("preservedYearSectionByViolationId");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === "object") {
+          setPreservedYearSectionByViolationId(parsed);
+        }
+      }
+    } catch (err) {
+      console.warn("Unable to restore preserved year section data", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "preservedYearSectionByViolationId",
+        JSON.stringify(preservedYearSectionByViolationId),
+      );
+    } catch (err) {
+      console.warn("Unable to persist preserved year section data", err);
+    }
+  }, [preservedYearSectionByViolationId]);
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
+  const [editType, setEditType] = useState("user"); // "user" or "violation"
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [userToRestore, setUserToRestore] = useState(null);
+  const [archiveSuccessMessage, setArchiveSuccessMessage] = useState("");
 
-  const handleSaveEdit = (id, updatedRecord) => {
-    setData((prev) =>
-      prev.map((record) => (record.id === id ? updatedRecord : record)),
-    );
+  // School year management states
+  const [isDeleteSchoolYearModalOpen, setIsDeleteSchoolYearModalOpen] = useState(false);
+  const [schoolYearToDelete, setSchoolYearToDelete] = useState(null);
+  const [isRenameSchoolYearModalOpen, setIsRenameSchoolYearModalOpen] = useState(false);
+  const [schoolYearToRename, setSchoolYearToRename] = useState(null);
+  const [newSchoolYearName, setNewSchoolYearName] = useState("");
+  const [isSchoolYearActionLoading, setIsSchoolYearActionLoading] = useState(false);
+
+  // Download/Export states
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState('excel');
+  const [downloadAllModalOpen, setDownloadAllModalOpen] = useState(false);
+  const [downloadAllFormat, setDownloadAllFormat] = useState('excel');
+  const [showDownloadAlertModal, setShowDownloadAlertModal] = useState(false);
+  const [downloadAlertMessage, setDownloadAlertMessage] = useState("");
+
+  // Load archived users on mount
+  useEffect(() => {
+    const loadArchivedUsers = async () => {
+      try {
+        setIsLoading(true);
+        setError("");
+        const response = await fetch("/api/archive/users", {
+          headers: { ...getAuditHeaders() },
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === "ok") {
+          setArchivedUsers(data.archivedUsers || []);
+        } else {
+          setError(data.message || "Failed to load archived users");
+        }
+      } catch (err) {
+        setError("Failed to load archived users: " + err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadArchivedUsers();
+  }, []);
+
+  // Listen for archive completion events from StudentViolation page
+  useEffect(() => {
+    const handleArchiveEvent = (event) => {
+      console.log("Archive event received, refreshing school years and violations...", event.detail);
+
+      // For resolved archive actions from general archive button, navigate to that archive year/semester.
+      // If the source is unresolved, keep the current unresolved view on screen.
+      if (event?.detail?.source !== "unresolved" && event?.detail?.schoolYear && event?.detail?.semester) {
+        setActiveFolder(event.detail.schoolYear);
+        setActiveSemester(event.detail.semester);
+        setSelectedUnresolvedYear("");
+      }
+
+      // Merge preserved year_section map if provided
+      if (event?.detail?.preservedYearSections && typeof event.detail.preservedYearSections === "object") {
+        setPreservedYearSectionByViolationId((prev) => ({
+          ...prev,
+          ...event.detail.preservedYearSections,
+        }));
+      }
+
+      // Force immediate refresh of school years
+      const loadSchoolYears = async () => {
+        try {
+          const response = await fetch("/api/archive/school-years", {
+            headers: { ...getAuditHeaders() },
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            console.log("School years updated:", data.schoolYears);
+            if (data.status === "ok" && Array.isArray(data.schoolYears)) {
+              setSchoolYears(data.schoolYears || []);
+              
+              // Auto-select first folder if available
+              if (data.schoolYears.length > 0 && activeFolder === "users") {
+                console.log("Auto-selecting first folder:", data.schoolYears[0]);
+                setActiveFolder(data.schoolYears[0]);
+                setActiveSemester("1ST SEM");
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error refreshing school years:", err);
+        }
+      };
+      
+      loadSchoolYears();
+    };
+
+    window.addEventListener("archiveCompleted", handleArchiveEvent);
+    return () => {
+      window.removeEventListener("archiveCompleted", handleArchiveEvent);
+    };
+  }, [activeFolder]);
+
+  // Load school years on mount and set up periodic refresh
+  useEffect(() => {
+    const loadSchoolYears = async () => {
+      try {
+        const response = await fetch("/api/archive/school-years", {
+          headers: { ...getAuditHeaders() },
+        });
+        
+        if (!response.ok) {
+          console.warn("Failed to load school years:", response.status);
+          setSchoolYears([]);
+          return;
+        }
+        
+        const data = await response.json();
+        console.log("Loaded archive school years:", data.schoolYears);
+
+        if (data.status === "ok" && Array.isArray(data.schoolYears)) {
+          const years = data.schoolYears || [];
+          setSchoolYears(years);
+          // Don't auto-select folder - keep users as default
+        } else {
+          setSchoolYears([]);
+        }
+      } catch (err) {
+        console.error("Error loading school years:", err);
+        setSchoolYears([]);
+      }
+    };
+
+    loadSchoolYears();
+    
+    // Refresh school years more frequently to catch new archives
+    const interval = setInterval(loadSchoolYears, 2000);
+    
+    // Listen for storage changes (for cross-tab communication)
+    const handleStorageChange = () => {
+      console.log("Storage changed, reloading school years");
+      loadSchoolYears();
+    };
+    window.addEventListener("storage", handleStorageChange);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, [activeFolder]);
+
+  // Load unresolved school years for UNRESOLVED folder
+  useEffect(() => {
+    const loadUnresolvedSchoolYears = async () => {
+      if (activeFolder !== "unresolved") {
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/archive/unresolved-school-years", {
+          headers: { ...getAuditHeaders() },
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === "ok" && Array.isArray(data.schoolYears)) {
+          setUnresolvedSchoolYears(data.schoolYears);
+        } else {
+          setUnresolvedSchoolYears([]);
+        }
+      } catch (err) {
+        console.error("Error loading unresolved school years:", err);
+        setUnresolvedSchoolYears([]);
+      }
+    };
+
+    loadUnresolvedSchoolYears();
+  }, [activeFolder]);
+
+  // Load violations when folder or semester changes
+  useEffect(() => {
+    const loadViolations = async () => {
+      if (activeFolder === "users") {
+        setArchivedViolations([]);
+        return;
+      }
+
+      if (activeFolder === "unresolved" && !selectedUnresolvedYear) {
+        setArchivedViolations([]);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setError("");
+
+        const targetYear =
+          activeFolder === "unresolved" ? selectedUnresolvedYear : activeFolder;
+
+        console.log(
+          `Loading violations for ${activeSemester} S.Y. ${targetYear} (${activeFolder})`,
+        );
+
+        const endpoint =
+          activeFolder === "unresolved"
+            ? `/api/archive/unresolved/${encodeURIComponent(targetYear)}/${encodeURIComponent(activeSemester)}`
+            : `/api/archive/violations/${encodeURIComponent(targetYear)}/${encodeURIComponent(activeSemester)}`;
+
+        const response = await fetch(endpoint, {
+          headers: { ...getAuditHeaders() },
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.status === "ok") {
+          const violations = data.violations || [];
+          setArchivedViolations(violations);
+          console.log(
+            `✓ Loaded ${violations.length} archived violations for ${activeSemester} S.Y. ${targetYear}`,
+          );
+        } else {
+          console.warn("Error loading violations:", data.message);
+          setError(data.message || "Failed to load violations");
+          setArchivedViolations([]);
+        }
+      } catch (err) {
+        console.error("Error loading violations:", err);
+        setError("Failed to load violations: " + err.message);
+        setArchivedViolations([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadViolations();
+  }, [activeFolder, activeSemester, selectedUnresolvedYear]);
+
+  // Load all violations for global search
+  useEffect(() => {
+    const loadAllViolations = async () => {
+      if (!isGlobalSearch || allArchivedViolations.length > 0) return;
+
+      try {
+        setIsLoading(true);
+        console.log("Loading all violations for global search...");
+
+        const allViolations = [];
+        const unresolvedAll = [];
+
+        for (const year of schoolYears) {
+          try {
+            const response1st = await fetch(`/api/archive/violations/${year}/1ST SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const response2nd = await fetch(`/api/archive/violations/${year}/2ND SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const responseSummer = await fetch(`/api/archive/violations/${year}/SUMMER`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const unresolved1st = await fetch(`/api/archive/unresolved/${year}/1ST SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const unresolved2nd = await fetch(`/api/archive/unresolved/${year}/2ND SEM`, {
+              headers: { ...getAuditHeaders() },
+            });
+            const unresolvedSummer = await fetch(`/api/archive/unresolved/${year}/SUMMER`, {
+              headers: { ...getAuditHeaders() },
+            });
+
+            if (response1st.ok) {
+              const data1st = await response1st.json();
+              if (data1st.status === "ok" && Array.isArray(data1st.violations)) {
+                allViolations.push(...(data1st.violations || []));
+              }
+            }
+
+            if (response2nd.ok) {
+              const data2nd = await response2nd.json();
+              if (data2nd.status === "ok" && Array.isArray(data2nd.violations)) {
+                allViolations.push(...(data2nd.violations || []));
+              }
+            }
+
+            if (responseSummer.ok) {
+              const dataSummer = await responseSummer.json();
+              if (dataSummer.status === "ok" && Array.isArray(dataSummer.violations)) {
+                allViolations.push(...(dataSummer.violations || []));
+              }
+            }
+
+            if (unresolved1st.ok) {
+              const dataUnresolved1st = await unresolved1st.json();
+              if (dataUnresolved1st.status === "ok" && Array.isArray(dataUnresolved1st.violations)) {
+                unresolvedAll.push(
+                  ...dataUnresolved1st.violations.map((v) => ({ ...v, isUnresolved: true })),
+                );
+              }
+            }
+
+            if (unresolved2nd.ok) {
+              const dataUnresolved2nd = await unresolved2nd.json();
+              if (dataUnresolved2nd.status === "ok" && Array.isArray(dataUnresolved2nd.violations)) {
+                unresolvedAll.push(
+                  ...dataUnresolved2nd.violations.map((v) => ({ ...v, isUnresolved: true })),
+                );
+              }
+            }
+
+            if (unresolvedSummer.ok) {
+              const dataUnresolvedSummer = await unresolvedSummer.json();
+              if (dataUnresolvedSummer.status === "ok" && Array.isArray(dataUnresolvedSummer.violations)) {
+                unresolvedAll.push(
+                  ...dataUnresolvedSummer.violations.map((v) => ({ ...v, isUnresolved: true })),
+                );
+              }
+            }
+          } catch (err) {
+            console.warn(`Error loading violations for ${year}:`, err);
+          }
+        }
+
+        setAllUnresolvedViolations(unresolvedAll);
+
+        setAllArchivedViolations(allViolations);
+        console.log(`✓ Loaded ${allViolations.length} total archived violations for global search`);
+      } catch (err) {
+        console.error("Error loading all violations:", err);
+        setAllArchivedViolations([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (isGlobalSearch && schoolYears.length > 0) {
+      loadAllViolations();
+    }
+  }, [isGlobalSearch, schoolYears, allArchivedViolations.length]);
+
+  // Reset unresolved selection when leaving unresolved folder
+  useEffect(() => {
+    if (activeFolder !== "unresolved") {
+      setSelectedUnresolvedYear("");
+    }
+  }, [activeFolder]);
+
+  // Load archived users when users folder is clicked
+  useEffect(() => {
+    const loadArchivedUsersData = async () => {
+      if (activeFolder !== "users") {
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setError("");
+        console.log("Loading archived users...");
+        
+        const response = await fetch("/api/archive/users", {
+          headers: { ...getAuditHeaders() },
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === "ok") {
+          setArchivedUsers(data.archivedUsers || []);
+          console.log(`✓ Loaded ${(data.archivedUsers || []).length} archived users`);
+        } else {
+          setError(data.message || "Failed to load archived users");
+          console.error("Error loading users:", data.message);
+        }
+      } catch (err) {
+        setError("Failed to load archived users: " + err.message);
+        console.error("Error loading users:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadArchivedUsersData();
+  }, [activeFolder]);
+
+  const handleSaveEdit = async (id, updatedRecord) => {
+    try {
+      if (editType === "user") {
+        const response = await fetch(`/api/archive/users/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuditHeaders(),
+          },
+          body: JSON.stringify(updatedRecord),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setArchivedUsers((prev) =>
+            prev.map((u) => (u.id === id ? data.user : u)),
+          );
+          setIsEditOpen(false);
+          setSelectedRow(null);
+        } else {
+          const data = await response.json();
+          setError(data.message || "Failed to save changes");
+        }
+      } else if (editType === "violation") {
+        const response = await fetch(`/api/archive/violations/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuditHeaders(),
+          },
+          body: JSON.stringify(updatedRecord),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setArchivedViolations((prev) =>
+            prev.map((v) => (v.id === id ? data.violation : v)),
+          );
+          setIsEditOpen(false);
+          setSelectedRow(null);
+        } else {
+          const data = await response.json();
+          setError(data.message || "Failed to save changes");
+        }
+      }
+    } catch (err) {
+      setError("Error saving edit: " + err.message);
+    }
   };
 
-  const formatDateTime = (date, time) => {
-    return (
-      <span>
-        <b>{date}</b>
-        <br />
-        <span className="text-xs text-gray-500">{time}</span>
-      </span>
-    );
+  const handleRestoreConfirm = async () => {
+    if (!userToRestore) return;
+
+    try {
+      const response = await fetch(`/api/archive/users/${userToRestore.id}/restore`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+      });
+
+      if (response.ok) {
+        await response.json();
+        // Remove the user from archived list
+        setArchivedUsers((prev) => prev.filter((u) => u.id !== userToRestore.id));
+        setIsRestoreModalOpen(false);
+        setUserToRestore(null);
+        // Show success message
+        setError("");
+      } else {
+        const data = await response.json();
+        setError(data.message || "Failed to restore user");
+      }
+    } catch (err) {
+      setError("Error restoring user: " + err.message);
+    }
   };
 
-  const dataSample = Array.from({ length: 20 }).map((_, i) => ({
-    id: i + 1,
-    date: formatDateTime("02/02/26", "11:00 AM"),
-    studentName: (
-      <span>
-        <b>Arman Jeresano</b>
-        <br />
-        <span className="text-xs text-gray-500">23-00000</span>
-      </span>
-    ),
-    yearSection: "BSIT - 3B",
-    violation:
-      i % 3 === 0 ? "Academic" : i % 3 === 1 ? "Behavioral" : "Uniform",
-    reportedBy: i % 2 === 0 ? "Jenny Hernandez" : "Edrianne Lumbas",
-    remarks:
-      i % 4 === 0
-        ? "Warning issued"
-        : i % 4 === 1
-          ? "Parent notified"
-          : "Lorem Ipsum",
-    signature: i % 2 === 0 ? "Signed" : "Attach",
-  }));
+  const handleRestoreClick = (user) => {
+    setUserToRestore(user);
+    setIsRestoreModalOpen(true);
+  };
 
-  const [data, setData] = useState(dataSample);
+  // School year management handlers
+  const handleDeleteSchoolYear = async () => {
+    if (!schoolYearToDelete) return;
+
+    try {
+      setIsSchoolYearActionLoading(true);
+      const response = await fetch(`/api/archive/school-years/${schoolYearToDelete}`, {
+        method: "DELETE",
+        headers: { ...getAuditHeaders() },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Remove the school year from the list
+        setSchoolYears((prev) => prev.filter((year) => year !== schoolYearToDelete));
+        // If the deleted year was active, switch to users folder
+        if (activeFolder === schoolYearToDelete) {
+          setActiveFolder("users");
+          setActiveSemester("1ST SEM");
+        }
+        setIsDeleteSchoolYearModalOpen(false);
+        setSchoolYearToDelete(null);
+        setError(""); // Clear any previous errors
+        // Trigger archive completion event to refresh other components
+        window.dispatchEvent(new CustomEvent("archiveCompleted"));
+      } else {
+        const data = await response.json();
+        setError(data.message || "Failed to delete school year");
+      }
+    } catch (err) {
+      setError("Error deleting school year: " + err.message);
+    } finally {
+      setIsSchoolYearActionLoading(false);
+    }
+  };
+
+  const handleRenameSchoolYear = async () => {
+    if (!schoolYearToRename || !newSchoolYearName.trim()) return;
+
+    try {
+      setIsSchoolYearActionLoading(true);
+      const response = await fetch(`/api/archive/school-years/${schoolYearToRename}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+        body: JSON.stringify({ newSchoolYear: newSchoolYearName.trim() }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Update the school year in the list
+        setSchoolYears((prev) => prev.map((year) =>
+          year === schoolYearToRename ? newSchoolYearName.trim() : year
+        ));
+        // If the renamed year was active, update the active folder
+        if (activeFolder === schoolYearToRename) {
+          setActiveFolder(newSchoolYearName.trim());
+        }
+        setIsRenameSchoolYearModalOpen(false);
+        setSchoolYearToRename(null);
+        setNewSchoolYearName("");
+        setError(""); // Clear any previous errors
+        // Trigger archive completion event to refresh other components
+        window.dispatchEvent(new CustomEvent("archiveCompleted"));
+      } else {
+        const data = await response.json();
+        setError(data.message || "Failed to rename school year");
+      }
+    } catch (err) {
+      setError("Error renaming school year: " + err.message);
+    } finally {
+      setIsSchoolYearActionLoading(false);
+    }
+  };
+
+  const handleDeleteSchoolYearClick = (schoolYear) => {
+    setSchoolYearToDelete(schoolYear);
+    setIsDeleteSchoolYearModalOpen(true);
+  };
+
+  const handleRenameSchoolYearClick = (schoolYear) => {
+    setSchoolYearToRename(schoolYear);
+    setNewSchoolYearName(schoolYear);
+    setIsRenameSchoolYearModalOpen(true);
+  };
+
+  // Get all folders (USERS + UNRESOLVED + School Years)
+  const folders = useMemo(
+    () => [
+      { key: "users", label: "USERS" },
+      { key: "unresolved", label: "UNRESOLVED" },
+      ...schoolYears.map((year) => ({
+        key: year,
+        label: `S.Y. ${year}`,
+      })),
+    ],
+    [schoolYears],
+  );
+
+// Prepare data based on active folder or global search
+  const displayData = useMemo(() => {
+    if (!isGlobalSearch) {
+      // Current folder-only search
+      if (activeFolder === "users") {
+        return archivedUsers.map((user) => ({
+          id: user.id,
+          no: "",
+          full_name: user.full_name,
+          name: (
+            <div>
+              <div className="font-semibold">{user.full_name}</div>
+              <div className="text-xs text-gray-400">{user.school_id}</div>
+            </div>
+          ),
+          school_id: user.school_id || user.schoolId || '',
+          email: user.email,
+          program: user.program,
+          yearSection: user.year_section,
+          status: user.status,
+          archivedReason: user.archived_reason,
+          statusDisplay: user.archived_reason ? (
+            <span className="text-red-500 font-medium">{user.archived_reason}</span>
+          ) : user.status === "Graduated" ? (
+            <span className="text-green-700 font-medium">Graduated</span>
+          ) : (
+            user.status
+          ),
+          violationCount: user.violation_count,
+          archivedDate: formatDate(user.archived_at),
+          folder: "USERS",
+          folderKey: "users",
+          recordType: "user",
+          sourceType: "archive",
+          searchableText: `${user.full_name || ""} ${user.school_id || ""} ${user.email || ""} ${user.program || ""} ${user.year_section || ""} ${user.status || ""} ${user.archived_reason || ""}`.toLowerCase(),
+        }));
+      } else {
+        return archivedViolations.map((violation) => {
+          const preservedYearSection =
+            preservedYearSectionByViolationId[violation.id] || violation.year_section;
+          const combinedYearSection = formatProgramYearSection(
+            violation.program,
+            preservedYearSection,
+          );
+
+          return {
+            id: violation.id,
+            no: "",
+            studentName: (
+              <div>
+                <div className="font-semibold">{violation.student_name}</div>
+                <div className="text-xs text-gray-400">{violation.school_id}</div>
+              </div>
+            ),
+            yearSection: combinedYearSection,
+            program: violation.program || '',
+            violation: violation.violation_label,
+            type:
+              violation.violation_category && violation.violation_degree
+                ? `${violation.violation_category} - ${violation.violation_degree}`
+                : "-",
+            reportedBy: violation.reported_by || "-",
+            remarks: violation.remarks || "-",
+            signature: violation.signature_image ? "Signed" : "No Signature",
+            signatureImage: violation.signature_image,
+            date: formatDate(violation.archived_at),
+            archivedAt: violation.archived_at,
+            violationId: violation.id,
+            folder: activeFolder === "unresolved" ? `UNRESOLVED` : `S.Y. ${activeFolder}`,
+            folderKey:
+              activeFolder === "unresolved"
+                ? `unresolved-${selectedUnresolvedYear || violation.school_year || ""}`
+                : activeFolder,
+            status: activeFolder === "unresolved" ? "Unresolved" : "Archived",
+            recordType: "violation",
+            sourceType: violation.sourceType || (violation.isHistoricalWorkbook ? "workbook" : "archive"),
+            isHistoricalWorkbook: Boolean(violation.isHistoricalWorkbook),
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${combinedYearSection || preservedYearSection || violation.year_section || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+          };
+        });
+      }
+    } else {
+      // Global search - combine all data only if loaded
+      const allData = [];
+
+      // Add users from USERS folder, only real entries
+      archivedUsers.forEach((user) => {
+        const hasUser =
+          (user.full_name && user.full_name.trim()) ||
+          (user.school_id && user.school_id.trim()) ||
+          (user.email && user.email.trim());
+        if (!hasUser) return;
+
+        allData.push({
+          id: user.id,
+          no: "",
+          full_name: user.full_name,
+          name: (
+            <div>
+              <div className="font-semibold">{user.full_name}</div>
+              <div className="text-xs text-gray-400">{user.school_id}</div>
+            </div>
+          ),
+          school_id: user.school_id || user.schoolId || '',
+          email: user.email,
+          program: user.program,
+          yearSection: user.year_section,
+          status: user.status,
+          archivedReason: user.archived_reason,
+          statusDisplay: user.archived_reason ? (
+            <span className="text-red-500 font-medium">{user.archived_reason}</span>
+          ) : user.status === "Graduated" ? (
+            <span className="text-green-700 font-medium">Graduated</span>
+          ) : (
+            user.status
+          ),
+          violationCount: user.violation_count,
+          archivedDate: formatDate(user.archived_at),
+          folder: "USERS",
+          folderKey: "users",
+          recordType: "user",
+          sourceType: "archive",
+          // Add searchable text for global search
+          searchableText: `${user.full_name || ""} ${user.school_id || ""} ${user.email || ""} ${user.program || ""} ${user.year_section || ""} ${user.status || ""} ${user.archived_reason || ""}`.toLowerCase(),
+        });
+      });
+
+      // Add violations from all school years only if data is loaded
+      if (allArchivedViolations.length > 0) {
+        allArchivedViolations.forEach((violation) => {
+          const hasViolation =
+            (violation.student_name && violation.student_name.trim()) ||
+            (violation.school_id && violation.school_id.trim());
+          if (!hasViolation) return;
+
+          allData.push({
+            id: violation.id,
+            no: "",
+            studentName: (
+              <div>
+                <div className="font-semibold">{violation.student_name}</div>
+                <div className="text-xs text-gray-400">{violation.school_id}</div>
+              </div>
+            ),
+            yearSection: formatProgramYearSection(violation.program, violation.year_section),
+            program: violation.program || '',
+            violation: violation.violation_label,
+            type:
+              violation.violation_category && violation.violation_degree
+                ? `${violation.violation_category} - ${violation.violation_degree}`
+                : "-",
+            reportedBy: violation.reported_by || "-",
+            remarks: violation.remarks || "-",
+            signature: violation.signature_image ? "Signed" : "No Signature",
+            signatureImage: violation.signature_image,
+            date: formatDate(violation.archived_at),
+            archivedAt: violation.archived_at,
+            violationId: violation.id,
+            folder: `S.Y. ${violation.school_year}`,
+            folderKey: violation.school_year,
+            recordType: "violation",
+            sourceType: violation.sourceType || (violation.isHistoricalWorkbook ? "workbook" : "archive"),
+            isHistoricalWorkbook: Boolean(violation.isHistoricalWorkbook),
+            // Add searchable text for global search
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${formatProgramYearSection(violation.program, violation.year_section) || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+          });
+        });
+      }
+
+      // Add unresolved violations in global search
+      if (allUnresolvedViolations.length > 0) {
+        allUnresolvedViolations.forEach((violation) => {
+          const hasViolation =
+            (violation.student_name && violation.student_name.trim()) ||
+            (violation.school_id && violation.school_id.trim());
+          if (!hasViolation) return;
+
+          allData.push({
+            id: violation.id,
+            no: "",
+            studentName: (
+              <div>
+                <div className="font-semibold">{violation.student_name}</div>
+                <div className="text-xs text-gray-400">{violation.school_id}</div>
+              </div>
+            ),
+            yearSection: formatProgramYearSection(violation.program, violation.year_section),
+            program: violation.program || '',
+            violation: violation.violation_label,
+            type:
+              violation.violation_category && violation.violation_degree
+                ? `${violation.violation_category} - ${violation.violation_degree}`
+                : "-",
+            reportedBy: violation.reported_by || "-",
+            remarks: violation.remarks || "-",
+            signature: violation.signature_image ? "Signed" : "No Signature",
+            signatureImage: violation.signature_image,
+            date: formatDate(violation.archived_at),
+            archivedAt: violation.archived_at,
+            violationId: violation.id,
+            folder: `UNRESOLVED S.Y. ${violation.school_year}`,
+            folderKey: `unresolved-${violation.school_year}`,
+            subFolderKey: violation.school_year,
+            recordType: "violation",
+            sourceType: violation.sourceType || (violation.isHistoricalWorkbook ? "workbook" : "archive"),
+            isHistoricalWorkbook: Boolean(violation.isHistoricalWorkbook),
+            isUnresolved: true,
+            schoolYear: violation.school_year,
+            // Add searchable text for global search
+            searchableText: `${violation.student_name || ""} ${violation.school_id || ""} ${formatProgramYearSection(violation.program, violation.year_section) || ""} ${violation.violation_label || ""} ${violation.violation_category || ""} ${violation.violation_degree || ""} ${violation.reported_by || ""} ${violation.remarks || ""}`.toLowerCase(),
+          });
+        });
+      }
+
+      return allData;
+    }
+  }, [activeFolder, archivedUsers, archivedViolations, allArchivedViolations, isGlobalSearch]);
 
   // Filter function
   const filteredData = useMemo(() => {
-    return data.filter((item) => {
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const studentName =
-          typeof item.studentName === "object"
-            ? item.studentName.props.children[0].props.children
-            : "";
-        const studentId =
-          typeof item.studentName === "object"
-            ? item.studentName.props.children[1].props.children
-            : "";
+    if (isGlobalSearch) {
+      if (!searchQuery.trim()) {
+        return [];
+      }
+    }
+
+    if (!searchQuery) {
+      return displayData.map((item, index) => ({
+        ...item,
+        no: index + 1,
+      }));
+    }
+
+    const query = searchQuery.toLowerCase();
+
+    if (!isGlobalSearch) {
+      // Current folder-only search
+      const filtered = displayData.filter((item) => {
+        const fullText = (item.searchableText || "").toLowerCase();
+        if (!fullText.includes(query)) {
+          return false;
+        }
 
         if (
-          !studentName.toLowerCase().includes(query) &&
-          !studentId.toLowerCase().includes(query) &&
-          !item.yearSection.toLowerCase().includes(query) &&
-          !item.violation.toLowerCase().includes(query)
+          filterType &&
+          item.type &&
+          !item.type.toLowerCase().includes(filterType.toLowerCase())
         ) {
           return false;
         }
+
+        return true;
+      });
+
+      return filtered.map((item, index) => ({
+        ...item,
+        no: index + 1,
+      }));
+    } else {
+      // Global search - only proceed if we have data
+      if (displayData.length === 0) {
+        return [];
       }
 
-      if (filterType && item.violation !== filterType) {
-        return false;
+      // Global search - search across folders and records
+      const matchingFolders = new Set();
+      const matchingRecords = [];
+
+      // Check folder names (including unresolved subfolder suggestions)
+      const allSearchFolders = [
+        ...folders,
+        ...unresolvedSchoolYears.map((year) => ({
+          key: `unresolved-${year}`,
+          label: `UNRESOLVED S.Y. ${year}`,
+        })),
+      ];
+
+      allSearchFolders.forEach((folder) => {
+        if (folder.label.toLowerCase().includes(query)) {
+          matchingFolders.add(folder.key);
+        }
+      });
+
+      // Check records
+      displayData.forEach((item) => {
+        if (item.searchableText && item.searchableText.includes(query)) {
+          matchingRecords.push(item);
+          matchingFolders.add(item.folderKey);
+        }
+      });
+
+      // Combine results: folders with their records
+      const results = [];
+
+      // First, add folders that match the search
+      allSearchFolders.forEach((folder) => {
+        if (matchingFolders.has(folder.key)) {
+          // Add folder header
+          results.push({
+            id: `folder-${folder.key}`,
+            isFolder: true,
+            folderName: folder.label,
+            folderKey: folder.key,
+            no: "",
+          });
+
+          // Add matching records from this folder
+          const folderRecords = matchingRecords.filter((record) => record.folderKey === folder.key);
+          folderRecords.forEach((record) => {
+            results.push({
+              ...record,
+              no: "",
+            });
+          });
+        }
+      });
+
+      return results;
+    }
+  }, [displayData, searchQuery, filterType, isGlobalSearch, folders]);
+
+  // Define columns based on active folder and search mode
+  const columns = useMemo(() => {
+    if (isGlobalSearch && searchQuery) {
+      // Global search columns
+      return [
+        {
+          key: "folderName",
+          label: "Results",
+          render: (value, row) => {
+            if (row.isFolder) {
+              return (
+                <div className="flex items-center gap-2 py-2">
+                  <Folder className="w-5 h-5 text-[#A3AED0]" />
+                  <span className="font-semibold text-[#A3AED0]">{row.folderName}</span>
+                </div>
+              );
+            } else {
+              // Record row
+              return (
+                <div className="ml-6">
+                  {row.recordType === "user" ? (
+                    <div className="flex flex-col">
+                      <div className="font-semibold">{row.full_name}</div>
+                      <div className="text-xs text-gray-400">{row.email}</div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col">
+                      <div className="font-semibold">{row.studentName}</div>
+                      <div className="text-xs text-gray-400">{row.violation}</div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+          },
+        },
+        {
+          key: "details",
+          label: "",
+          render: (value, row) => {
+            if (row.isFolder) {
+              return null;
+            }
+            return row.recordType === "user" ? (
+              <div className="text-sm text-gray-300">
+                <div>Program: {row.program}</div>
+                <div>Status: {row.statusDisplay}</div>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-300">
+                <div>Type: {row.type}</div>
+                <div>Date: {row.date}</div>
+              </div>
+            );
+          },
+        },
+        {
+          key: "actions",
+          label: "",
+          align: "center",
+          render: (_value, row) => {
+            if (row.isFolder) {
+              return (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+                  onClick={() => {
+                    setActiveFolder(row.folderKey);
+                    setIsGlobalSearch(false);
+                    setSearchQuery("");
+                  }}
+                >
+                  <Folder className="w-4 h-4" />
+                  Open Folder
+                </Button>
+              );
+            }
+
+            // Record actions
+            if (row.recordType === "user") {
+              return (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
+                      <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                    <DropdownMenuItem onClick={() => handleEdit(row, "user")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
+                      <Edit className="w-4 h-4" />
+                      <span>Edit</span>
+                    </DropdownMenuItem>
+                    {row.status !== "Graduated" && (
+                      <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Restore</span>
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            } else {
+              if (row.isHistoricalWorkbook || row.sourceType === "workbook") {
+                return (
+                  <span className="text-xs text-gray-400 uppercase tracking-wide">
+                    Imported
+                  </span>
+                );
+              }
+
+              return (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+                  onClick={() => handleEdit(row, "violation")}
+                >
+                  <Edit className="w-4 h-4" />
+                  Edit
+                </Button>
+              );
+            }
+          },
+        },
+      ];
+    } else {
+      // Regular folder view columns
+      if (activeFolder === "users") {
+        return [
+          {
+            key: "no",
+            label: "No",
+            width: "w-10",
+            render: (value) => <span>{value}</span>,
+          },
+          {
+            key: "name",
+            label: "Full Name",
+            render: (value) => value,
+          },
+          {
+            key: "email",
+            label: "Email",
+          },
+          {
+            key: "program",
+            label: "Program",
+          },
+          {
+            key: "yearSection",
+            label: "Program-Year/Section",
+          },
+          {
+            key: "status",
+            label: "Status",
+            render: (value, row) => row.statusDisplay || value,
+          },
+          {
+            key: "violationCount",
+            label: "Violation Count",
+          },
+          {
+            key: "archivedDate",
+            label: "Archived Date",
+          },
+          {
+            key: "actions",
+            label: "",
+            align: "center",
+            render: (_value, row) => (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
+                    <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                  <DropdownMenuItem onClick={() => handleEdit(row, "user")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
+                    <Edit className="w-4 h-4" />
+                    <span>Edit</span>
+                  </DropdownMenuItem>
+                  {row.status !== "Graduated" && (
+                    <DropdownMenuItem onClick={() => handleRestoreClick(row)} className="gap-2 cursor-pointer text-green-700 hover:bg-green-100 hover:text-green-800 focus:bg-green-100 focus:text-green-800">
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Restore</span>
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ),
+          },
+        ];
       }
 
-      if (filterSignature && item.signature !== filterSignature) {
-        return false;
+      if (activeFolder === "unresolved") {
+        return [
+          {
+            key: "no",
+            label: "No",
+            width: "w-10",
+            render: (value) => <span>{value}</span>,
+          },
+          {
+            key: "date",
+            label: "Date",
+            render: (value) => value,
+          },
+          {
+            key: "studentName",
+            label: "Student Name",
+            render: (value) => value,
+          },
+          {
+            key: "yearSection",
+            label: "Year/Section",
+          },
+          {
+            key: "violation",
+            label: "Violation",
+          },
+          {
+            key: "type",
+            label: "Type",
+          },
+          {
+            key: "reportedBy",
+            label: "Reported by",
+          },
+          {
+            key: "remarks",
+            label: "Remarks",
+          },
+          {
+            key: "signature",
+            label: "Signature",
+            render: (_value, row) =>
+              row.signatureImage ? (
+                <div className="flex items-center gap-2">
+                  <img
+                    src={row.signatureImage}
+                    alt="Signature"
+                    className="h-8 w-24 object-contain bg-white rounded border border-gray-200"
+                  />
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="px-3 py-1 h-7 text-xs gap-1"
+                >
+                  Attach
+                </Button>
+              ),
+          },
+          {
+            key: "status",
+            label: "Status",
+            render: (_value, row) => (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="bg-[#A3AED0] text-white px-3 py-1 gap-2 flex items-center"
+                onClick={() => handleClearUnresolved(row)}
+              >
+                <Check className="w-4 h-4" />
+                <span className="font-semibold">Cleared</span>
+              </Button>
+            ),
+          },
+          {
+            key: "actions",
+            label: "",
+            align: "center",
+            render: (_value, row) => (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="inline-flex items-center justify-center rounded-md p-1 hover:bg-[#3D4654] transition-colors">
+                    <MoreVertical className="w-5 h-5 text-[#A3AED0]" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                  <DropdownMenuItem onClick={() => handleEdit(row, "violation")} className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900">
+                    <Edit className="w-4 h-4" />
+                    <span>Edit</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleDeleteArchivedViolation(row)} className="gap-2 cursor-pointer text-red-700 hover:bg-red-100 hover:text-red-800 focus:bg-red-100 focus:text-red-800">
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ),
+          },
+        ];
       }
 
-      return true;
-    });
-  }, [data, searchQuery, filterType, filterSignature]);
+      // Default archive table columns
+      return [
+        {
+          key: "no",
+          label: "No",
+          width: "w-10",
+          render: (value) => <span>{value}</span>,
+        },
+        {
+          key: "date",
+          label: "Date",
+          render: (value) => value,
+        },
+        {
+          key: "studentName",
+          label: "Student Name",
+          render: (value) => value,
+        },
+        {
+          key: "yearSection",
+          label: "Program-Year/Section",
+        },
+        {
+          key: "violation",
+          label: "Violation",
+        },
+        {
+          key: "type",
+          label: "Type",
+        },
+        {
+          key: "reportedBy",
+          label: "Reported by",
+        },
+        {
+          key: "remarks",
+          label: "Remarks",
+        },
+        {
+          key: "signature",
+          label: "Signature",
+          render: (_value, row) =>
+            row.signatureImage ? (
+              <div className="flex items-center gap-2">
+                <img
+                  src={row.signatureImage}
+                  alt="Signature"
+                  className="h-8 w-24 object-contain bg-white rounded border border-gray-200"
+                />
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="px-3 py-1 h-7 text-xs gap-1"
+              >
+                Attach
+              </Button>
+            ),
+        },
+        {
+          key: "actions",
+          label: "",
+          align: "center",
+          render: (_value, row) => (
+              row.isHistoricalWorkbook || row.sourceType === "workbook" ? (
+                <span className="text-xs text-gray-400 uppercase tracking-wide">
+                  Imported
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+                  onClick={() => handleEdit(row, "violation")}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
+                    />
+                  </svg>
+                  Edit
+                </Button>
+              )
+          ),
+        },
+      ];
+    }
+  }, [activeFolder, isGlobalSearch, searchQuery]);
 
-  const columns = [
-    {
-      key: "no",
-      label: "No",
-      width: "w-10",
-      render: (value, row) => {
-        const index = filteredData.findIndex((item) => item.id === row.id);
-        return <span>{index + 1}</span>;
-      },
-    },
-    {
-      key: "date",
-      label: "Date",
-      render: (value) => value,
-    },
-    {
-      key: "studentName",
-      label: "Student Name",
-      render: (value) => value,
-    },
-    { key: "yearSection", label: "Year/Section" },
-    { key: "violation", label: "Violation" },
-    { key: "reportedBy", label: "Reported by" },
-    { key: "remarks", label: "Remarks" },
-    {
-      key: "signature",
-      label: "Signature",
-      render: (value) => (
-        <Button size="sm" variant="secondary" className="px-3 py-1">
-          {value}
-        </Button>
-      ),
-    },
-    {
-      key: "actions",
-      label: "",
-      align: "center",
-      render: (_, row) => (
-        <Button
-          size="sm"
-          variant="secondary"
-          className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
-          onClick={() => handleEdit(row)}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="w-4 h-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15.232 5.232l3.536 3.536M9 13l6.536-6.536a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-2.828 0L9 13zm0 0V17h4"
-            />
-          </svg>
-          Edit
-        </Button>
-      ),
-    },
-  ];
+  const tableTitle = isGlobalSearch
+    ? searchQuery
+      ? `Global Search Results for "${searchQuery}"`
+      : "Global Search (enter keywords to find records)"
+    : activeFolder === "users"
+    ? "Archived Users"
+    : activeFolder === "unresolved"
+    ? selectedUnresolvedYear
+      ? `Unresolved Student Records - S.Y. ${selectedUnresolvedYear} (${activeSemester})`
+      : "Unresolved Student Records - Select a Year"
+    : `Archived Student Records - S.Y. ${activeFolder} (${activeSemester})`;
 
-  const tableTitle =
-    activeFolder === "users"
-      ? "Archived Users"
-      : `Archived Student Records - S.Y. ${activeFolder.replace("-", " - ")} (${activeSemester} Semester)`;
+  const handleClearUnresolved = async (row) => {
+    if (!row?.id) return;
 
-  const handleEdit = (row) => {
+    // Preserve the row's immediate year_section before backend may update student year_section on promotion.
+    const originalYearSection = row.year_section || row.yearSection;
+    const originalProgram = row.program || '';
+    if (originalYearSection) {
+      setPreservedYearSectionByViolationId((prev) => ({
+        ...prev,
+        [row.id]: formatProgramYearSection(originalProgram, originalYearSection) || originalYearSection,
+      }));
+    }
+
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/archive/violations/${row.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuditHeaders(),
+        },
+        body: JSON.stringify({ isUnresolved: false }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.status !== "ok") {
+        throw new Error(data.message || "Failed to clear unresolved record.");
+      }
+
+      // Remove from unresolved in current view immediately
+      setArchivedViolations((items) => items.filter((item) => item.id !== row.id));
+      setAllUnresolvedViolations((items) => items.filter((item) => item.id !== row.id));
+
+      if (data.promotion?.isEligible) {
+        if (data.promotion.promoted) {
+          setArchiveSuccessMessage("Student promotion triggered automatically after clearance.");
+        } else if (data.promotion.graduated) {
+          setArchiveSuccessMessage("Student graduated automatically after all violations cleared.");
+        } else {
+          setArchiveSuccessMessage("Student is eligible and checked for promotion after clearance.");
+        }
+        setTimeout(() => setArchiveSuccessMessage(""), 5000);
+      }
+
+      // preserve year section from archived record before promotion so UI does not show the promoted value in the source archive row
+      const preservedYS = data.preservedYearSection || originalYearSection;
+      if (preservedYS) {
+        setPreservedYearSectionByViolationId((prev) => ({
+          ...prev,
+          [row.id]: formatProgramYearSection(originalProgram, preservedYS) || preservedYS,
+        }));
+      }
+
+      // Keep user in the unresolved folder view when clearing from unresolved items.
+      const destinationYear = selectedUnresolvedYear || row.school_year || activeFolder;
+      const destinationSemester = row.semester || activeSemester;
+
+      // Notify other components but don't force folder navigation from unresolved clear.
+      window.dispatchEvent(
+        new CustomEvent("archiveCompleted", {
+          detail: {
+            source: "unresolved",
+            archivedCount: 1,
+            schoolYear: destinationYear,
+            semester: destinationSemester,
+            preservedYearSections: preservedYS
+              ? { [row.id]: formatProgramYearSection(originalProgram, preservedYS) || preservedYS }
+              : {},
+          },
+        }),
+      );
+    } catch (err) {
+      setError(err.message || "Unable to clear unresolved record.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteArchivedViolation = async (row) => {
+    if (!row?.id) return;
+    if (!window.confirm("Delete this archived violation?")) return;
+
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/archive/violations/${row.id}`, {
+        method: "DELETE",
+        headers: {
+          ...getAuditHeaders(),
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.status !== "ok") {
+        throw new Error(data.message || "Failed to delete record.");
+      }
+
+      setArchivedViolations((items) => items.filter((item) => item.id !== row.id));
+    } catch (err) {
+      setError(err.message || "Unable to delete record.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEdit = (row, type) => {
     setSelectedRow(row);
+    setEditType(type);
     setIsEditOpen(true);
   };
 
   const clearFilters = () => {
     setSearchQuery("");
     setFilterType("");
-    setFilterSignature("");
+    if (isGlobalSearch) {
+      setIsGlobalSearch(false);
+      setAllArchivedViolations([]); // Clear global search data
+    }
   };
+
+  // Export functionality
+  const formatDownloadFileName = (folderType, schoolYear = '', semester = '', isAllRecords = false) => {
+    const sanitize = (text) =>
+      String(text || '')
+        .replace(/[\\/:*?"<>|]/g, '')
+        .trim();
+
+    const dateSegment = formatDateForFileName(new Date());
+    const ext = 'xlsx'; // Default to excel for now, will be overridden by format param
+
+    if (folderType === 'users') {
+      return `Archived_Users_${dateSegment}.${ext}`;
+    } else if (folderType === 'unresolved') {
+      const yearSegment = schoolYear ? `SY${schoolYear}` : 'AllYears';
+      const semesterSegment = semester ? semester.replace(' ', '') : '';
+      return `Unresolved_Violations_${yearSegment}_${semesterSegment}_${dateSegment}.${ext}`;
+    } else {
+      // Archived violations by school year
+      const yearSegment = schoolYear ? `SY${schoolYear}` : 'UnknownYear';
+      const semesterSegment = semester ? semester.replace(' ', '') : '';
+      return `Archived_Violations_${yearSegment}_${semesterSegment}_${dateSegment}.${ext}`;
+    }
+  };
+
+  const getExportTitles = () => {
+    const isUsersFolder = activeFolder === 'users';
+    const isUnresolvedFolder = activeFolder === 'unresolved';
+    const reportTitle = isUsersFolder
+      ? 'ARCHIVED USERS REPORT'
+      : isUnresolvedFolder
+      ? 'UNRESOLVED VIOLATIONS REPORT'
+      : 'ARCHIVED VIOLATIONS REPORT';
+
+    const yearLine = isUsersFolder
+      ? ''
+      : isUnresolvedFolder
+      ? selectedUnresolvedYear
+        ? `S.Y. ${selectedUnresolvedYear}`
+        : ''
+      : activeFolder
+      ? `S.Y. ${activeFolder}`
+      : '';
+
+    const semesterLine =
+      !isUsersFolder && activeSemester ? `(${activeSemester})` : '';
+
+    const exportLabel = isUsersFolder
+      ? 'Archived Users'
+      : isUnresolvedFolder
+      ? 'Unresolved Violations'
+      : 'Archived Violations';
+
+    return { reportTitle, yearLine, semesterLine, exportLabel };
+  };
+
+  const createDownload = async (format) => {
+    if (filteredData.length === 0) {
+      setDownloadAlertMessage("There's no record to export");
+      setShowDownloadAlertModal(true);
+      return;
+    }
+
+    const filename = formatDownloadFileName(
+      activeFolder,
+      activeFolder === 'unresolved' ? selectedUnresolvedYear : activeFolder,
+      activeSemester
+    ).replace('.xlsx', format === 'pdf' ? '.pdf' : '.xlsx');
+
+    const { reportTitle, yearLine, semesterLine, exportLabel } = getExportTitles();
+
+    // Prepare data based on folder type
+    let sheetData = [];
+    let title = reportTitle;
+    let headers = [];
+
+    if (activeFolder === 'users') {
+      title = 'ARCHIVED USERS REPORT';
+      headers = ['No', 'Student No.', 'Full Name', 'Email', 'Program', 'Year/Section', 'Status', 'Violation Count', 'Archived Date'];
+      sheetData = filteredData.map((item, index) => {
+        const statusValue =
+          item.archivedReason ||
+          (typeof item.status === 'string'
+            ? item.status
+            : item.status?.toString?.() || '') ||
+          '';
+
+        const studentNo = (item.school_id || item.schoolId || '').toString().trim();
+        const fullName = item.full_name || '';
+
+        return {
+          'No': index + 1,
+          'Student No.': studentNo,
+          'Full Name': fullName,
+          'Email': item.email || '',
+          'Program': item.program || '',
+          'Year/Section': item.yearSection || '',
+          'Status': statusValue,
+          'Violation Count': item.violationCount || 0,
+          'Archived Date': item.archivedDate || '',
+        };
+      });
+    } else {
+      // Violations (both archived and unresolved)
+      title = activeFolder === 'unresolved' ? 'UNRESOLVED VIOLATIONS REPORT' : 'ARCHIVED VIOLATIONS REPORT';
+      headers = ['No', 'Date', 'Student Name', 'Program-Year/Section', 'Violation', 'Type', 'Reported by', 'Remarks', 'Signature', 'Status'];
+      sheetData = filteredData.map((item, index) => ({
+        'No': index + 1,
+        'Date': item.date || '-',
+        'Student Name': item.studentName?.props?.children?.[0]?.props?.children || item.studentName || '-',
+        'Program-Year/Section': item.yearSection || '-',
+        'Violation': item.violation || '-',
+        'Type': item.type || '-',
+        'Reported by': item.reportedBy || '-',
+        'Remarks': item.remarks || '-',
+        'Signature': item.signatureImage ? 'Signed' : 'No Signature',
+        'Status': item.status || '-',
+      }));
+    }
+
+    if (format === 'excel') {
+      try {
+        const [{ Workbook }, headerImage] = await Promise.all([
+          import('exceljs'),
+          resolveHeaderImage(),
+        ]);
+
+        const workbook = new Workbook();
+        const sheet = workbook.addWorksheet('Archive Report', {
+          views: [{ state: 'frozen', ySplit: 11 }],
+        });
+
+        // Set column widths
+        const columnWidths = activeFolder === 'users'
+          ? [10, 18, 35, 35, 20, 20, 15, 15, 18]
+          : [10, 18, 35, 20, 40, 24, 20, 44, 22, 16];
+        
+        sheet.columns = headers.map((header, index) => ({
+          key: header,
+          width: columnWidths[index] || 20,
+        }));
+
+        const headerCellEnd = String.fromCharCode(65 + headers.length - 1);
+        sheet.mergeCells(`A1:${headerCellEnd}3`);
+
+        if (activeFolder === 'users') {
+          // Users folder: title row 5 and generated row 6
+          sheet.mergeCells(`A5:${headerCellEnd}5`);
+          sheet.mergeCells(`A6:${headerCellEnd}6`);
+        } else {
+          // Violations: full layout with year and semester
+          sheet.mergeCells(`A4:${headerCellEnd}4`);
+          sheet.mergeCells(`A5:${headerCellEnd}5`);
+          sheet.mergeCells(`A6:${headerCellEnd}6`);
+          sheet.mergeCells(`A7:${headerCellEnd}7`);
+        }
+        
+        sheet.pageSetup = {
+          orientation: activeFolder === 'users' ? 'portrait' : 'landscape',
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          paperSize: 'Letter',
+        };
+        sheet.printOptions = {
+          horizontalCentered: true,
+          verticalCentered: false,
+        };
+        
+        sheet.getRow(1).height = 26;
+        sheet.getRow(2).height = 26;
+        sheet.getRow(3).height = 26;
+        
+        if (activeFolder === 'users') {
+          sheet.getRow(4).height = 10;
+          sheet.getRow(5).height = 28;
+          sheet.getRow(6).height = 18;
+          sheet.getRow(7).height = 0.1;
+          sheet.getRow(8).height = 0.1;
+          sheet.getRow(9).height = 0.1;
+          sheet.getRow(10).height = 0.1;
+          sheet.getRow(11).height = 24;
+        } else {
+          sheet.getRow(4).height = 28;
+          sheet.getRow(5).height = 20;
+          sheet.getRow(6).height = 20;
+          sheet.getRow(7).height = 20;
+          sheet.getRow(8).height = 0.1;
+          sheet.getRow(9).height = 0.1;
+          sheet.getRow(10).height = 0.1;
+          sheet.getRow(11).height = 24;
+        }
+
+        // Add header image if available
+        if (headerImage.dataUrl && headerImage.dimensions) {
+          const headerRegionStartCol = 1;
+          const headerRegionEndCol = headers.length;
+          const headerRegionWidthPx = Array.from(
+            { length: headerRegionEndCol - headerRegionStartCol + 1 },
+            (_, index) => {
+              const width = sheet.getColumn(headerRegionStartCol + index).width || 10;
+              return Number(width) * 7.5;
+            },
+          ).reduce((total, width) => total + width, 0);
+          const headerRegionStartPx = Array.from({ length: headerRegionStartCol - 1 }, (_, index) => {
+            const width = sheet.getColumn(index + 1).width || 10;
+            return Number(width) * 7.5;
+          }).reduce((total, width) => total + width, 0);
+          const headerRegionHeightPx = [1, 2, 3].reduce(
+            (total, rowNumber) => total + (Number(sheet.getRow(rowNumber).height || 15) * 1.333),
+            0,
+          );
+          const imageScale = Math.min(
+            (headerRegionWidthPx - 24) / headerImage.dimensions.width,
+            (headerRegionHeightPx - 6) / headerImage.dimensions.height,
+          );
+          const imageWidthPx = Math.max(8, Math.round(headerImage.dimensions.width * imageScale));
+          const imageHeightPx = Math.max(8, Math.round(headerImage.dimensions.height * imageScale));
+          const leftOffsetPx = headerRegionStartPx + Math.max(0, (headerRegionWidthPx - imageWidthPx) / 2) + (activeFolder === 'users' ? 62 : 0);
+          const topOffsetPx = (headerRegionHeightPx - imageHeightPx) / 2;
+
+          const toColCoordinate = (pixelOffset) => {
+            let accumulatedPx = 0;
+            for (let i = 1; i <= headers.length; i += 1) {
+              const colWidth = sheet.getColumn(i).width || 15;
+              const colPx = colWidth * 7.5;
+              if (accumulatedPx + colPx >= pixelOffset) {
+                const offsetInCol = pixelOffset - accumulatedPx;
+                return (i - 1) + offsetInCol / colPx;
+              }
+              accumulatedPx += colPx;
+            }
+            return headers.length - 1;
+          };
+
+          const toRowCoordinate = (pixelOffset) => {
+            let accumulatedPx = 0;
+            for (let i = 1; i <= 3; i += 1) {
+              const rowPx = Number(sheet.getRow(i).height || 15) * 1.333;
+              if (accumulatedPx + rowPx >= pixelOffset) {
+                const offsetInRow = pixelOffset - accumulatedPx;
+                return (i - 1) + offsetInRow / rowPx;
+              }
+              accumulatedPx += rowPx;
+            }
+            return 2;
+          };
+
+          const imageId = workbook.addImage({ base64: headerImage.dataUrl, extension: 'png' });
+          sheet.addImage(imageId, {
+            tl: {
+              col: toColCoordinate(leftOffsetPx),
+              row: toRowCoordinate(topOffsetPx),
+            },
+            ext: {
+              width: imageWidthPx,
+              height: imageHeightPx,
+            },
+          });
+        }
+
+        // Title and subtitle
+        if (activeFolder === 'users') {
+          // Users folder: title in A5 and generated date in A6
+          const titleCell = sheet.getCell('A5');
+          titleCell.value = title;
+          titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: 'FF000000' } };
+          titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+          const generatedCell = sheet.getCell('A6');
+          const generatedDateRaw = new Date();
+          const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
+          const day = generatedDateRaw.getDate();
+          const year = generatedDateRaw.getFullYear();
+          const time = generatedDateRaw.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+          generatedCell.value = `Generated: ${month} ${day}, ${year}, ${time}`;
+          generatedCell.font = { name: 'Calibri', size: 11, color: { argb: 'FF4B5563' } };
+          generatedCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        } else {
+          // Violations layout: title in A4, year in A5, semester in A6, generated in A7
+          const titleCell = sheet.getCell('A4');
+          titleCell.value = title;
+          titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: 'FF000000' } };
+          titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+          const yearCell = sheet.getCell('A5');
+          yearCell.value = yearLine || '';
+          yearCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF1F2937' } };
+          yearCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+          const semesterCell = sheet.getCell('A6');
+          semesterCell.value = semesterLine || '';
+          semesterCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF1F2937' } };
+          semesterCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+          const generatedCell = sheet.getCell('A7');
+          const generatedDateRaw = new Date();
+          const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
+          const day = generatedDateRaw.getDate();
+          const year = generatedDateRaw.getFullYear();
+          const time = generatedDateRaw.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+          generatedCell.value = `Generated: ${month} ${day}, ${year}, ${time}`;
+          generatedCell.font = { name: 'Calibri', size: 11, color: { argb: 'FF4B5563' } };
+          generatedCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        }
+
+        // Header row
+        const headerRow = sheet.getRow(11);
+        headerRow.values = headers;
+        headerRow.height = 24;
+        headerRow.eachCell((cell) => {
+          cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF0F172A' },
+          };
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          };
+        });
+
+        // Data rows
+        const dataRowStart = 12;
+        sheetData.forEach((row, index) => {
+          const excelRow = sheet.getRow(dataRowStart + index);
+          excelRow.values = Object.values(row);
+          excelRow.height = 28;
+
+          excelRow.eachCell((cell, cellNum) => {
+            cell.font = { name: 'Calibri', size: 11, color: { argb: 'FF1F2937' } };
+            // Center align No column and Status column
+            if (cellNum === 1 || (activeFolder !== 'users' && cellNum === 10) || (activeFolder === 'users' && cellNum === 7)) {
+              cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            } else {
+              cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+            }
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+              left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+              bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+              right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            };
+          });
+        });
+
+        // Add signature images for violations
+        if (activeFolder !== 'users') {
+          filteredData.forEach((item, index) => {
+            if (item.signatureImage) {
+              const signatureImageData = item.signatureImage;
+              const signatureColIndex = 9; // Column I (0-indexed as 8, but 1-indexed as 9)
+              const signatureRowIndex = dataRowStart + index;
+
+              const colWidthPx = sheet.getColumn(signatureColIndex).width * 7.5;
+              const rowHeightPx = sheet.getRow(signatureRowIndex).height * 1.333;
+
+              const maxWidth = colWidthPx * 0.8;
+              const maxHeight = rowHeightPx * 0.8;
+              const sigWidth = Math.min(maxWidth, 80);
+              const sigHeight = Math.min(maxHeight, 24);
+
+              const sigLeftOffset = (colWidthPx - sigWidth) / 2;
+              const sigTopOffset = (rowHeightPx - sigHeight) / 2;
+
+              const toColCoordinateForSig = (pixelOffset) => {
+                let remaining = pixelOffset;
+                const colWidth = sheet.getColumn(signatureColIndex).width || 15;
+                const colPx = colWidth * 7.5;
+                if (remaining <= colPx) {
+                  return (signatureColIndex - 1) + remaining / colPx;
+                }
+                return signatureColIndex - 1;
+              };
+
+              const toRowCoordinateForSig = (pixelOffset) => {
+                let remaining = pixelOffset;
+                const rowPx = Number(sheet.getRow(signatureRowIndex).height || 15) * 1.333;
+                if (remaining <= rowPx) {
+                  return (signatureRowIndex - 1) + remaining / rowPx;
+                }
+                return signatureRowIndex - 1;
+              };
+
+              const signatureImageId = workbook.addImage({ base64: signatureImageData, extension: 'png' });
+              sheet.addImage(signatureImageId, {
+                tl: {
+                  col: toColCoordinateForSig(sigLeftOffset),
+                  row: toRowCoordinateForSig(sigTopOffset),
+                },
+                ext: {
+                  width: sigWidth,
+                  height: sigHeight,
+                },
+              });
+
+              // Clear the text in the signature cell since we have an image
+              const signatureCell = sheet.getCell(`${String.fromCharCode(65 + signatureColIndex - 1)}${signatureRowIndex}`);
+              signatureCell.value = '';
+            }
+          });
+        }
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error('Excel export failed', error);
+        alert('Unable to generate Excel download.');
+      }
+    } else if (format === 'pdf') {
+      try {
+        const [{ jsPDF }, { default: autoTable }, headerImage] = await Promise.all([
+          import('jspdf'),
+          import('jspdf-autotable'),
+          resolveHeaderImage(),
+        ]);
+
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const tableMarginLeft = 10;
+        const tableMarginRight = 10;
+        const tableWidth = pageWidth - tableMarginLeft - tableMarginRight;
+        const tableCenterX = tableMarginLeft + tableWidth / 2;
+        let startY = 20;
+
+        // Add header image if available
+        if (headerImage.dataUrl && headerImage.dimensions) {
+          const headerWidth = tableWidth;
+          const headerHeight = (headerImage.dimensions.height * headerWidth) / headerImage.dimensions.width;
+          const headerX = tableMarginLeft;
+          doc.addImage(headerImage.dataUrl, 'PNG', headerX, 10, headerWidth, headerHeight);
+          startY = 10 + headerHeight + 8;
+        }
+
+        const generatedDateRaw = new Date();
+        const month = generatedDateRaw.toLocaleString(undefined, { month: 'long' });
+        const day = generatedDateRaw.getDate();
+        const year = generatedDateRaw.getFullYear();
+        const time = generatedDateRaw.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+        const generatedAt = `Generated: ${month} ${day}, ${year}, ${time}`;
+
+        const titleLines = [title, yearLine, semesterLine].filter(Boolean);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(18);
+        let currentY = startY + 5;
+        titleLines.forEach((line, index) => {
+          doc.setFont('helvetica', index === 0 ? 'bold' : 'normal');
+          doc.setFontSize(index === 0 ? 18 : 12);
+          doc.text(line, tableCenterX, currentY, { align: 'center' });
+          currentY += index === 0 ? 8 : 7;
+        });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(11);
+        doc.text(generatedAt, tableCenterX, currentY + 2, { align: 'center' });
+
+        const rawColumnWidths = activeFolder === 'users'
+          ? [12, 24, 35, 35, 22, 18, 20, 18, 18]
+          : [12, 22, 35, 20, 40, 28, 25, 50, 25, 18];
+        const totalRawWidth = rawColumnWidths.reduce((sum, width) => sum + width, 0);
+        const scaledColumnWidths = rawColumnWidths.map((width) => (width * tableWidth) / totalRawWidth);
+        const tableStartY = currentY + 10;
+
+        // Custom renderer for signature column
+        const didDrawCell = (data) => {
+          if (data.section === 'body' && activeFolder !== 'users') {
+            const signatureColumnIndex = 8; // Signature column index
+            if (data.column.index === signatureColumnIndex) {
+              const item = filteredData[data.row.index];
+              if (item.signatureImage) {
+                const cellWidth = data.cell.width;
+                const cellHeight = data.cell.height;
+                const x = data.cell.x + 1;
+                const y = data.cell.y + 1;
+
+                const maxWidth = cellWidth - 2;
+                const maxHeight = cellHeight - 2;
+                const scale = Math.min(maxWidth / 80, maxHeight / 24, 1);
+                const sigWidth = 80 * scale;
+                const sigHeight = 24 * scale;
+
+                const sigX = x + (maxWidth - sigWidth) / 2;
+                const sigY = y + (maxHeight - sigHeight) / 2;
+
+                doc.addImage(item.signatureImage, 'PNG', sigX, sigY, sigWidth, sigHeight);
+              }
+            }
+          }
+        };
+
+        const bodyData = sheetData.map(row => Object.values(row));
+
+        autoTable(doc, {
+          startY: tableStartY,
+          head: [headers],
+          body: bodyData,
+          theme: 'grid',
+          styles: {
+            fontSize: 8,
+            cellPadding: 2,
+            textColor: [31, 41, 55],
+            halign: 'left',
+            valign: 'middle',
+          },
+          headStyles: {
+            fillColor: [15, 23, 42],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            halign: 'center',
+          },
+          alternateRowStyles: {
+            fillColor: [248, 250, 252],
+          },
+          margin: { left: tableMarginLeft, right: tableMarginRight },
+          tableWidth: tableWidth,
+          columnStyles: activeFolder === 'users' ? {
+            0: { cellWidth: scaledColumnWidths[0], halign: 'center' },
+            1: { cellWidth: scaledColumnWidths[1], halign: 'center' },
+            2: { cellWidth: scaledColumnWidths[2] },
+            3: { cellWidth: scaledColumnWidths[3] },
+            4: { cellWidth: scaledColumnWidths[4] },
+            5: { cellWidth: scaledColumnWidths[5] },
+            6: { cellWidth: scaledColumnWidths[6], halign: 'center' },
+            7: { cellWidth: scaledColumnWidths[7], halign: 'center' },
+            8: { cellWidth: scaledColumnWidths[8], halign: 'center' },
+          } : {
+            0: { cellWidth: scaledColumnWidths[0], halign: 'center' },
+            1: { cellWidth: scaledColumnWidths[1] },
+            2: { cellWidth: scaledColumnWidths[2] },
+            3: { cellWidth: scaledColumnWidths[3] },
+            4: { cellWidth: scaledColumnWidths[4] },
+            5: { cellWidth: scaledColumnWidths[5] },
+            6: { cellWidth: scaledColumnWidths[6] },
+            7: { cellWidth: scaledColumnWidths[7] },
+            8: { cellWidth: scaledColumnWidths[8], halign: 'center' },
+            9: { cellWidth: scaledColumnWidths[9] },
+          },
+          didDrawCell,
+        });
+
+        doc.save(filename);
+      } catch (error) {
+        console.error('PDF export failed', error);
+        alert('Unable to generate PDF download.');
+      }
+    }
+  };
+
+  const confirmDownload = () => {
+    createDownload(downloadFormat);
+    setDownloadModalOpen(false);
+  };
+
+  const confirmDownloadAll = () => {
+    createDownload(downloadAllFormat);
+    setDownloadAllModalOpen(false);
+  };
+
+  const { exportLabel } = getExportTitles();
 
   return (
     <div className="text-white">
@@ -204,119 +2186,268 @@ const Archives = () => {
         <h2 className="text-xl font-bold mb-2 tracking-wide">
           SYSTEM ARCHIVES{" "}
           <span className="font-normal">
-            &gt; {folderList.find((f) => f.key === activeFolder)?.label}
+            &gt;{" "}
+            {folders.find((f) => f.key === activeFolder)?.label ||
+              activeFolder}
           </span>
         </h2>
       </AnimatedContent>
 
-      <AnimatedContent delay={0.1}>
-        <SearchBar
-          placeholder="Search by name, ID, or section..."
-          className="mb-4 w-80"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </AnimatedContent>
+      {error && (
+        <AnimatedContent delay={0.05}>
+          <div className="mb-4 bg-red-500/10 border border-red-500/40 rounded-lg p-4 flex gap-3">
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+            <p className="text-red-300 text-sm">{error}</p>
+          </div>
+        </AnimatedContent>
+      )}
 
-      <AnimatedContent delay={0.2}>
-        <div className="flex gap-4 mb-6">
-          {folderList.map((folder) => (
-            <button
-              key={folder.key}
-              onClick={() => setActiveFolder(folder.key)}
-              className={`flex flex-col items-center px-4 py-2 rounded-xl transition-all duration-200 ${
-                activeFolder === folder.key
-                  ? "bg-[#23262B] border-2 border-[#A3AED0]"
-                  : "bg-[#23262B]/60 border border-transparent"
-              } hover:bg-[#23262B]`}
+      <AnimatedContent delay={0.1}>
+        <div className="flex gap-4 items-center mb-4">
+          <SearchBar
+            placeholder={
+              isGlobalSearch
+                ? "Search across all folders..."
+                : `Search ${activeFolder === "users" ? "users" : "records"}...`
+            }
+            className="flex-1 w-80"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-300">Search Mode:</label>
+            <Button
+              size="sm"
+              variant={isGlobalSearch ? "default" : "secondary"}
+              className={`px-3 py-1 text-xs ${
+                isGlobalSearch
+                  ? "bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8]"
+                  : "bg-[#3D4654] hover:bg-[#4d5664] text-gray-300"
+              } border-0`}
+              onClick={() => {
+                setIsGlobalSearch(true);
+                setSearchQuery(""); // Clear search when switching to global
+                setFilterType("");
+              }}
             >
-              <span className="mb-2 flex items-center justify-center w-[80px] h-[60px]">
-                <Folder className="w-8 h-8" />
-              </span>
-              <span className="text-xs font-semibold text-white">
-                {folder.label}
-              </span>
-            </button>
-          ))}
+              Global
+            </Button>
+            <Button
+              size="sm"
+              variant={!isGlobalSearch ? "default" : "secondary"}
+              className={`px-3 py-1 text-xs ${
+                !isGlobalSearch
+                  ? "bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8]"
+                  : "bg-[#3D4654] hover:bg-[#4d5664] text-gray-300"
+              } border-0`}
+              onClick={() => {
+                setIsGlobalSearch(false);
+                setSearchQuery(""); // Clear search when switching to current folder
+                setFilterType("");
+                setAllArchivedViolations([]); // Clear global search data
+              }}
+            >
+              Current Folder
+            </Button>
+          </div>
         </div>
       </AnimatedContent>
 
-      {activeFolder !== "users" && (
+      <AnimatedContent delay={0.2}>
+        {!isGlobalSearch && (
+          <div className="flex gap-4 mb-6 overflow-x-auto pb-2">
+            {folders.map((folder) => (
+              <div key={folder.key} className="relative flex-shrink-0">
+                <button
+                  onClick={() => {
+                    setActiveFolder(folder.key);
+                    setActiveSemester("1ST SEM");
+                    if (folder.key === "unresolved") {
+                      setSelectedUnresolvedYear("");
+                    }
+                  }}
+                  className={`flex flex-col items-center px-4 py-2 rounded-xl transition-all duration-200 ${folder.key !== "users" ? "pr-8" : ""} ${
+                    activeFolder === folder.key
+                      ? "bg-[#23262B] border-2 border-[#A3AED0]"
+                      : "bg-[#23262B]/60 border border-transparent"
+                  } hover:bg-[#23262B]`}
+                >
+                  <span className="mb-2 flex items-center justify-center w-[80px] h-[60px]">
+                    <Folder className="w-8 h-8" />
+                  </span>
+                  <span className="text-xs font-semibold text-white text-center w-full">
+                    {folder.label}
+                  </span>
+                </button>
+                {folder.key !== "users" && folder.key !== "unresolved" && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="absolute top-1 right-1 w-6 h-6 hover:bg-[#3D4654] rounded-full flex items-center justify-center transition-colors">
+                        <MoreVertical className="w-3 h-3 text-[#A3AED0]" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="bg-white/95 border-white/20 text-gray-800">
+                      <DropdownMenuItem
+                        onClick={() => handleRenameSchoolYearClick(folder.key)}
+                        className="gap-2 cursor-pointer text-gray-900 hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900"
+                      >
+                        <Edit className="w-4 h-4" />
+                        <span>Rename</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => handleDeleteSchoolYearClick(folder.key)}
+                        className="gap-2 cursor-pointer text-red-700 hover:bg-red-100 hover:text-red-800 focus:bg-red-100 focus:text-red-800"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Delete</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </AnimatedContent>
+
+      {activeFolder === "unresolved" && !selectedUnresolvedYear && !isGlobalSearch && (
+        <AnimatedContent delay={0.25}>
+          <div className="bg-[#23262B] rounded-xl p-6 mb-4">
+            <h3 className="text-lg font-bold mb-3">Unresolved Violations</h3>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {schoolYears.length === 0 ? (
+                <div className="text-gray-300 col-span-full">No school year yet.</div>
+              ) : (
+                schoolYears
+                  .filter((year) =>
+                    searchQuery
+                      ? String(year).toLowerCase().includes(searchQuery.toLowerCase())
+                      : true,
+                  )
+                  .map((year) => (
+                    <button
+                      key={year}
+                      onClick={() => {
+                        setSelectedUnresolvedYear(year);
+                        setActiveSemester("1ST SEM");
+                      }}
+                      className="rounded-lg border border-[#A3AED0]/30 p-3 text-left text-sm text-white hover:border-[#A3AED0]"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Folder className="w-4 h-4 text-[#A3AED0]" />
+                        <span className="font-semibold">S.Y. {year}</span>
+                      </div>
+                    </button>
+                  ))
+              )}
+              {schoolYears.length > 0 &&
+                !schoolYears.some((year) =>
+                  searchQuery
+                    ? String(year).toLowerCase().includes(searchQuery.toLowerCase())
+                    : true,
+                ) && (
+                  <div className="text-gray-300 col-span-full">
+                    No matching school year found.
+                  </div>
+                )}
+            </div>
+          </div>
+        </AnimatedContent>
+      )}
+
+      {activeFolder !== "users" && !isGlobalSearch && selectedUnresolvedYear && (
+        <AnimatedContent delay={0.25}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Folder className="w-4 h-4 text-[#A3AED0]" />
+              <span className="text-sm text-[#A3AED0] font-semibold">UNRESOLVED</span>
+              <span className="text-sm text-gray-300">&gt;</span>
+              <span className="text-sm text-white font-medium">S.Y. {selectedUnresolvedYear}</span>
+            </div>
+            <Button
+              size="xs"
+              variant="secondary"
+              className="px-2 py-1"
+              onClick={() => {
+                setSelectedUnresolvedYear("");
+              }}
+            >
+              Back to Year Selection
+            </Button>
+          </div>
+          <TableTabs
+            tabs={semesterTabs}
+            activeTab={activeSemester}
+            onTabChange={setActiveSemester}
+            className="mb-4"
+          />
+        </AnimatedContent>
+      )}
+
+      {activeFolder !== "users" && !isGlobalSearch && activeFolder !== "unresolved" && (
         <AnimatedContent delay={0.25}>
           <TableTabs
             tabs={semesterTabs}
             activeTab={activeSemester}
             onTabChange={setActiveSemester}
-            className="mb-2"
+            className="mb-4"
           />
         </AnimatedContent>
       )}
 
-      <AnimatedContent delay={0.4}>
-        <div className="bg-[#23262B] rounded-xl p-6">
+      {!(activeFolder === "unresolved" && !selectedUnresolvedYear && !isGlobalSearch) && (
+        <AnimatedContent delay={0.4}>
+          <div className="bg-[#23262B] rounded-xl p-6">
           <h3 className="text-lg font-bold mb-4">{tableTitle}</h3>
+
+          {archiveSuccessMessage && (
+            <div className="mb-3 px-3 py-2 text-sm border border-emerald-300 bg-emerald-50 text-emerald-700 rounded">
+              {archiveSuccessMessage}
+            </div>
+          )}
 
           <div className="flex justify-between items-center mb-4">
             <div className="flex gap-2">
-              {/* Violation Type Filter */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className={`gap-2 ${filterType ? "bg-[#4A9B9B] hover:bg-[#5aabab]" : "bg-[#A3AED0] hover:bg-[#b3bde0]"} text-[#23262B] border-0 transition-colors`}
-                  >
-                    <Filter className="w-4 h-4" />
-                    {filterType || "Violation Type"}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setFilterType("")}>
-                    All Types
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setFilterType("Academic")}>
-                    Academic
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setFilterType("Behavioral")}>
-                    Behavioral
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setFilterType("Uniform")}>
-                    Uniform
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* Signature Status Filter */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className={`gap-2 ${filterSignature ? "bg-[#4A9B9B] hover:bg-[#5aabab]" : "bg-[#A3AED0] hover:bg-[#b3bde0]"} text-[#23262B] border-0 transition-colors`}
-                  >
-                    <Filter className="w-4 h-4" />
-                    {filterSignature || "Signature Status"}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setFilterSignature("")}>
-                    All
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setFilterSignature("Signed")}
-                  >
-                    Signed
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setFilterSignature("Attach")}
-                  >
-                    Attach
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {activeFolder !== "users" && !isGlobalSearch && (
+                <>
+                  {/* Violation Type Filter */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className={`gap-2 ${
+                          filterType
+                            ? "bg-[#4A9B9B] hover:bg-[#5aabab]"
+                            : "bg-[#A3AED0] hover:bg-[#b3bde0]"
+                        } text-[#23262B] border-0 transition-colors`}
+                      >
+                        <Filter className="w-4 h-4" />
+                        {filterType || "Violation Type"}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                      <DropdownMenuItem onClick={() => setFilterType("")}>
+                        All Types
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterType("Minor Offenses")}
+                      >
+                        Minor Offenses
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterType("Major Offenses")}
+                      >
+                        Major Offenses
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
+              )}
 
               {/* Clear Filters Button */}
-              {(filterType || filterSignature || searchQuery) && (
+              {(filterType || searchQuery || isGlobalSearch) && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -332,29 +2463,283 @@ const Archives = () => {
               variant="secondary"
               size="sm"
               className="gap-2 bg-[#A3AED0] text-[#23262B] hover:bg-[#8B9CB8] border-0"
+              onClick={() => setDownloadModalOpen(true)}
             >
               <Download className="w-4 h-4" /> Export
             </Button>
           </div>
 
-          <DataTable columns={columns} data={filteredData} />
-
-          {filteredData.length === 0 && (
+          {isLoading ? (
             <div className="text-center py-8 text-gray-400">
-              No records found matching the filters.
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400"></div>
+              <p className="mt-2">
+                {isGlobalSearch && searchQuery
+                  ? "Searching across all folders..."
+                  : "Loading data..."}
+              </p>
             </div>
+          ) : filteredData.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              {isGlobalSearch
+                ? searchQuery
+                  ? "No matching folders or records found"
+                  : "Enter a search term to start global search"
+                : activeFolder === "users"
+                ? "No archived users found"
+                : activeFolder === "unresolved"
+                ? "No unresolved records found for this semester."
+                : "No records found for this semester."}
+            </div>
+          ) : (
+            <DataTable
+              columns={columns}
+              data={filteredData}
+              onRowClick={(row) => {
+                if (!isGlobalSearch) return;
+
+                if (row.isFolder) {
+                  if (row.folderKey && row.folderKey.startsWith("unresolved-")) {
+                    setActiveFolder("unresolved");
+                    setSelectedUnresolvedYear(row.folderKey.replace("unresolved-", ""));
+                    setActiveSemester("1ST SEM");
+                  } else {
+                    setActiveFolder(row.folderKey);
+                    if (row.folderKey !== "users" && row.folderKey !== "unresolved") {
+                      setActiveSemester("1ST SEM");
+                    }
+                  }
+                  setIsGlobalSearch(false);
+                  setSearchQuery("");
+                  setFilterType("");
+                  return;
+                }
+
+                if (row.recordType === "user") {
+                  setActiveFolder("users");
+                } else if (row.recordType === "violation") {
+                  if (row.isUnresolved) {
+                    setActiveFolder("unresolved");
+                    setSelectedUnresolvedYear(row.schoolYear || "");
+                    setActiveSemester("1ST SEM");
+                  } else {
+                    setActiveFolder(row.folderKey || "users");
+                    setActiveSemester("1ST SEM");
+                  }
+                }
+                setIsGlobalSearch(false);
+                setSearchQuery("");
+                setFilterType("");
+              }}
+            />
           )}
         </div>
       </AnimatedContent>
+      )}
+
+      <Modal
+        isOpen={downloadModalOpen}
+        onClose={() => setDownloadModalOpen(false)}
+        title="Export Archive Report"
+        size="sm"
+      >
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm text-gray-200">Choose a format for exporting the current table view.</p>
+          </div>
+          <div className="border border-gray-400 rounded px-3 py-2">
+            <label className="text-xs text-gray-300">Rows to export: {filteredData.length}</label>
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-white">Format</div>
+            <select
+              value={downloadFormat}
+              onChange={(e) => setDownloadFormat(e.target.value)}
+              className="w-full rounded-lg border border-gray-500/30 bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
+            >
+              <option value="excel">Excel (.xlsx)</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </div>
+        </div>
+        <ModalFooter>
+          <button
+            type="button"
+            className="rounded-lg border border-white/20 px-4 py-2 text-sm text-white hover:bg-white/10"
+            onClick={() => setDownloadModalOpen(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200"
+            onClick={confirmDownload}
+          >
+            Export
+          </button>
+        </ModalFooter>
+      </Modal>
+
+      <AlertModal
+        isOpen={showDownloadAlertModal}
+        onClose={() => setShowDownloadAlertModal(false)}
+        title="Export unavailable"
+        message={downloadAlertMessage}
+        confirmLabel="Okay"
+      />
 
       {/* Edit Modal */}
       {isEditOpen && selectedRow && (
         <EditArchiveModal
           isOpen={isEditOpen}
-          onClose={() => setIsEditOpen(false)}
+          onClose={() => {
+            setIsEditOpen(false);
+            setSelectedRow(null);
+          }}
           record={selectedRow}
+          editType={editType}
           onSave={handleSaveEdit}
         />
+      )}
+
+      {/* Restore Confirmation Modal */}
+      {isRestoreModalOpen && userToRestore && (
+        <Modal isOpen={isRestoreModalOpen} onClose={() => { setIsRestoreModalOpen(false); setUserToRestore(null); }} showCloseButton={true}>
+          <div className="bg-transparent">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-yellow-400" />
+              <h3 className="text-lg font-bold text-white">Confirm Restore</h3>
+            </div>
+            <p className="text-gray-300 mb-6">
+              Are you sure you want to restore{" "}
+              <span className="font-semibold text-[#A3AED0]">
+                {userToRestore.full_name || userToRestore.name}
+              </span>
+              ? This user will be moved back to the user management and become active again.
+            </p>
+            <ModalFooter>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setIsRestoreModalOpen(false);
+                  setUserToRestore(null);
+                }}
+                className="bg-[#3D4654] hover:bg-[#4d5664] border-0"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleRestoreConfirm}
+                className="bg-green-700 hover:bg-green-800 border-0 text-white"
+              >
+                Restore User
+              </Button>
+            </ModalFooter>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete School Year Confirmation Modal */}
+      {isDeleteSchoolYearModalOpen && schoolYearToDelete && (
+        <Modal
+          isOpen={isDeleteSchoolYearModalOpen}
+          onClose={() => {
+            setIsDeleteSchoolYearModalOpen(false);
+            setSchoolYearToDelete(null);
+          }}
+          showCloseButton={true}
+        >
+          <div className="bg-transparent">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-red-400" />
+              <h3 className="text-lg font-bold text-white">Confirm Delete School Year</h3>
+            </div>
+            <p className="text-gray-300 mb-6">
+              Are you sure you want to delete the school year{" "}
+              <span className="font-semibold text-[#A3AED0]">
+                S.Y. {schoolYearToDelete}
+              </span>
+              ? This will permanently delete all archived violation records for this school year and cannot be undone.
+            </p>
+            <ModalFooter>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setIsDeleteSchoolYearModalOpen(false);
+                  setSchoolYearToDelete(null);
+                }}
+                className="bg-[#3D4654] hover:bg-[#4d5664] border-0"
+                disabled={isSchoolYearActionLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDeleteSchoolYear}
+                disabled={isSchoolYearActionLoading}
+                className="bg-red-700 hover:bg-red-800 border-0 text-white"
+              >
+                {isSchoolYearActionLoading ? "Deleting..." : "Delete School Year"}
+              </Button>
+            </ModalFooter>
+          </div>
+        </Modal>
+      )}
+
+      {/* Rename School Year Modal */}
+      {isRenameSchoolYearModalOpen && schoolYearToRename && (
+        <Modal
+          isOpen={isRenameSchoolYearModalOpen}
+          onClose={() => {
+            setIsRenameSchoolYearModalOpen(false);
+            setSchoolYearToRename(null);
+            setNewSchoolYearName("");
+          }}
+          showCloseButton={true}
+        >
+          <div className="bg-transparent">
+            <div className="flex items-center gap-3 mb-4">
+              <Edit className="w-6 h-6 text-blue-400" />
+              <h3 className="text-lg font-bold text-white">Rename School Year</h3>
+            </div>
+            <p className="text-gray-300 mb-4">
+              Enter a new name for the school year{" "}
+              <span className="font-semibold text-[#A3AED0]">
+                S.Y. {schoolYearToRename}
+              </span>
+              :
+            </p>
+            <div className="mb-6">
+              <input
+                type="text"
+                value={newSchoolYearName}
+                onChange={(e) => setNewSchoolYearName(e.target.value)}
+                className="w-full px-3 py-2 bg-[#23262B] border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-[#A3AED0]"
+                placeholder="e.g., 2024-2025"
+                disabled={isSchoolYearActionLoading}
+              />
+            </div>
+            <ModalFooter>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setIsRenameSchoolYearModalOpen(false);
+                  setSchoolYearToRename(null);
+                  setNewSchoolYearName("");
+                }}
+                className="bg-[#3D4654] hover:bg-[#4d5664] border-0"
+                disabled={isSchoolYearActionLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleRenameSchoolYear}
+                disabled={isSchoolYearActionLoading || !newSchoolYearName.trim() || newSchoolYearName.trim() === schoolYearToRename}
+                className="bg-blue-700 hover:bg-blue-800 border-0 text-white"
+              >
+                {isSchoolYearActionLoading ? "Renaming..." : "Rename School Year"}
+              </Button>
+            </ModalFooter>
+          </div>
+        </Modal>
       )}
     </div>
   );

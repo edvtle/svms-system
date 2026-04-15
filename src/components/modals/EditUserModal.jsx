@@ -5,10 +5,13 @@ import Button from "@/components/ui/Button";
 
 const EditUserModal = ({ isOpen, onClose, user, onSave }) => {
   const [formData, setFormData] = useState({
-    studentName: "",
+    username: "",
+    firstName: "",
+    lastName: "",
     schoolId: "",
     program: "",
     yearSection: "",
+    email: "",
     status: "",
     violationCount: 0,
   });
@@ -16,12 +19,15 @@ const EditUserModal = ({ isOpen, onClose, user, onSave }) => {
   useEffect(() => {
     if (user) {
       setFormData({
-        studentName: user.studentName,
-        schoolId: user.schoolId,
-        program: user.program,
-        yearSection: user.yearSection,
-        status: user.status,
-        violationCount: user.violationCount,
+        username: user.username || "",
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+        schoolId: user.schoolId || "",
+        program: user.program || "",
+        yearSection: user.yearSection || "",
+        email: user.email || "",
+        status: user.status || "",
+        violationCount: Number(user.violationCount) || 0,
       });
     }
   }, [user]);
@@ -31,10 +37,12 @@ const EditUserModal = ({ isOpen, onClose, user, onSave }) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSave(user.id, formData);
-    onClose();
+    const saved = await onSave(user.id, formData);
+    if (saved) {
+      onClose();
+    }
   };
 
   return (
@@ -51,27 +59,64 @@ const EditUserModal = ({ isOpen, onClose, user, onSave }) => {
           <GlassInput
             label={
               <span className="text-sm font-medium text-white mb-2">
-                Student Name
+                First Name
               </span>
             }
-            name="studentName"
-            value={formData.studentName}
+            name="firstName"
+            value={formData.firstName}
             onChange={handleChange}
-            placeholder="Student Name"
+            placeholder="First Name"
           />
           <GlassInput
             label={
               <span className="text-sm font-medium text-white mb-2">
-                Student ID
+                Last Name
+              </span>
+            }
+            name="lastName"
+            value={formData.lastName}
+            onChange={handleChange}
+            placeholder="Last Name"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <GlassInput
+            label={
+              <span className="text-sm font-medium text-white mb-2">
+                School ID
               </span>
             }
             name="schoolId"
             value={formData.schoolId}
             onChange={handleChange}
-            placeholder="Student ID"
+            placeholder="School ID"
+          />
+          <GlassInput
+            label={
+              <span className="text-sm font-medium text-white mb-2">
+                Username
+              </span>
+            }
+            name="username"
+            value={formData.username}
+            onChange={handleChange}
+            placeholder="Username"
           />
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <GlassInput
+            label={
+              <span className="text-sm font-medium text-white mb-2">
+                Year/Section
+              </span>
+            }
+            name="yearSection"
+            value={formData.yearSection}
+            onChange={handleChange}
+            placeholder="Year/Section"
+          />
           <div>
             <label className="block text-sm font-medium text-white mb-2">
               Program
@@ -87,18 +132,23 @@ const EditUserModal = ({ isOpen, onClose, user, onSave }) => {
               <option value="BSCS">BSCS</option>
             </select>
           </div>
+        </div>
+
+        <div className="mb-4">
           <GlassInput
             label={
-              <span className="text-sm font-medium text-white mb-2">
-                Year/Section
-              </span>
+              <span className="text-sm font-medium text-white mb-2">Email</span>
             }
-            name="yearSection"
-            value={formData.yearSection}
+            name="email"
+            type="email"
+            value={formData.email}
             onChange={handleChange}
-            placeholder="Year/Section"
+            placeholder="student@email.com"
           />
         </div>
+
+        <ModalDivider />
+
         <div className="mb-4">
           <label className="block text-sm font-medium text-white mb-2">
             Status

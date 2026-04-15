@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Card from "../../components/ui/Card";
 import AdminStatCard from "../../components/ui/AdminStatCard";
@@ -7,7 +7,9 @@ import {
   ViewStudentsButton,
 } from "../../components/ui/QuickActionButton";
 import AnimatedContent from "../../components/ui/AnimatedContent";
-import Modal from "../../components/ui/Modal";
+import Modal, { ModalFooter } from "../../components/ui/Modal";
+import AlertModal from "../../components/ui/AlertModal";
+import Button from "../../components/ui/Button";
 import DataTable, {
   TableCellText,
   TableCellDateTime,
@@ -31,6 +33,55 @@ import {
   Search,
 } from "lucide-react";
 
+const RANKING_EXPORT_HEADER_IMAGE_PATH = "/plpasig_header.jpg";
+const EXCEL_HEADER_IMAGE_WIDTH_PX = 560;
+const EXCEL_HEADER_IMAGE_HEIGHT_PX = 82;
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const getDataUrlDimensions = (dataUrl) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+    };
+    img.onerror = () => reject(new Error("Unable to load image dimensions."));
+    img.src = dataUrl;
+  });
+
+const parseYearSection = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) {
+    return { year: "", section: "", normalized: "" };
+  }
+
+  const compact = normalized.replace(/\s+/g, "");
+  const match = compact.match(/^(\d+)([A-Z]+)?$/);
+  if (match) {
+    return {
+      year: match[1] || "",
+      section: match[2] || "",
+      normalized: `${match[1] || ""}${match[2] || ""}`,
+    };
+  }
+
+  const yearMatch = compact.match(/\d+/);
+  const sectionMatch = compact.match(/[A-Z]+/);
+  const year = yearMatch ? yearMatch[0] : "";
+  const section = sectionMatch ? sectionMatch[0] : "";
+  return {
+    year,
+    section,
+    normalized: `${year}${section}`,
+  };
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const [selectedSemester, setSelectedSemester] = useState("1st Sem");
@@ -40,129 +91,40 @@ const Dashboard = () => {
   const [programFilter, setProgramFilter] = useState("All");
   const [yearLevelFilter, setYearLevelFilter] = useState("All");
   const [sectionFilter, setSectionFilter] = useState("All");
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(true);
+  const [activityModalOpen, setActivityModalOpen] = useState(false);
+  const [violationMetrics, setViolationMetrics] = useState({
+    activeViolations: 0,
+    warningStudents: 0,
+    atRiskStudents: 0,
+    highRiskStudents: 0,
+  });
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
+  const [metricComparisons, setMetricComparisons] = useState({
+    activeViolations: 0,
+    warningStudents: 0,
+    atRiskStudents: 0,
+    highRiskStudents: 0,
+  });
+  const [trendBySemester, setTrendBySemester] = useState({
+    "1st Sem": [],
+    "2nd Sem": [],
+    Summer: [],
+  });
 
-  const rankingData = [
-    {
-      rank: "01",
-      name: "Jenny Hernandez",
-      violations: 6,
-      color: "bg-cyan-500",
-      id: "23-0001",
-      program: "BSIT",
-      year: "1",
-      section: "A",
-    },
-    {
-      rank: "02",
-      name: "Edrianne Lumabas",
-      violations: 4,
-      color: "bg-cyan-500",
-      id: "23-0002",
-      program: "BSIT",
-      year: "2",
-      section: "A",
-    },
-    {
-      rank: "03",
-      name: "Jessa Marie Balnig",
-      violations: 3,
-      color: "bg-cyan-500",
-      id: "23-0003",
-      program: "BSCS",
-      year: "3",
-      section: "A",
-    },
-    {
-      rank: "04",
-      name: "Raiza Roces",
-      violations: 2,
-      color: "bg-cyan-500",
-      id: "23-0004",
-      program: "BSCS",
-      year: "4",
-      section: "A",
-    },
-    {
-      rank: "05",
-      name: "Lyrika Hermozo",
-      violations: 5,
-      color: "bg-cyan-500",
-      id: "23-0005",
-      program: "BSIT",
-      year: "1",
-      section: "B",
-    },
-    {
-      rank: "06",
-      name: "Mark Anthony Reyes",
-      violations: 4,
-      color: "bg-cyan-500",
-      id: "23-0006",
-      program: "BSCS",
-      year: "2",
-      section: "B",
-    },
-    {
-      rank: "07",
-      name: "Samantha Cruz",
-      violations: 3,
-      color: "bg-cyan-500",
-      id: "23-0007",
-      program: "BSIT",
-      year: "3",
-      section: "C",
-    },
-    {
-      rank: "08",
-      name: "Carlos Mendoza",
-      violations: 2,
-      color: "bg-cyan-500",
-      id: "23-0008",
-      program: "BSCS",
-      year: "4",
-      section: "C",
-    },
-    {
-      rank: "09",
-      name: "Angelica Santos",
-      violations: 4,
-      color: "bg-cyan-500",
-      id: "23-0009",
-      program: "BSIT",
-      year: "1",
-      section: "D",
-    },
-    {
-      rank: "10",
-      name: "Ramon Garcia",
-      violations: 3,
-      color: "bg-cyan-500",
-      id: "23-0010",
-      program: "BSCS",
-      year: "2",
-      section: "D",
-    },
-    {
-      rank: "11",
-      name: "Patricia Lopez",
-      violations: 2,
-      color: "bg-cyan-500",
-      id: "23-0011",
-      program: "BSIT",
-      year: "3",
-      section: "E",
-    },
-    {
-      rank: "12",
-      name: "Jose Martinez",
-      violations: 1,
-      color: "bg-cyan-500",
-      id: "23-0012",
-      program: "BSCS",
-      year: "4",
-      section: "E",
-    },
-  ];
+  const [rankingData, setRankingData] = useState([]);
+  const [isLoadingRanking, setIsLoadingRanking] = useState(true);
+  const [showRankingExportModal, setShowRankingExportModal] = useState(false);
+  const [showRankingExportAlertModal, setShowRankingExportAlertModal] = useState(false);
+  const [showTrendExportConfirmModal, setShowTrendExportConfirmModal] = useState(false);
+  const [showTrendExportAlertModal, setShowTrendExportAlertModal] = useState(false);
+  const [trendExportAlertMessage, setTrendExportAlertMessage] = useState("");
+  const [rankingExportFormat, setRankingExportFormat] = useState("excel");
+  const [isExportingRanking, setIsExportingRanking] = useState(false);
+  const [isTrendExporting, setIsTrendExporting] = useState(false);
+  const [rankingExportAlertMessage, setRankingExportAlertMessage] = useState("");
+  const [hoveredTrendPointIndex, setHoveredTrendPointIndex] = useState(null);
 
   const filteredRankingData = rankingData.filter((student) => {
     const matchesSearch = student.name
@@ -177,48 +139,1294 @@ const Dashboard = () => {
     return matchesSearch && matchesProgram && matchesYear && matchesSection;
   });
 
-  const recentActivity = [
+  const programFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(rankingData.map((student) => String(student.program || "").trim()).filter(Boolean))).sort(),
+    [rankingData],
+  );
+
+  const yearFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(rankingData.map((student) => String(student.year || "").trim()).filter(Boolean))).sort(
+        (a, b) => Number(a) - Number(b),
+      ),
+    [rankingData],
+  );
+
+  const sectionFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(rankingData.map((student) => String(student.section || "").trim()).filter(Boolean))).sort(),
+    [rankingData],
+  );
+
+  const rankingExportRows = useMemo(
+    () =>
+      filteredRankingData.map((student) => ({
+        rank: student.rank,
+        studentName: student.name,
+        schoolId: student.id,
+        program: student.program,
+        year: student.year,
+        section: student.section,
+        totalViolations: student.violations,
+      })),
+    [filteredRankingData],
+  );
+
+  const selectedTrendData = useMemo(() => {
+    const fallback = [
+      { label: "Sep", count: 0 },
+      { label: "Oct", count: 0 },
+      { label: "Nov", count: 0 },
+    ];
+    const trendRows = Array.isArray(trendBySemester?.[selectedSemester])
+      ? trendBySemester[selectedSemester]
+      : [];
+
+    if (!trendRows.length) {
+      return fallback;
+    }
+
+    const monthOrderBySemester = {
+      "1st Sem": ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov"],
+      "2nd Sem": ["Dec", "Jan", "Feb", "Mar", "Apr", "May"],
+      Summer: ["May", "Jun"],
+    };
+
+    const aggregate = trendRows.reduce((acc, row) => {
+      const label = String(row?.label || "").trim();
+      if (!label) return acc;
+      const count = Number(row?.count) || 0;
+      acc.set(label, (acc.get(label) || 0) + count);
+      return acc;
+    }, new Map());
+
+    const ordered = monthOrderBySemester[selectedSemester] || [];
+    const normalized = ordered
+      .filter((label) => aggregate.has(label))
+      .map((label) => ({ label, count: aggregate.get(label) || 0 }));
+
+    return normalized.length ? normalized : trendRows;
+  }, [selectedSemester, trendBySemester]);
+
+  const selectedTrendRawData = useMemo(
+    () => (Array.isArray(trendBySemester?.[selectedSemester]) ? trendBySemester[selectedSemester] : []),
+    [selectedSemester, trendBySemester],
+  );
+
+  const selectedTrendGraphData = useMemo(
+    () => selectedTrendData.map((entry) => Number(entry.count) || 0),
+    [selectedTrendData],
+  );
+
+  const trendSummary = useMemo(() => {
+    if (!selectedTrendData.length) {
+      return {
+        first: { label: "-", count: 0 },
+        peak: { label: "-", count: 0 },
+        latest: { label: "-", count: 0 },
+      };
+    }
+
+    const first = selectedTrendData[0];
+    const latest = selectedTrendData[selectedTrendData.length - 1];
+    const peak = selectedTrendData.reduce((best, current) =>
+      (Number(current.count) || 0) > (Number(best.count) || 0) ? current : best,
+    );
+
+    return { first, peak, latest };
+  }, [selectedTrendData]);
+
+  const dashboardTrendChart = useMemo(() => {
+    const width = 920;
+    const height = 250;
+    const left = 38;
+    const right = 18;
+    const top = 14;
+    const bottom = 36;
+    const chartWidth = width - left - right;
+    const chartHeight = height - top - bottom;
+
+    const counts = selectedTrendData.map((entry) => Number(entry.count) || 0);
+    const maxCount = Math.max(...counts, 1);
+    const maxTick = Math.max(4, Math.ceil(maxCount / 2) * 2);
+    const yTicks = Array.from(
+      new Set([0, Math.round(maxTick / 3), Math.round((maxTick * 2) / 3), maxTick]),
+    ).sort((a, b) => a - b);
+
+    const points = counts.map((count, index) => {
+      const x =
+        counts.length <= 1
+          ? left + chartWidth / 2
+          : left + (index / (counts.length - 1)) * chartWidth;
+      const y = top + ((maxTick - count) / maxTick) * chartHeight;
+      return {
+        x,
+        y,
+        count,
+        label: selectedTrendData[index]?.label || "",
+        index,
+      };
+    });
+
+    const linePath = points.reduce((acc, point, index) => {
+      if (index === 0) {
+        return `M ${point.x} ${point.y}`;
+      }
+      const prev = points[index - 1];
+      const cpX = (prev.x + point.x) / 2;
+      return `${acc} Q ${cpX} ${prev.y}, ${point.x} ${point.y}`;
+    }, "");
+
+    const areaPath = points.length
+      ? `${linePath} L ${points[points.length - 1].x} ${top + chartHeight} L ${points[0].x} ${top + chartHeight} Z`
+      : "";
+
+    const peakIndex = counts.reduce((bestIndex, value, index) =>
+      value > counts[bestIndex] ? index : bestIndex,
+    0);
+
+    const startPoint = points[0] || { label: "-", count: 0 };
+    const peakPoint = points[peakIndex] || startPoint;
+    const latestPoint = points[points.length - 1] || startPoint;
+
+    return {
+      width,
+      height,
+      left,
+      right,
+      top,
+      bottom,
+      chartHeight,
+      yTicks,
+      points,
+      linePath,
+      areaPath,
+      startPoint,
+      peakPoint,
+      latestPoint,
+      peakIndex,
+    };
+  }, [selectedTrendData]);
+
+  const createTrendChartCanvasImage = useCallback(() => {
+    const width = 920;
+    const height = 300;
+    const scale = 3;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Unable to create export canvas.");
+    }
+    ctx.scale(scale, scale);
+    ctx.imageSmoothingEnabled = true;
+
+    const wrapperRadius = 24;
+    const wrapperBackground = "#222427";
+    const wrapperBorder = "rgba(255,255,255,0.12)";
+    const chartGridColor = "rgba(255,255,255,0.12)";
+    const chartLineColor = "#d1d5db";
+    const chartPointFill = "#e5e7eb";
+    const chartPointBorder = "#222427";
+    const gradientTopColor = "rgba(209,213,219,0.08)";
+    const gradientBottomColor = "rgba(34,36,39,0)";
+    const labelTextColor = "rgba(156,163,175,0.9)";
+    const summaryBg = "rgba(255,255,255,0.05)";
+    const summaryBorder = "rgba(255,255,255,0.1)";
+    const summaryLabelColor = "#9ca3af";
+    const summaryValueColor = "#ffffff";
+
+    const drawRoundedRect = (x, y, w, h, r) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    };
+
+    // Card background
+    drawRoundedRect(0.5, 0.5, width - 1, height - 1, wrapperRadius);
+    ctx.fillStyle = wrapperBackground;
+    ctx.fill();
+
+    const svgOffsetY = 6;
+    const chartTop = svgOffsetY + dashboardTrendChart.top;
+    const chartBottom = svgOffsetY + dashboardTrendChart.top + dashboardTrendChart.chartHeight + 20;
+    const chartLeft = dashboardTrendChart.left + 48;
+    const chartRight = width - dashboardTrendChart.right - 12;
+    const chartWidth = chartRight - chartLeft;
+
+    const counts = dashboardTrendChart.points.map((point) => point.count);
+    const maxTick = Math.max(...dashboardTrendChart.yTicks, 1);
+    const minorStep = Math.max(1, Math.ceil(maxTick / 10));
+    const detailedYValues = [];
+    for (let value = 0; value <= maxTick; value += minorStep) {
+      detailedYValues.push(value);
+    }
+    if (detailedYValues[detailedYValues.length - 1] !== maxTick) {
+      detailedYValues.push(maxTick);
+    }
+
+    const minorValueSet = new Set(detailedYValues);
+    const majorValueSet = new Set(dashboardTrendChart.yTicks);
+
+    const exportPoints = counts.map((count, index) => {
+      const x =
+        counts.length <= 1
+          ? chartLeft + chartWidth / 2
+          : chartLeft + (index / (counts.length - 1)) * chartWidth;
+      const y = chartTop + ((maxTick - count) / maxTick) * dashboardTrendChart.chartHeight;
+      return {
+        x,
+        y,
+        count,
+        label: dashboardTrendChart.points[index]?.label || "",
+      };
+    });
+
+    // Horizontal guide lines for all detailed Y values
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 0.5;
+    detailedYValues.forEach((value) => {
+      const y =
+        chartTop +
+        ((maxTick - value) / maxTick) *
+          dashboardTrendChart.chartHeight;
+      ctx.beginPath();
+      ctx.moveTo(chartLeft, y);
+      ctx.lineTo(chartRight, y);
+      ctx.stroke();
+    });
+
+    // Major Y-axis labels (bold)
+    ctx.font = "bold 11px Inter, sans-serif";
+    ctx.fillStyle = labelTextColor;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    dashboardTrendChart.yTicks.forEach((tick) => {
+      const y =
+        chartTop +
+        ((maxTick - tick) / maxTick) *
+          dashboardTrendChart.chartHeight;
+      ctx.fillText(String(tick), chartLeft - 24, y);
+    });
+
+    // Minor Y-axis values (smaller, lighter)
+    ctx.font = "10px Inter, sans-serif";
+    ctx.fillStyle = "rgba(156,163,175,0.55)";
+    detailedYValues.forEach((value) => {
+      if (majorValueSet.has(value)) return;
+      const y =
+        chartTop +
+        ((maxTick - value) / maxTick) *
+          dashboardTrendChart.chartHeight;
+      ctx.fillText(String(value), chartLeft - 24, y);
+    });
+
+    // Axis lines
+    ctx.strokeStyle = chartGridColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(chartLeft, chartTop);
+    ctx.lineTo(chartLeft, chartBottom);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(chartLeft, chartBottom);
+    ctx.lineTo(chartRight, chartBottom);
+    ctx.stroke();
+
+    // X-axis labels
+    ctx.font = "11px Inter, sans-serif";
+    ctx.fillStyle = labelTextColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    exportPoints.forEach((point) => {
+      const label = point.label || "";
+      ctx.fillText(label, point.x, chartBottom + 12);
+    });
+
+    // Axis titles
+    ctx.font = "12px Inter, sans-serif";
+    ctx.fillStyle = labelTextColor;
+    ctx.textAlign = "center";
+    ctx.fillText("Months", (chartLeft + chartRight) / 2, chartBottom + 32);
+
+    ctx.save();
+    ctx.translate(chartLeft - 50, chartTop + dashboardTrendChart.chartHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Violations", 0, 0);
+    ctx.restore();
+
+    ctx.font = "11px Inter, sans-serif";
+    ctx.fillStyle = labelTextColor;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    if (exportPoints.length) {
+      const gradient = ctx.createLinearGradient(0, chartTop, 0, chartBottom);
+      gradient.addColorStop(0, gradientTopColor);
+      gradient.addColorStop(1, gradientBottomColor);
+
+      ctx.beginPath();
+      exportPoints.forEach((point, index) => {
+        const x = point.x;
+        const y = point.y;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          const prev = exportPoints[index - 1];
+          const cpX = (prev.x + point.x) / 2;
+          ctx.quadraticCurveTo(cpX, prev.y, x, y);
+        }
+      });
+      const lastPoint = exportPoints[exportPoints.length - 1];
+      const firstPoint = exportPoints[0];
+      ctx.lineTo(lastPoint.x, chartBottom);
+      ctx.lineTo(firstPoint.x, chartBottom);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      ctx.beginPath();
+      exportPoints.forEach((point, index) => {
+        const x = point.x;
+        const y = point.y;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          const prev = exportPoints[index - 1];
+          const cpX = (prev.x + point.x) / 2;
+          ctx.quadraticCurveTo(cpX, prev.y, x, y);
+        }
+      });
+      ctx.strokeStyle = chartLineColor;
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.stroke();
+
+      exportPoints.forEach((point, index) => {
+        const x = point.x;
+        const y = point.y;
+        const radius = index === exportPoints.length - 1 ? 4.8 : 3.4;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = chartPointFill;
+        ctx.fill();
+        ctx.strokeStyle = chartPointBorder;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+      });
+    }
+
+    return canvas.toDataURL("image/png");
+  }, [dashboardTrendChart]);
+
+  const renderInteractiveTrendChart = useCallback(
+    ({ compact = false } = {}) => {
+      const activePoint =
+        dashboardTrendChart.points[hoveredTrendPointIndex] ||
+        dashboardTrendChart.latestPoint;
+      const chartHeightClass = compact ? "h-[80%]" : "h-[83%]";
+      const wrapperHeightClass = compact ? "h-[286px]" : "h-[472px]";
+
+      const handlePointerMove = (event) => {
+        const svg = event.currentTarget;
+        const rect = svg.getBoundingClientRect();
+        const ratioX = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+        const xInViewBox = ratioX * dashboardTrendChart.width;
+
+        if (!dashboardTrendChart.points.length) {
+          setHoveredTrendPointIndex(null);
+          return;
+        }
+
+        const nearestIndex = dashboardTrendChart.points.reduce(
+          (bestIndex, point, index) => {
+            const currentDistance = Math.abs(point.x - xInViewBox);
+            const bestDistance = Math.abs(
+              dashboardTrendChart.points[bestIndex].x - xInViewBox,
+            );
+            return currentDistance < bestDistance ? index : bestIndex;
+          },
+          0,
+        );
+
+        setHoveredTrendPointIndex(nearestIndex);
+      };
+
+      return (
+        <div
+          className={`relative ${wrapperHeightClass} overflow-hidden rounded-2xl border border-white/15 bg-white/5 backdrop-blur-xl px-6 pt-6 pb-12 shadow-[0_8px_24px_rgba(0,0,0,0.18)]`}
+        >
+          <svg
+            viewBox={`0 0 ${dashboardTrendChart.width} ${dashboardTrendChart.height}`}
+            className={`${chartHeightClass} w-full rounded-xl`}
+            preserveAspectRatio="none"
+            onMouseMove={handlePointerMove}
+            onMouseLeave={() => setHoveredTrendPointIndex(null)}
+          >
+            <defs>
+              <linearGradient id="dashTrendArea" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#a3aed0" stopOpacity="0.13" />
+                <stop offset="100%" stopColor="#232528" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+
+            {dashboardTrendChart.yTicks.map((tick) => {
+              const y =
+                dashboardTrendChart.top +
+                ((dashboardTrendChart.yTicks[dashboardTrendChart.yTicks.length - 1] - tick) /
+                  dashboardTrendChart.yTicks[dashboardTrendChart.yTicks.length - 1]) *
+                  dashboardTrendChart.chartHeight;
+              return (
+                <g key={`tick-${tick}`}>
+                  <line
+                    x1={dashboardTrendChart.left}
+                    y1={y}
+                    x2={dashboardTrendChart.width - dashboardTrendChart.right}
+                    y2={y}
+                    stroke="rgba(209,213,219,0.10)"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={dashboardTrendChart.left - 16}
+                    y={y + 5}
+                    fill="rgba(163,174,208,0.7)"
+                    fontSize="11"
+                    fontWeight="500"
+                    textAnchor="end"
+                  >
+                    {tick}
+                  </text>
+                </g>
+              );
+            })}
+
+            {dashboardTrendChart.areaPath ? (
+              <path d={dashboardTrendChart.areaPath} fill="url(#dashTrendArea)" />
+            ) : null}
+
+            {dashboardTrendChart.linePath ? (
+              <path
+                d={dashboardTrendChart.linePath}
+                fill="none"
+                stroke="#a3aed0"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ filter: "drop-shadow(0 2px 6px #A3AED0AA)" }}
+              />
+            ) : null}
+
+            {dashboardTrendChart.points.map((point, index) => {
+              const isActive = activePoint?.index === index;
+              const isLatest = index === dashboardTrendChart.points.length - 1;
+              return (
+                <g key={`point-${index}`}>
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r={9}
+                    fill="transparent"
+                  />
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r={isActive ? 6.2 : isLatest ? 5.2 : 3.8}
+                    fill="#a3aed0"
+                    stroke="#232528"
+                    strokeWidth={isActive ? 2.2 : 1.6}
+                    fillOpacity={isActive ? 1 : 0.85}
+                  />
+                </g>
+              );
+            })}
+
+            {activePoint ? (() => {
+              // Tooltip content
+              const valueText = `${activePoint.count} violations`;
+              const labelText = activePoint.label;
+              // Estimate width based on text length (SVG doesn't auto-size rects)
+              const paddingX = 16;
+              const paddingY = 10;
+              const valueFontSize = 14;
+              const labelFontSize = 12;
+              const valueWidth = valueText.length * valueFontSize * 0.6;
+              const labelWidth = labelText.length * labelFontSize * 0.6;
+              const tooltipWidth = Math.max(100, valueWidth, labelWidth) + paddingX * 2;
+              const tooltipHeight = valueFontSize + labelFontSize + paddingY * 2 + 6;
+              const tooltipX = Math.max(
+                dashboardTrendChart.left + 12,
+                Math.min(
+                  dashboardTrendChart.width - dashboardTrendChart.right - tooltipWidth,
+                  activePoint.x,
+                ),
+              );
+              const tooltipY = Math.max(16, Math.min(dashboardTrendChart.height - 70, activePoint.y - tooltipHeight - 8));
+              return (
+                <g>
+                  <rect
+                    x={tooltipX}
+                    y={tooltipY}
+                    rx="10"
+                    width={tooltipWidth}
+                    height={tooltipHeight}
+                    fill="#232528"
+                    stroke="#a3aed0"
+                    strokeWidth="1.2"
+                    pointerEvents="none"
+                    style={{ filter: "drop-shadow(0 2px 8px #23252888)" }}
+                  />
+                  <text
+                    x={tooltipX + tooltipWidth / 2}
+                    y={tooltipY + paddingY + valueFontSize}
+                    fill="#f3f4f6"
+                    fontSize={valueFontSize}
+                    fontWeight="700"
+                    pointerEvents="none"
+                    textAnchor="middle"
+                    style={{ letterSpacing: '0.01em' }}
+                  >
+                    {valueText}
+                  </text>
+                  <text
+                    x={tooltipX + tooltipWidth / 2}
+                    y={tooltipY + paddingY + valueFontSize + labelFontSize + 4}
+                    fill="#a3aed0"
+                    fontSize={labelFontSize}
+                    fontWeight="500"
+                    pointerEvents="none"
+                    textAnchor="middle"
+                  >
+                    {labelText}
+                  </text>
+                </g>
+              );
+            })() : null}
+          </svg>
+
+          <div className="grid grid-cols-3 gap-4 px-7 pt-7 mt-3 pb-2">
+            <div className="text-center">
+              <p className="text-[11px] font-medium tracking-wide text-gray-400 mb-2">Start ({dashboardTrendChart.startPoint.label || "-"})</p>
+              <p className="text-xl font-semibold text-white">{dashboardTrendChart.startPoint.count || 0}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-[11px] font-medium tracking-wide text-gray-400 mb-2">Peak ({dashboardTrendChart.peakPoint.label || "-"})</p>
+              <p className="text-xl font-semibold text-white">{dashboardTrendChart.peakPoint.count || 0}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-[11px] font-medium tracking-wide text-gray-400 mb-2">Latest ({dashboardTrendChart.latestPoint.label || "-"})</p>
+              <p className="text-xl font-semibold text-white">{dashboardTrendChart.latestPoint.count || 0}</p>
+            </div>
+          </div>
+        </div>
+      );
+    },
+    [dashboardTrendChart, hoveredTrendPointIndex],
+  );
+
+  const formatDateForFileName = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const downloadBlob = useCallback((blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const resolveRankingHeaderImage = useCallback(async () => {
+    const response = await fetch(RANKING_EXPORT_HEADER_IMAGE_PATH);
+    if (!response.ok) {
+      throw new Error(`Required header image not found: ${RANKING_EXPORT_HEADER_IMAGE_PATH}`);
+    }
+
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    const dimensions = await getDataUrlDimensions(dataUrl);
+    const extension = String(blob.type || "").toLowerCase().includes("png") ? "png" : "jpeg";
+    const imageFormat = extension === "png" ? "PNG" : "JPEG";
+
+    return { dataUrl, dimensions, extension, imageFormat };
+  }, []);
+
+  const exportRankingAsExcel = useCallback(async () => {
+    const [{ Workbook }, { dataUrl, dimensions, extension }] = await Promise.all([
+      import("exceljs"),
+      resolveRankingHeaderImage(),
+    ]);
+
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet("Violation Ranking", {
+      views: [{ state: "frozen", ySplit: 6 }],
+    });
+
+    sheet.columns = [
+      { key: "rank", width: 10 },
+      { key: "studentName", width: 30 },
+      { key: "schoolId", width: 18 },
+      { key: "program", width: 14 },
+      { key: "year", width: 10 },
+      { key: "section", width: 10 },
+      { key: "totalViolations", width: 20 },
+    ];
+
+    sheet.mergeCells("A1:G3");
+    sheet.mergeCells("A4:G4");
+    sheet.mergeCells("A5:G5");
+    sheet.getRow(1).height = 26;
+    sheet.getRow(2).height = 26;
+    sheet.getRow(3).height = 26;
+    sheet.getRow(4).height = 28;
+    sheet.getRow(5).height = 18;
+
+    const titleCell = sheet.getCell("A4");
+    titleCell.value = "Student Violation Ranking Report";
+    titleCell.font = { name: "Calibri", size: 18, bold: true };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const subtitleCell = sheet.getCell("A5");
+    subtitleCell.value = `Generated: ${new Date().toLocaleString()}`;
+    subtitleCell.font = { name: "Calibri", size: 11, color: { argb: "FF4B5563" } };
+    subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    const headerRegionWidthPx = sheet.columns.reduce(
+      (total, column) => total + Number(column.width || 10) * 7.5,
+      0,
+    );
+    const headerRegionHeightPx = [1, 2, 3].reduce(
+      (total, rowNumber) => total + Number(sheet.getRow(rowNumber).height || 15) * 1.333,
+      0,
+    );
+    const imageScale = Math.min(
+      (headerRegionWidthPx - 24) / dimensions.width,
+      (headerRegionHeightPx - 6) / dimensions.height,
+      EXCEL_HEADER_IMAGE_WIDTH_PX / dimensions.width,
+      EXCEL_HEADER_IMAGE_HEIGHT_PX / dimensions.height,
+      1,
+    );
+    const imageWidthPx = Math.max(8, Math.round(dimensions.width * imageScale));
+    const imageHeightPx = Math.max(8, Math.round(dimensions.height * imageScale));
+    const leftOffsetPx = Math.max((headerRegionWidthPx - imageWidthPx) / 2, 0);
+    const topOffsetPx = Math.max((headerRegionHeightPx - imageHeightPx) / 2, 0);
+
+    const toColCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let colIndex = 0; colIndex < sheet.columns.length; colIndex += 1) {
+        const colPx = Number(sheet.columns[colIndex]?.width || 10) * 7.5;
+        if (remaining <= colPx) {
+          return colIndex + remaining / colPx;
+        }
+        remaining -= colPx;
+      }
+      return sheet.columns.length - 1;
+    };
+
+    const toRowCoordinate = (pixelOffset) => {
+      let remaining = pixelOffset;
+      for (let rowIndex = 1; rowIndex <= 3; rowIndex += 1) {
+        const rowPx = Number(sheet.getRow(rowIndex).height || 15) * 1.333;
+        if (remaining <= rowPx) {
+          return rowIndex - 1 + remaining / rowPx;
+        }
+        remaining -= rowPx;
+      }
+      return 2;
+    };
+
+    const imageId = workbook.addImage({ base64: dataUrl, extension });
+    sheet.addImage(imageId, {
+      tl: {
+        col: toColCoordinate(leftOffsetPx),
+        row: toRowCoordinate(topOffsetPx),
+      },
+      ext: {
+        width: imageWidthPx,
+        height: imageHeightPx,
+      },
+    });
+
+    const headerRowNumber = 6;
+    const headerRow = sheet.getRow(headerRowNumber);
+    headerRow.values = [
+      "Rank",
+      "Student Name",
+      "School ID",
+      "Program",
+      "Year",
+      "Section",
+      "Total Violations",
+    ];
+    headerRow.height = 24;
+
+    headerRow.eachCell((cell) => {
+      cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0F172A" },
+      };
+      cell.alignment = {
+        horizontal: "left",
+        vertical: "middle",
+        wrapText: true,
+        indent: 1,
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFCBD5E1" } },
+        left: { style: "thin", color: { argb: "FFCBD5E1" } },
+        bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+        right: { style: "thin", color: { argb: "FFCBD5E1" } },
+      };
+    });
+
+    const firstDataRow = headerRowNumber + 1;
+    for (const [index, row] of rankingExportRows.entries()) {
+      const excelRowNumber = firstDataRow + index;
+      const excelRow = sheet.getRow(excelRowNumber);
+      excelRow.values = [
+        row.rank,
+        row.studentName,
+        row.schoolId,
+        row.program,
+        row.year,
+        row.section,
+        row.totalViolations,
+      ];
+      excelRow.height = 28;
+
+      excelRow.eachCell((cell) => {
+        cell.font = { name: "Calibri", size: 11, color: { argb: "FF1F2937" } };
+        cell.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+          wrapText: true,
+          indent: 1,
+        };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFCBD5E1" } },
+          left: { style: "thin", color: { argb: "FFCBD5E1" } },
+          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+          right: { style: "thin", color: { argb: "FFCBD5E1" } },
+        };
+        if (excelRowNumber % 2 === 0) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" },
+          };
+        }
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    downloadBlob(blob, `student_violation_ranking_${formatDateForFileName()}.xlsx`);
+  }, [downloadBlob, rankingExportRows, resolveRankingHeaderImage]);
+
+  const exportRankingAsPdf = useCallback(async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const { dataUrl, dimensions, imageFormat } = await resolveRankingHeaderImage();
+    const tableMarginLeft = 10;
+    const tableMarginRight = 10;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const tableWidth = pageWidth - tableMarginLeft - tableMarginRight;
+    const baseColumnWidths = [14, 58, 30, 24, 16, 16, 28];
+    const baseTotalWidth = baseColumnWidths.reduce((sum, width) => sum + width, 0);
+    const widthScale = tableWidth / baseTotalWidth;
+    const tableColumnWidths = baseColumnWidths.map((width) => width * widthScale);
+    const tableCenterX = tableMarginLeft + tableWidth / 2;
+    let startY = 22;
+
+    if (dataUrl) {
+      const headerWidth = tableWidth;
+      const headerHeight = (dimensions.height * headerWidth) / dimensions.width;
+      const headerX = tableMarginLeft;
+      doc.addImage(dataUrl, imageFormat, headerX, 8, headerWidth, headerHeight);
+      startY = 8 + headerHeight + 8;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("Student Violation Ranking Report", tableCenterX, startY, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, tableCenterX, startY + 5, {
+      align: "center",
+    });
+
+    autoTable(doc, {
+      startY: startY + 9,
+      head: [["Rank", "Student Name", "School ID", "Program", "Year", "Section", "Total Violations"]],
+      body: rankingExportRows.map((row) => [
+        row.rank,
+        row.studentName,
+        row.schoolId,
+        row.program,
+        row.year,
+        row.section,
+        row.totalViolations,
+      ]),
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.4,
+        textColor: [31, 41, 55],
+        halign: "left",
+        valign: "middle",
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        halign: "left",
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      margin: { left: tableMarginLeft, right: tableMarginRight },
+      tableWidth,
+      columnStyles: {
+        0: { cellWidth: tableColumnWidths[0] },
+        1: { cellWidth: tableColumnWidths[1] },
+        2: { cellWidth: tableColumnWidths[2] },
+        3: { cellWidth: tableColumnWidths[3] },
+        4: { cellWidth: tableColumnWidths[4] },
+        5: { cellWidth: tableColumnWidths[5] },
+        6: { cellWidth: tableColumnWidths[6] },
+      },
+    });
+
+    doc.save(`student_violation_ranking_${formatDateForFileName()}.pdf`);
+  }, [rankingExportRows, resolveRankingHeaderImage]);
+
+  const exportTrendAsPdf = useCallback(async () => {
+    if (!selectedTrendRawData.length) {
+      setTrendExportAlertMessage("There's no record to export");
+      setShowTrendExportAlertModal(true);
+      return;
+    }
+
+    setIsTrendExporting(true);
+    try {
+      const [{ jsPDF }] = await Promise.all([import("jspdf")]);
+
+        const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const { dataUrl, dimensions, imageFormat } = await resolveRankingHeaderImage();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 20;
+      const contentWidth = pageWidth - margin * 2;
+      const centerX = pageWidth / 2;
+      let cursorY = margin;
+
+      if (dataUrl) {
+        const headerWidth = contentWidth;
+        const headerHeight = (dimensions.height * headerWidth) / dimensions.width;
+        doc.addImage(dataUrl, imageFormat, margin, cursorY, headerWidth, headerHeight);
+        cursorY += headerHeight + 10;
+      }
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text("Violation Trends Over the Semester", centerX, cursorY, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Semester: ${selectedSemester}`, centerX, cursorY + 8, { align: "center" });
+      doc.text(`Generated: ${new Date().toLocaleString()}`, centerX, cursorY + 16, { align: "center" });
+      cursorY += 28;
+
+      const chartImageDataUrl = createTrendChartCanvasImage();
+      const chartImageWidth = contentWidth * 0.86;
+      const chartImageHeight = (260 / 920) * chartImageWidth;
+      const chartImageLeft = margin + (contentWidth - chartImageWidth) / 2;
+      const chartImageTop = cursorY;
+      doc.addImage(chartImageDataUrl, "PNG", chartImageLeft, chartImageTop, chartImageWidth, chartImageHeight);
+
+      const statsY = chartImageTop + chartImageHeight + 12;
+      const statsSpacing = chartImageWidth / 3;
+      const statsX = [chartImageLeft + statsSpacing * 0.5, chartImageLeft + statsSpacing * 1.5, chartImageLeft + statsSpacing * 2.5];
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Start (${trendSummary.first.label || "-"})`, statsX[0], statsY, { align: "center" });
+      doc.text(`Peak (${trendSummary.peak.label || "-"})`, statsX[1], statsY, { align: "center" });
+      doc.text(`Latest (${trendSummary.latest.label || "-"})`, statsX[2], statsY, { align: "center" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      const valueY = statsY + 6;
+      doc.text(String(trendSummary.first.count || 0), statsX[0], valueY, { align: "center" });
+      doc.text(String(trendSummary.peak.count || 0), statsX[1], valueY, { align: "center" });
+      doc.text(String(trendSummary.latest.count || 0), statsX[2], valueY, { align: "center" });
+
+      const cleanedSemester = selectedSemester
+        .replace(/\s+/g, "_")
+        .replace(/[^a-zA-Z0-9_-]/g, "");
+      doc.save(`violation_trends_${cleanedSemester}_${formatDateForFileName()}.pdf`);
+    } catch (error) {
+      setTrendExportAlertMessage(error?.message || "Unable to export report.");
+      setShowTrendExportAlertModal(true);
+    } finally {
+      setIsTrendExporting(false);
+    }
+  }, [selectedTrendData, selectedSemester, resolveRankingHeaderImage, selectedTrendRawData, createTrendChartCanvasImage, trendSummary]);
+
+  const handleConfirmRankingExport = async () => {
+    if (rankingExportRows.length === 0) {
+      setRankingExportAlertMessage("There's no record to export");
+      setShowRankingExportAlertModal(true);
+      return;
+    }
+
+    setIsExportingRanking(true);
+    try {
+      if (rankingExportFormat === "excel") {
+        await exportRankingAsExcel();
+      } else {
+        await exportRankingAsPdf();
+      }
+      setShowRankingExportModal(false);
+    } catch (error) {
+      alert(error?.message || "Unable to export report.");
+    } finally {
+      setIsExportingRanking(false);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const degreeRank = {
+      "First Degree": 1,
+      "Second Degree": 2,
+      "Third Degree": 3,
+      "Fourth Degree": 4,
+      "Fifth Degree": 5,
+      "Sixth Degree": 6,
+      "Seventh Degree": 7,
+    };
+
+    const getRiskColor = (rank) => {
+      if (rank >= 5 && rank <= 7) return "bg-red-500";
+      if (rank >= 3 && rank <= 4) return "bg-orange-500";
+      if (rank === 2) return "bg-yellow-500";
+      if (rank === 1) return "bg-green-500";
+      return "bg-gray-500";
+    };
+
+    const fetchDashboardViolationData = async () => {
+      setIsLoadingMetrics(true);
+      setIsLoadingRanking(true);
+
+      try {
+        const [studentsRes, violationsRes, analyticsRes] = await Promise.all([
+          fetch("/api/students"),
+          fetch("/api/student-violations"),
+          fetch("/api/violation-analytics"),
+        ]);
+
+        const studentsResult = await studentsRes.json().catch(() => ({}));
+        const violationsResult = await violationsRes.json().catch(() => ({}));
+        const analyticsResult = await analyticsRes.json().catch(() => ({}));
+
+        if (!studentsRes.ok || !Array.isArray(studentsResult?.students)) {
+          throw new Error("Failed to load students.");
+        }
+        if (!violationsRes.ok || !Array.isArray(violationsResult?.records)) {
+          throw new Error("Failed to load violations.");
+        }
+
+        const students = studentsResult.students || [];
+        const activeRecords = violationsResult.records.filter((rec) => !rec.cleared_at);
+
+        const studentById = new Map(students.map((student) => [Number(student.id), student]));
+
+        const studentMaxDegree = activeRecords.reduce((acc, rec) => {
+          const studentId = Number(rec.student_id);
+          if (!studentId) return acc;
+
+          const rank = degreeRank[String(rec.violation_degree)] || 0;
+          acc[studentId] = Math.max(acc[studentId] || 0, rank);
+          return acc;
+        }, {});
+
+        const violationCountMap = {};
+        students.forEach((student) => {
+          violationCountMap[student.id] = Number(student.violation_count) || 0;
+        });
+
+        let warningStudents = 0;
+        let atRiskStudents = 0;
+        let highRiskStudents = 0;
+
+        Object.entries(studentMaxDegree).forEach(([studentId, degree]) => {
+          const count = violationCountMap[studentId] || 0;
+
+          if (count >= 5 || (degree >= 5 && degree <= 7)) {
+            highRiskStudents += 1;
+          } else if ((count >= 3 && count <= 4) || (degree >= 3 && degree <= 4)) {
+            atRiskStudents += 1;
+          } else if (count === 2 || degree === 2) {
+            warningStudents += 1;
+          }
+        });
+
+        const rankingStats = activeRecords.reduce((acc, rec) => {
+          const studentId = Number(rec.student_id);
+          if (!studentId || !studentById.has(studentId)) return acc;
+
+          if (!acc[studentId]) {
+            acc[studentId] = {
+              count: 0,
+              maxDegreeRank: 0,
+            };
+          }
+
+          acc[studentId].count += 1;
+          const rank = degreeRank[String(rec.violation_degree)] || 0;
+          if (rank > acc[studentId].maxDegreeRank) {
+            acc[studentId].maxDegreeRank = rank;
+          }
+          return acc;
+        }, {});
+
+        const newRankingData = Object.entries(rankingStats)
+          .map(([studentId, data]) => {
+            const student = studentById.get(Number(studentId));
+            const parsedYearSection = parseYearSection(student?.year_section);
+            return {
+              rank: "",
+              name: student?.full_name || student?.username || "Unknown",
+              violations: data.count,
+              color: getRiskColor(data.maxDegreeRank),
+              id: student?.school_id || "",
+              program: student?.program || "",
+              year: parsedYearSection.year,
+              section: parsedYearSection.section,
+              yearSection: parsedYearSection.normalized,
+              maxDegreeRank: data.maxDegreeRank,
+            };
+          })
+          .sort((a, b) => b.violations - a.violations || b.maxDegreeRank - a.maxDegreeRank)
+          .map((item, index) => ({
+            ...item,
+            rank: String(index + 1).padStart(2, "0"),
+          }));
+
+        if (isMounted) {
+          setViolationMetrics({
+            activeViolations: activeRecords.length,
+            warningStudents,
+            atRiskStudents,
+            highRiskStudents,
+          });
+
+          setMetricComparisons({
+            activeViolations:
+              Number(analyticsResult?.cards?.activeViolations?.percentChange) || 0,
+            warningStudents:
+              Number(analyticsResult?.cards?.warningStudents?.percentChange) || 0,
+            atRiskStudents:
+              Number(analyticsResult?.cards?.atRiskStudents?.percentChange) || 0,
+            highRiskStudents:
+              Number(analyticsResult?.cards?.highRiskStudents?.percentChange) || 0,
+          });
+
+          setTrendBySemester({
+            "1st Sem": Array.isArray(analyticsResult?.trendBySemester?.["1st Sem"])
+              ? analyticsResult.trendBySemester["1st Sem"]
+              : [],
+            "2nd Sem": Array.isArray(analyticsResult?.trendBySemester?.["2nd Sem"])
+              ? analyticsResult.trendBySemester["2nd Sem"]
+              : [],
+            Summer: Array.isArray(analyticsResult?.trendBySemester?.Summer)
+              ? analyticsResult.trendBySemester.Summer
+              : [],
+          });
+
+          setRankingData(newRankingData);
+        }
+      } catch (_error) {
+        if (isMounted) {
+          setViolationMetrics({
+            activeViolations: 0,
+            warningStudents: 0,
+            atRiskStudents: 0,
+            highRiskStudents: 0,
+          });
+          setMetricComparisons({
+            activeViolations: 0,
+            warningStudents: 0,
+            atRiskStudents: 0,
+            highRiskStudents: 0,
+          });
+          setTrendBySemester({
+            "1st Sem": [],
+            "2nd Sem": [],
+            Summer: [],
+          });
+          setRankingData([]);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingMetrics(false);
+          setIsLoadingRanking(false);
+        }
+      }
+    };
+
+    fetchDashboardViolationData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const formatAuditDateTime = (isoValue) => {
+      const dateObj = isoValue ? new Date(isoValue) : new Date();
+      if (Number.isNaN(dateObj.getTime())) {
+        return { date: "-", time: "-" };
+      }
+
+      return {
+        date: dateObj.toLocaleDateString("en-GB"),
+        time: dateObj.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        }),
+      };
+    };
+
+    const fetchRecentActivity = async ({ silent = false } = {}) => {
+      if (!silent && isMounted) {
+        setIsLoadingActivity(true);
+      }
+
+      try {
+        const response = await fetch("/api/audit-logs?limit=100");
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok || result?.status !== "ok") {
+          throw new Error(result?.message || "Failed to load activity logs.");
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        const logs = Array.isArray(result.logs) ? result.logs : [];
+        const mapped = logs.map((log) => {
+          const { date, time } = formatAuditDateTime(log.created_at);
+          return {
+            id: log.id,
+            date,
+            time,
+            actorName: log.actor_name || "Admin User",
+            actorRole: log.actor_role || "admin",
+            action: String(log.action || "").replaceAll("_", " "),
+            target:
+              log.target_id != null && String(log.target_id).length > 0
+                ? `${log.target_type} #${log.target_id}`
+                : log.target_type || "system",
+            details: log.details || "No additional details",
+          };
+        });
+
+        setRecentActivity(mapped);
+      } catch (_error) {
+        if (isMounted) {
+          setRecentActivity([]);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingActivity(false);
+        }
+      }
+    };
+
+    fetchRecentActivity();
+
+    const intervalId = setInterval(() => {
+      fetchRecentActivity({ silent: true });
+    }, 15000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  const recentActivityColumns = [
     {
-      date: "02/02/26",
-      time: "12:00AM",
-      name: "Edrianne Lumabas",
-      id: "23-0001",
-      program: "BSIT - 1A",
-      type: "Academic",
+      key: "date",
+      label: "Date",
+      render: (_, row) => <TableCellDateTime date={row.date} time={row.time} />,
     },
     {
-      date: "02/02/26",
-      time: "11:00AM",
-      name: "Jenny Hernandez",
-      id: "23-0002",
-      program: "BSIT - 2A",
-      type: "Behavioral",
+      key: "actorName",
+      label: "Admin",
+      render: (_, row) => (
+        <TableCellText
+          primary={row.actorName}
+          secondary={String(row.actorRole || "").toUpperCase()}
+        />
+      ),
     },
+    { key: "target", label: "Target" },
     {
-      date: "02/02/26",
-      time: "10:00AM",
-      name: "Lyrika Hermozo",
-      id: "23-0003",
-      program: "BSCS - 3A",
-      type: "Academic",
+      key: "action",
+      label: "Action",
+      render: (value) => (
+        <TableCellBadge
+          label={value}
+          variant={
+            String(value || "").includes("DELETE")
+              ? "danger"
+              : String(value || "").includes("CREATE") ||
+                String(value || "").includes("UPLOAD")
+                ? "success"
+                : String(value || "").includes("UPDATE")
+                  ? "warning"
+                  : "info"
+          }
+        />
+      ),
     },
-    {
-      date: "02/02/26",
-      time: "9:00AM",
-      name: "Jessa Marie Balnig",
-      id: "23-0004",
-      program: "BSCS - 4A",
-      type: "Behavioral",
-    },
-    {
-      date: "02/02/26",
-      time: "8:00AM",
-      name: "Raiza Roces",
-      id: "23-0005",
-      program: "BSIT - 1A",
-      type: "Academic",
-    },
+    { key: "details", label: "Details" },
   ];
+
+  const recentActivityPreview = recentActivity.slice(0, 5);
 
   return (
     <div className="text-white">
@@ -249,20 +1457,46 @@ const Dashboard = () => {
           <div className="flex gap-4 flex-1">
             <AdminStatCard
               title="Active Violations"
-              value="0"
-              percentage={0}
+              value={
+                isLoadingMetrics ? "-" : violationMetrics.activeViolations.toString()
+              }
+              percentage={metricComparisons.activeViolations}
               comparisonLabel="vs last semester"
               icon={<AlertTriangle className="w-5 h-5 text-orange-400" />}
               iconBgColor="bg-orange-500/20"
               className="flex-1"
             />
             <AdminStatCard
-              title="At-Risk Students"
-              value="0"
-              percentage={0}
+              title="Warning Students"
+              value={
+                isLoadingMetrics ? "-" : violationMetrics.warningStudents.toString()
+              }
+              percentage={metricComparisons.warningStudents}
               comparisonLabel="vs last semester"
-              icon={<Users className="w-5 h-5 text-cyan-400" />}
-              iconBgColor="bg-cyan-500/20"
+              icon={<AlertTriangle className="w-5 h-5 text-yellow-400" />}
+              iconBgColor="bg-yellow-500/20"
+              className="flex-1"
+            />
+            <AdminStatCard
+              title="At-Risk Students"
+              value={
+                isLoadingMetrics ? "-" : violationMetrics.atRiskStudents.toString()
+              }
+              percentage={metricComparisons.atRiskStudents}
+              comparisonLabel="vs last semester"
+              icon={<Users className="w-5 h-5 text-orange-400" />}
+              iconBgColor="bg-orange-500/20"
+              className="flex-1"
+            />
+            <AdminStatCard
+              title="High-Risk Students"
+              value={
+                isLoadingMetrics ? "-" : violationMetrics.highRiskStudents.toString()
+              }
+              percentage={metricComparisons.highRiskStudents}
+              comparisonLabel="vs last semester"
+              icon={<AlertTriangle className="w-5 h-5 text-red-400" />}
+              iconBgColor="bg-red-500/20"
               className="flex-1"
             />
           </div>
@@ -318,6 +1552,11 @@ const Dashboard = () => {
                     >
                       2nd Sem
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSelectedSemester("Summer")}
+                    >
+                      Summer
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <button
@@ -328,64 +1567,7 @@ const Dashboard = () => {
                 </button>
               </div>
             </div>
-            {/* Chart Placeholder */}
-            <div className="h-48 flex items-end justify-between px-4 relative">
-              <svg
-                className="w-full h-full absolute inset-0"
-                preserveAspectRatio="none"
-              >
-                <defs>
-                  <linearGradient
-                    id="lineGradient"
-                    x1="0%"
-                    y1="0%"
-                    x2="100%"
-                    y2="0%"
-                  >
-                    <stop offset="0%" stopColor="#06b6d4" />
-                    <stop offset="100%" stopColor="#06b6d4" />
-                  </linearGradient>
-                </defs>
-                <path
-                  d="M 20 140 Q 80 120, 120 130 T 200 80 T 280 90 T 360 60 T 440 70"
-                  fill="none"
-                  stroke="url(#lineGradient)"
-                  strokeWidth="2"
-                />
-                <circle
-                  cx="120"
-                  cy="130"
-                  r="6"
-                  fill="#fff"
-                  stroke="#06b6d4"
-                  strokeWidth="2"
-                />
-                <circle
-                  cx="200"
-                  cy="80"
-                  r="6"
-                  fill="#fff"
-                  stroke="#06b6d4"
-                  strokeWidth="2"
-                />
-                <circle
-                  cx="360"
-                  cy="60"
-                  r="6"
-                  fill="#fff"
-                  stroke="#06b6d4"
-                  strokeWidth="2"
-                />
-              </svg>
-              <div className="absolute bottom-0 left-0 right-0 flex justify-between text-muted px-2">
-                <span>Jan</span>
-                <span>Feb</span>
-                <span>Mar</span>
-                <span>Apr</span>
-                <span>May</span>
-                <span>Jun</span>
-              </div>
-            </div>
+            {renderInteractiveTrendChart({ compact: true })}
           </Card>
 
           {/* Student Violation Ranking */}
@@ -469,41 +1651,18 @@ const Dashboard = () => {
         <Card variant="glass" padding="md">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-section-title">Recent Activity</h3>
-            <button className="text-gray-400">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
-              </svg>
+            <button
+              type="button"
+              onClick={() => setActivityModalOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 border border-white/15 text-gray-200 hover:text-white hover:bg-white/15 transition-colors"
+            >
+              <Maximize2 className="w-4 h-4" />
+              View All
             </button>
           </div>
           <DataTable
-            columns={[
-              {
-                key: "date",
-                label: "Date",
-                render: (_, row) => (
-                  <TableCellDateTime date={row.date} time={row.time} />
-                ),
-              },
-              {
-                key: "name",
-                label: "Student Name",
-                render: (_, row) => (
-                  <TableCellText primary={row.name} secondary={row.id} />
-                ),
-              },
-              { key: "program", label: "Program/Year/Section" },
-              {
-                key: "type",
-                label: "Type",
-                render: (value) => (
-                  <TableCellBadge
-                    label={value}
-                    variant={value === "Academic" ? "primary" : "warning"}
-                  />
-                ),
-              },
-            ]}
-            data={recentActivity}
+            columns={recentActivityColumns}
+            data={isLoadingActivity ? [] : recentActivityPreview}
             onRowClick={(row) => console.log("Row clicked", row)}
           />
         </Card>
@@ -516,16 +1675,16 @@ const Dashboard = () => {
         onClose={() => setTrendModalOpen(false)}
         title={"Violation Trends Over the Semester"}
         size="2xl"
-        className="max-w-[1100px] max-h-[80vh] overflow-y-auto scrollbar-hide"
+        className="max-w-[1100px] max-h-[80vh] overflow-y-auto custom-scrollbar"
       >
-        <p className="text-sm text-gray-400 mb-4">
+        <p className="text-sm text-gray-400 mb-5">
           This chart visualizes violation trends for the selected semester.
         </p>
         {/* Semester Dropdown & Actions */}
-        <div className="flex items-center gap-2 mb-6">
+        <div className="flex items-center gap-3 mb-6">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 bg-white/10 backdrop-blur-sm text-white text-sm px-4 py-2 rounded-lg border border-white/10 h-10">
+              <button className="flex items-center gap-2 bg-white/8 backdrop-blur-sm text-white text-sm px-4 py-2.5 rounded-lg border border-white/12 h-10">
                 {selectedSemester}
                 <ChevronDown className="w-4 h-4" />
               </button>
@@ -537,91 +1696,28 @@ const Dashboard = () => {
               <DropdownMenuItem onClick={() => setSelectedSemester("2nd Sem")}>
                 2nd Sem
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSelectedSemester("Summer")}>
+                Summer
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <button
-            className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors h-10"
+            className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-100 text-sm font-medium px-4 py-2.5 rounded-lg border border-gray-600 shadow transition-colors h-10"
             onClick={() => {
-              /* Add export logic here */
+              if (!selectedTrendRawData.length) {
+                setTrendExportAlertMessage("There's no record to export");
+                setShowTrendExportAlertModal(true);
+                return;
+              }
+              setShowTrendExportConfirmModal(true);
             }}
+            disabled={isTrendExporting}
           >
-            Export
+            <Download className="w-4 h-4" />
+            {isTrendExporting ? "Exporting PDF..." : "Export PDF"}
           </button>
         </div>
-        {/* Chart Area */}
-        <div className="h-[320px] flex items-end justify-between px-4 relative mb-6">
-          <svg
-            className="w-full h-full absolute inset-0"
-            preserveAspectRatio="none"
-          >
-            <defs>
-              <linearGradient
-                id="modalLineGradient"
-                x1="0%"
-                y1="0%"
-                x2="100%"
-                y2="0%"
-              >
-                <stop offset="0%" stopColor="#06b6d4" />
-                <stop offset="100%" stopColor="#06b6d4" />
-              </linearGradient>
-            </defs>
-            <path
-              d="M 10 140 Q 100 120, 150 130 T 250 80 T 350 90 T 450 60 T 550 75 T 650 50 T 750 65 T 850 55 T 950 70"
-              fill="none"
-              stroke="url(#modalLineGradient)"
-              strokeWidth="2"
-            />
-            <circle
-              cx="150"
-              cy="130"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-            <circle
-              cx="250"
-              cy="80"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-            <circle
-              cx="450"
-              cy="60"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-            <circle
-              cx="650"
-              cy="50"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-            <circle
-              cx="850"
-              cy="55"
-              r="6"
-              fill="#fff"
-              stroke="#06b6d4"
-              strokeWidth="2"
-            />
-          </svg>
-          <div className="absolute bottom-0 left-0 right-0 flex justify-between text-muted px-2">
-            <span>Jan</span>
-            <span>Feb</span>
-            <span>Mar</span>
-            <span>Apr</span>
-            <span>May</span>
-            <span>Jun</span>
-          </div>
-        </div>
+        {renderInteractiveTrendChart({ compact: false })}
         {/* Analytics Description */}
         <div className="bg-white/5 border border-white/10 rounded-lg p-4 text-sm text-gray-300">
           This chart visualizes the trend of recorded student violations
@@ -645,48 +1741,13 @@ const Dashboard = () => {
             violations.
           </p>
           <button
-            className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors"
+            className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2 rounded-lg border border-cyan-700 shadow transition-colors inline-flex items-center gap-2"
             onClick={() => {
-              // Export functionality - create CSV from filtered data
-              const csvContent = [
-                [
-                  "Rank",
-                  "Student Name",
-                  "ID",
-                  "Program",
-                  "Year",
-                  "Section",
-                  "Total Violations",
-                ],
-                ...filteredRankingData.map((student) => [
-                  student.rank,
-                  student.name,
-                  student.id,
-                  student.program,
-                  student.year,
-                  student.section,
-                  student.violations,
-                ]),
-              ]
-                .map((row) => row.join(","))
-                .join("\n");
-
-              const blob = new Blob([csvContent], {
-                type: "text/csv;charset=utf-8;",
-              });
-              const link = document.createElement("a");
-              const url = URL.createObjectURL(blob);
-              link.setAttribute("href", url);
-              link.setAttribute(
-                "download",
-                `student_violation_ranking_${new Date().toISOString().split("T")[0]}.csv`,
-              );
-              link.style.visibility = "hidden";
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
+              setRankingExportFormat("excel");
+              setShowRankingExportModal(true);
             }}
           >
+            <Download className="w-4 h-4" />
             Export
           </button>
         </div>
@@ -709,12 +1770,11 @@ const Dashboard = () => {
               <DropdownMenuItem onClick={() => setProgramFilter("All")}>
                 All
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setProgramFilter("BSIT")}>
-                BSIT
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setProgramFilter("BSCS")}>
-                BSCS
-              </DropdownMenuItem>
+              {programFilterOptions.map((program) => (
+                <DropdownMenuItem key={program} onClick={() => setProgramFilter(program)}>
+                  {program}
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -728,18 +1788,11 @@ const Dashboard = () => {
               <DropdownMenuItem onClick={() => setYearLevelFilter("All")}>
                 All
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("1")}>
-                1
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("2")}>
-                2
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("3")}>
-                3
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setYearLevelFilter("4")}>
-                4
-              </DropdownMenuItem>
+              {yearFilterOptions.map((year) => (
+                <DropdownMenuItem key={year} onClick={() => setYearLevelFilter(year)}>
+                  {year}
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -753,21 +1806,11 @@ const Dashboard = () => {
               <DropdownMenuItem onClick={() => setSectionFilter("All")}>
                 All
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("A")}>
-                A
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("B")}>
-                B
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("C")}>
-                C
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("D")}>
-                D
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSectionFilter("E")}>
-                E
-              </DropdownMenuItem>
+              {sectionFilterOptions.map((section) => (
+                <DropdownMenuItem key={section} onClick={() => setSectionFilter(section)}>
+                  {section}
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -809,8 +1852,7 @@ const Dashboard = () => {
                     <div>
                       <p className={textSize}>{student.name}</p>
                       <p className="text-[12px] text-gray-400 mt-0.5">
-                        Program: {student.program} | Year: {student.year} |
-                        Section: {student.section}
+                        Program: {student.program} | Year/Section: {student.yearSection || `${student.year}${student.section}`}
                       </p>
                     </div>
                   </div>
@@ -845,6 +1887,135 @@ const Dashboard = () => {
           )}
         </div>
       </Modal>
+
+      <Modal
+        isOpen={activityModalOpen}
+        onClose={() => setActivityModalOpen(false)}
+        title={"Recent Activity"}
+        size="2xl"
+        className="max-w-[1200px] max-h-[80vh]"
+      >
+        <p className="text-sm text-gray-400 mb-4">
+          Full audit trail of recent admin actions.
+        </p>
+        <div className="max-h-[60vh] overflow-auto rounded-xl">
+          <DataTable
+            columns={recentActivityColumns}
+            data={isLoadingActivity ? [] : recentActivity}
+            onRowClick={(row) => console.log("Row clicked", row)}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showRankingExportModal}
+        onClose={() => {
+          if (!isExportingRanking) {
+            setShowRankingExportModal(false);
+          }
+        }}
+        title={<span className="font-black font-inter">Export Student Violation Ranking Report</span>}
+        size="md"
+        showCloseButton={!isExportingRanking}
+      >
+        <p className="text-sm text-gray-300 mb-3">
+          Choose a format for exporting the current table view.
+        </p>
+        <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 mb-4">
+          <p className="text-xs text-gray-300">
+            Rows to export: <span className="font-semibold text-white">{rankingExportRows.length}</span>
+          </p>
+        </div>
+
+        <label className="block text-sm font-medium text-white mb-2">Format</label>
+        <div className="relative">
+          <select
+            value={rankingExportFormat}
+            onChange={(event) => setRankingExportFormat(event.target.value)}
+            disabled={isExportingRanking}
+            className="w-full cursor-pointer backdrop-blur-md border border-white/20 rounded-xl px-4 pr-11 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] focus:outline-none focus:border-cyan-300/60 focus:ring-1 focus:ring-cyan-300/30 transition-all appearance-none"
+          >
+            <option value="excel">Excel (.xlsx)</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
+        </div>
+
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowRankingExportModal(false)}
+            disabled={isExportingRanking}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleConfirmRankingExport}
+            disabled={isExportingRanking}
+            className="px-6 py-2.5"
+          >
+            {isExportingRanking ? "Exporting..." : "Export"}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        isOpen={showTrendExportConfirmModal}
+        onClose={() => {
+          if (!isTrendExporting) {
+            setShowTrendExportConfirmModal(false);
+          }
+        }}
+        title={<span className="font-black font-inter">Confirm Trend Export</span>}
+        size="sm"
+        showCloseButton={!isTrendExporting}
+      >
+        <p className="text-sm text-gray-300 mb-4">
+          Export the current violation trends chart and summary for {selectedSemester}?
+        </p>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowTrendExportConfirmModal(false)}
+            disabled={isTrendExporting}
+            className="px-6 py-2.5"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => {
+              setShowTrendExportConfirmModal(false);
+              exportTrendAsPdf();
+            }}
+            disabled={isTrendExporting}
+            className="px-6 py-2.5"
+          >
+            {isTrendExporting ? "Exporting..." : "Confirm"}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <AlertModal
+        isOpen={showRankingExportAlertModal}
+        onClose={() => setShowRankingExportAlertModal(false)}
+        title="Export unavailable"
+        message={rankingExportAlertMessage}
+        confirmLabel="Okay"
+      />
+      <AlertModal
+        isOpen={showTrendExportAlertModal}
+        onClose={() => setShowTrendExportAlertModal(false)}
+        title="Export unavailable"
+        message={trendExportAlertMessage}
+        confirmLabel="Okay"
+      />
     </div>
   );
 };

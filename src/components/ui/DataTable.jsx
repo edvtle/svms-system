@@ -41,7 +41,11 @@ const DataTable = ({
                       : "text-left"
                 } ${column.width || ""}`}
               >
-                {column.label}
+                {column.renderHeader ? (
+                  column.renderHeader()
+                ) : (
+                  column.label
+                )}
               </th>
             ))}
             {hasActions && (

@@ -2,13 +2,16 @@ import React, { useState, useEffect } from "react";
 import Modal, { ModalFooter, ModalDivider } from "@/components/ui/Modal";
 import GlassInput from "@/components/ui/GlassInput";
 import Button from "@/components/ui/Button";
+import { ChevronDown } from "lucide-react";
 
-const AddUserModal = ({ isOpen, onClose, onSave }) => {
+const AddUserModal = ({ isOpen, onClose, onSave, isSaving = false }) => {
   const [formData, setFormData] = useState({
-    studentName: "",
+    firstName: "",
+    lastName: "",
     schoolId: "",
     program: "BSIT",
     yearSection: "",
+    email: "",
     status: "Regular",
   });
 
@@ -16,10 +19,12 @@ const AddUserModal = ({ isOpen, onClose, onSave }) => {
     if (!isOpen) {
       // Reset form when modal closes
       setFormData({
-        studentName: "",
+        firstName: "",
+        lastName: "",
         schoolId: "",
         program: "BSIT",
         yearSection: "",
+        email: "",
         status: "Regular",
       });
     }
@@ -30,10 +35,15 @@ const AddUserModal = ({ isOpen, onClose, onSave }) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSave(formData);
-    onClose();
+    if (isSaving) {
+      return;
+    }
+    const saved = await onSave(formData);
+    if (saved) {
+      onClose();
+    }
   };
 
   return (
@@ -52,15 +62,28 @@ const AddUserModal = ({ isOpen, onClose, onSave }) => {
           <GlassInput
             label={
               <span className="text-sm font-medium text-white mb-2">
-                Student Name
+                First Name
               </span>
             }
-            name="studentName"
-            value={formData.studentName}
+            name="firstName"
+            value={formData.firstName}
             onChange={handleChange}
-            placeholder="Student Name"
             required
           />
+          <GlassInput
+            label={
+              <span className="text-sm font-medium text-white mb-2">
+                Last Name
+              </span>
+            }
+            name="lastName"
+            value={formData.lastName}
+            onChange={handleChange}
+            required
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <GlassInput
             label={
               <span className="text-sm font-medium text-white mb-2">
@@ -70,12 +93,9 @@ const AddUserModal = ({ isOpen, onClose, onSave }) => {
             name="schoolId"
             value={formData.schoolId}
             onChange={handleChange}
-            placeholder="Student ID"
             required
           />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div>
+          <div className="relative">
             <label className="block text-sm font-medium text-white mb-2">
               Program
             </label>
@@ -83,12 +103,16 @@ const AddUserModal = ({ isOpen, onClose, onSave }) => {
               name="program"
               value={formData.program}
               onChange={handleChange}
-              className="w-full backdrop-blur-md border border-white/5 rounded-xl px-4 py-3 text-[15px] text-white bg-[rgba(45,47,52,0.8)] placeholder-gray-500 focus:outline-none focus:border-white/20 transition-all appearance-none"
+              className="w-full appearance-none cursor-pointer rounded-xl border border-white/10 bg-gradient-to-b from-[rgba(56,62,72,0.95)] to-[rgba(37,41,48,0.95)] px-4 py-3 pr-11 text-[15px] text-white shadow-inner shadow-black/20 focus:outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/20 transition-all"
             >
               <option value="BSIT">BSIT</option>
               <option value="BSCS">BSCS</option>
             </select>
+            <ChevronDown className="pointer-events-none absolute right-4 top-[46px] w-4 h-4 text-gray-300" />
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <GlassInput
             label={
               <span className="text-sm font-medium text-white mb-2">
@@ -98,10 +122,25 @@ const AddUserModal = ({ isOpen, onClose, onSave }) => {
             name="yearSection"
             value={formData.yearSection}
             onChange={handleChange}
-            placeholder="Year/Section (e.g., 3A)"
             required
           />
         </div>
+
+        <div className="mb-4">
+          <GlassInput
+            label={
+              <span className="text-sm font-medium text-white mb-2">Email</span>
+            }
+            name="email"
+            type="email"
+            value={formData.email}
+            onChange={handleChange}
+            required
+          />
+        </div>
+
+        <ModalDivider />
+
         <div className="mb-4">
           <label className="block text-sm font-medium text-white mb-2">
             Status
@@ -121,6 +160,7 @@ const AddUserModal = ({ isOpen, onClose, onSave }) => {
             variant="outline"
             type="button"
             onClick={onClose}
+            disabled={isSaving}
             className="px-8 py-2 bg-white text-[#1a1a1a] border-0 hover:bg-gray-100"
           >
             Cancel
@@ -128,9 +168,10 @@ const AddUserModal = ({ isOpen, onClose, onSave }) => {
           <Button
             variant="primary"
             type="submit"
+            disabled={isSaving}
             className="px-8 py-2 bg-[#556987] text-white hover:bg-[#3d4654]"
           >
-            Add User
+            {isSaving ? "Sending Credentials..." : "Add User"}
           </Button>
         </ModalFooter>
       </form>

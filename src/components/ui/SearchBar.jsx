@@ -4,7 +4,7 @@ const SearchBar = ({ value, onChange, placeholder = "Search", className = "" }) 
   return (
     <div className={`relative ${className}`}>
       <svg
-        className="absolute left-4 top-1/2 transform -translate-y-1/2 w-4 h-4 text-white "
+        className="absolute left-4 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
@@ -16,7 +16,7 @@ const SearchBar = ({ value, onChange, placeholder = "Search", className = "" }) 
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className="bg-[#1a1a1a] text-white placeholder-white pl-11 pr-6 py-2.5 rounded-xl w-full text-sm focus:outline-none focus:ring-1 focus:ring-gray-600"
+        className="bg-[#1a1a1a] text-white placeholder:text-gray-400 pl-11 pr-6 py-2.5 rounded-xl w-full text-sm focus:outline-none focus:ring-1 focus:ring-gray-600"
       />
     </div>
   )

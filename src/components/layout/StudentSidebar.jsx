@@ -1,8 +1,51 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import logo from "../../assets/css_logo.png";
+import { useSettings } from "../../context/SettingsContext";
+import { getAuditHeaders } from '@/lib/auditHeaders';
 
-const StudentSidebar = () => {
+const StudentSidebar = ({ onRequestLogout }) => {
+  const { settings } = useSettings();
+  
+  // Parse the display name to show first two words in bold
+  const displayName = settings?.displayName || "Student Violation Management System";
+  const nameParts = displayName.split(" ").filter(Boolean);
+  const firstTwoWords = nameParts.slice(0, 2).join(" ") || "";
+  const secondLine = nameParts[2] || "";
+  const thirdLine = nameParts[3] || "";
+
+  const [hasUnread, setHasUnread] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function checkUnread() {
+      try {
+        const res = await fetch('/api/notifications/unread-count', {
+          headers: { ...getAuditHeaders() },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && isMounted) {
+          setHasUnread((Number(data.count) || 0) > 0);
+        }
+      } catch (err) {
+        console.error('failed to fetch notif count', err);
+      }
+    }
+    checkUnread();
+    const iv = setInterval(checkUnread, 15000);
+    const onRead = () => {
+      if (isMounted) setHasUnread(false);
+    };
+    window.addEventListener('notificationsRead', onRead);
+    window.addEventListener('notificationRead', onRead);
+    return () => {
+      isMounted = false;
+      clearInterval(iv);
+      window.removeEventListener('notificationsRead', onRead);
+      window.removeEventListener('notificationRead', onRead);
+    };
+  }, []);
+
   const menuItems = [
     {
       path: "/student",
@@ -24,37 +67,51 @@ const StudentSidebar = () => {
       ),
     },
     {
-      path: "/student/notifications",
-      label: "Notification",
+      path: "/student/offenses",
+      label: "List of Offenses",
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0" />
+            d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
         </svg>
+      ),
+    },
+    {
+      path: "/student/notifications",
+      label: "Notification",
+      icon: (
+        <div className="relative">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0" />
+          </svg>
+          {hasUnread && (
+            <span className="absolute top-0 right-0 bg-blue-500 w-2 h-2 rounded-full"></span>
+          )}
+        </div>
       ),
     },
   ];
 
   return (
-    <aside className="w-60 h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-6 font-inter">
+    <aside className="w-60 h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-6 font-inter flex flex-col">
       
       {/* Logo */}
       <div className="mb-12">
         <img
-          src={logo}
-          alt="CSS Logo"
-          className="h-14 mt-4 mb-4 object-contain"
+          src={settings?.logoPath || logo}
+          alt="System Logo"
+          className="h-[8.5rem] mt-4 mb-4 object-contain"
         />
         <h1 className="text-xl font-extrabold leading-tight">
-          Student Portal
+          {firstTwoWords}
         </h1>
-        <p className="text-gray-500 text-base">
-          Violation Monitoring
-        </p>
+        {secondLine && <p className="text-white">{secondLine}</p>}
+        {thirdLine && <p className="text-white">{thirdLine}</p>}
       </div>
 
       {/* Navigation */}
-      <nav>
+      <nav className="flex-1">
         <ul className="space-y-1">
           {menuItems.map((item) => (
             <li key={item.path}>
@@ -76,6 +133,17 @@ const StudentSidebar = () => {
           ))}
         </ul>
       </nav>
+
+      <button
+        type="button"
+        onClick={onRequestLogout}
+        className="mt-4 flex items-center gap-3 py-2.5 px-4 rounded-lg text-sm font-medium text-red-300 hover:text-red-200 hover:bg-red-500/10 transition-all"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 11-4 0v-1m4-8V5a2 2 0 10-4 0v1" />
+        </svg>
+        <span>Logout</span>
+      </button>
     </aside>
   );
 };

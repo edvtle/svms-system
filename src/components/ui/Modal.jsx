@@ -60,7 +60,7 @@ const Modal = ({
   };
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+    <div className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-4 sm:items-center sm:py-6 transition-opacity duration-200 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
       {/* Backdrop */}
       <div 
         className={`absolute inset-0 bg-black/50 backdrop-blur-md transition-opacity duration-200 ${isOpen ? 'opacity-100' : 'opacity-0'}`}
@@ -68,8 +68,7 @@ const Modal = ({
       />
       {/* Modal Content */}
       <div
-        className={`relative w-full ${sizes[size]} mx-4 bg-gradient-to-br from-[#2a2d35]/80 to-[#1a1c20]/80 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] ring-1 ring-inset ring-white/10 ${className} transform transition-transform duration-300 ${isOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'} overflow-hidden scrollbar-hide`}
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        className={`modal-scrollbar relative my-auto w-full ${sizes[size]} bg-gradient-to-br from-[#2a2d35]/80 to-[#1a1c20]/80 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] ring-1 ring-inset ring-white/10 ${className} transform transition-transform duration-300 ${isOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'} max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-h-[calc(100vh-3rem)]`}
       >
         {/* Header */}
         {(title || showCloseButton) && (
