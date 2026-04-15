@@ -1350,79 +1350,86 @@ const StudentViolation = () => {
         </div>
       </AnimatedContent>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-6 mb-6 w-full h-full">
-        <AnimatedContent delay={0.05}>
-          <Card
-            onClick={() => setShowAnalyticsDetailModal(true)}
-            className="cursor-pointer h-full min-h-[200px] xl:col-span-2 flex flex-col justify-between items-start px-6 py-5 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02]"
-          >
-            <div className="flex w-full justify-between items-center mb-4">
-              <span className="text-lg font-black font-inter">Student Analytics</span>
-              <span
-                className={`font-bold text-sm ${
-                  analyticsData.studentAnalytics.predictedChangePercent >= 0
-                    ? "text-green-400"
-                    : "text-red-400"
-                }`}
-              >
-                {analyticsData.studentAnalytics.predictedChangePercent >= 0 ? "+" : ""}
-                {analyticsData.studentAnalytics.predictedChangePercent}%
-              </span>
-            </div>
-            <div className="w-full bg-gradient-to-b from-[#A3AED0]/30 to-transparent rounded-lg border border-white/10 mt-2 px-4 py-4 min-h-[140px] flex flex-col justify-between">
-              <AnalyticsLineGraph
-                data={analyticsData.studentAnalytics.graphData}
-                color="#A3AED0"
-                height={110}
-                showDots
+      <div className="flex flex-col xl:flex-row gap-6 mt-6 mb-6 w-full h-full items-stretch">
+        {/* Analytics card: left, fills height */}
+        <div className="flex-1 flex flex-col justify-stretch">
+          <AnimatedContent delay={0.05}>
+            <Card
+              onClick={() => setShowAnalyticsDetailModal(true)}
+              className="cursor-pointer h-full min-h-[240px] flex flex-col justify-between items-start px-8 py-6 w-full transition-all duration-300 hover:shadow-lg hover:shadow-white/5 hover:border-white/20 hover:scale-[1.02] rounded-2xl border border-white/10 shadow-md bg-[#232528]/80"
+            >
+              <div className="flex w-full justify-between items-center mb-4">
+                <span className="text-lg font-black font-inter">Student Analytics</span>
+                <span
+                  className={`font-bold text-sm ${
+                    analyticsData.studentAnalytics.predictedChangePercent >= 0
+                      ? "text-green-400"
+                      : "text-red-400"
+                  }`}
+                >
+                  {analyticsData.studentAnalytics.predictedChangePercent >= 0 ? "+" : ""}
+                  {analyticsData.studentAnalytics.predictedChangePercent}%
+                </span>
+              </div>
+              <div className="w-full bg-gradient-to-b from-[#A3AED0]/30 to-transparent rounded-lg border border-white/10 mt-2 px-6 py-6 min-h-[140px] flex flex-col justify-between">
+                <AnalyticsLineGraph
+                  data={analyticsData.studentAnalytics.graphData}
+                  color="#A3AED0"
+                  height={110}
+                  showDots
+                  showAxis
+                  showHoverLabel
+                />
+                <p className="text-xs text-gray-300 mt-4 leading-5">
+                  Next term forecast: {analyticsData.studentAnalytics.predictedNextTerm?.predictedViolations ?? 0} violations
+                  {analyticsData.studentAnalytics.predictedNextTerm?.label
+                    ? ` (${analyticsData.studentAnalytics.predictedNextTerm.label})`
+                    : ""}
+                </p>
+              </div>
+            </Card>
+          </AnimatedContent>
+        </div>
+        {/* Stat cards: right, vertically centered and fill height */}
+        <div className="flex-[1.1] flex flex-col justify-center">
+          <div className="grid grid-cols-2 grid-rows-2 gap-3 h-full">
+            <AnimatedContent delay={0.1}>
+              <StatCard
+                title="Warning Students"
+                value={metrics.warning}
+                percentage={analyticsData.cards.warningStudents.percentChange}
+                icon={<TrendingUp className="w-5 h-5 text-cyan-400" />}
+                className="h-full w-full min-h-[120px] rounded-2xl border border-white/10 shadow-md bg-[#232528]/80 flex flex-col justify-between"
               />
-              <p className="text-xs text-gray-300 mt-4 leading-5">
-                Next term forecast: {analyticsData.studentAnalytics.predictedNextTerm?.predictedViolations ?? 0} violations
-                {analyticsData.studentAnalytics.predictedNextTerm?.label
-                  ? ` (${analyticsData.studentAnalytics.predictedNextTerm.label})`
-                  : ""}
-              </p>
-            </div>
-          </Card>
-        </AnimatedContent>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 w-full h-full">
-          <AnimatedContent delay={0.1}>
-            <StatCard
-              title="Warning Students"
-              value={metrics.warning}
-              percentage={analyticsData.cards.warningStudents.percentChange}
-              icon={<TrendingUp />}
-              className="h-full w-full"
-            />
-          </AnimatedContent>
-          <AnimatedContent delay={0.15}>
-            <StatCard
-              title="At-Risk Students"
-              value={metrics.atRisk}
-              percentage={analyticsData.cards.atRiskStudents.percentChange}
-              icon={<TrendingUp />}
-              className="h-full w-full"
-            />
-          </AnimatedContent>
-          <AnimatedContent delay={0.2}>
-            <StatCard
-              title="High-Risk Students"
-              value={metrics.highRisk}
-              percentage={analyticsData.cards.highRiskStudents.percentChange}
-              icon={<TrendingDown />}
-              className="h-full w-full"
-            />
-          </AnimatedContent>
-          <AnimatedContent delay={0.25}>
-            <StatCard
-              title="Total Violations"
-              value={metrics.total}
-              percentage={analyticsData.cards.activeViolations.percentChange}
-              icon={<TrendingDown />}
-              className="h-full w-full"
-            />
-          </AnimatedContent>
+            </AnimatedContent>
+            <AnimatedContent delay={0.15}>
+              <StatCard
+                title="At-Risk Students"
+                value={metrics.atRisk}
+                percentage={analyticsData.cards.atRiskStudents.percentChange}
+                icon={<TrendingUp className="w-5 h-5 text-yellow-400" />}
+                className="h-full w-full min-h-[120px] rounded-2xl border border-white/10 shadow-md bg-[#232528]/80 flex flex-col justify-between"
+              />
+            </AnimatedContent>
+            <AnimatedContent delay={0.2}>
+              <StatCard
+                title="High-Risk Students"
+                value={metrics.highRisk}
+                percentage={analyticsData.cards.highRiskStudents.percentChange}
+                icon={<TrendingDown className="w-5 h-5 text-orange-400" />}
+                className="h-full w-full min-h-[120px] rounded-2xl border border-white/10 shadow-md bg-[#232528]/80 flex flex-col justify-between"
+              />
+            </AnimatedContent>
+            <AnimatedContent delay={0.25}>
+              <StatCard
+                title="Total Violations"
+                value={metrics.total}
+                percentage={analyticsData.cards.activeViolations.percentChange}
+                icon={<TrendingDown className="w-5 h-5 text-red-400" />}
+                className="h-full w-full min-h-[120px] rounded-2xl border border-white/10 shadow-md bg-[#232528]/80 flex flex-col justify-between"
+              />
+            </AnimatedContent>
+          </div>
         </div>
       </div>
 

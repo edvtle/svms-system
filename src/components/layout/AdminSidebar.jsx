@@ -75,39 +75,61 @@ const Sidebar = ({ onRequestLogout }) => {
 
   return (
     <aside className={`${isCollapsed ? 'w-24' : 'w-60'} relative h-screen sticky top-0 bg-gradient-to-b from-[#1A1C1F] to-[#232528] text-white p-4 font-inter transition-all duration-300 flex flex-col`}>
-      <button
-        type="button"
-        onClick={() => setIsCollapsed((prev) => !prev)}
-        className="group absolute -right-5 top-1/2 z-30 h-10 w-10 -translate-y-1/2 overflow-hidden rounded-xl border border-white/25 bg-gradient-to-b from-[#191c21] to-[#101318] text-white shadow-[0_10px_26px_rgba(0,0,0,0.35)] transition-all duration-300 hover:border-white/45 hover:from-[#21252b] hover:to-[#12171d]"
-        aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        <span className="absolute inset-[2px] rounded-[10px] border border-white/10" aria-hidden="true" />
-        <svg className="relative z-10 mx-auto h-4 w-4 transition-transform duration-300 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          {isCollapsed ? (
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M9 5l7 7-7 7" />
-          ) : (
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M15 5l-7 7 7 7" />
-          )}
-        </svg>
-      </button>
-      {/* Logo/Brand */}  
-      <div className={`mb-10 ${isCollapsed ? 'flex justify-center' : ''}`}>
-        <img
-          src={settings?.logoPath || logo}
-          alt="System Logo"
-          className={`${isCollapsed ? 'h-16' : 'h-[8.5rem]'} mt-2 mb-4 object-contain transition-all duration-300`}
-        />
-        {!isCollapsed && (
-          <>
-            <h1 className="text-xl font-extrabold leading-tight text-white">
-              {firstTwoWords}
-            </h1>
-            {secondLine && <p className="text-white">{secondLine}</p>}
-            {thirdLine && <p className="text-white">{thirdLine}</p>}
-          </>
-        )}
-      </div>
+      {/* Collapse Button and Logo/Brand */}
+      {isCollapsed ? (
+        <div className="flex flex-col items-center mb-6 relative">
+          <button
+            type="button"
+            onClick={() => setIsCollapsed((prev) => !prev)}
+            className="mb-2 h-8 w-8 flex items-center justify-center rounded-lg border border-white/20 bg-[#232528] hover:bg-[#191c21] transition-all duration-200 shadow-sm z-10"
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {/* Refined sidebar icon: outlined, single line, thin chevron, no fill */}
+            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="3" width="18" height="18" rx="5" stroke="#A3A3A3" strokeWidth="1.6" fill="none" />
+              <line x1="8" y1="6" x2="8" y2="18" stroke="#A3A3A3" strokeWidth="1.3" strokeLinecap="round" />
+              <polyline points="15.5,9 12.5,12 15.5,15" stroke="#A3A3A3" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <img
+            src={settings?.logoPath || logo}
+            alt="System Logo"
+            className="h-16 object-contain transition-all duration-300 mx-auto mb-2"
+          />
+        </div>
+      ) : (
+        <div className="relative mb-4">
+          <img
+            src={settings?.logoPath || logo}
+            alt="System Logo"
+            className="h-[8.5rem] mt-2 mb-2 object-contain transition-all duration-300 mx-auto"
+          />
+          <button
+            type="button"
+            onClick={() => setIsCollapsed((prev) => !prev)}
+            className="absolute top-2 right-2 h-8 w-8 flex items-center justify-center rounded-lg border border-white/20 bg-[#232528] hover:bg-[#191c21] transition-all duration-200 shadow-sm"
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {/* Refined sidebar icon: outlined, single line, thin chevron, no fill */}
+            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="3" width="18" height="18" rx="5" stroke="#A3A3A3" strokeWidth="1.6" fill="none" />
+              <line x1="8" y1="6" x2="8" y2="18" stroke="#A3A3A3" strokeWidth="1.3" strokeLinecap="round" />
+              <polyline points="12.5,9 15.5,12 12.5,15" stroke="#A3A3A3" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+      )}
+      {/* Brand Text */}
+      {!isCollapsed && (
+        <div className="mb-6 text-left">
+          <h1 className="text-xl font-extrabold leading-tight text-white">
+            {firstTwoWords}
+          </h1>
+          <p className="text-white">{[secondLine, thirdLine].filter(Boolean).join(' ')}</p>
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className="flex-1">
